@@ -30,14 +30,6 @@ import {
 } from "../../api/qmailApiServices";
 import "./QMailDashboard.css";
 
-const [folders, setFolders] = useState([]);
-const [mailCounts, setMailCounts] = useState({
-  inbox: { total: 0, unread: 0 },
-  sent: { total: 0, unread: 0 },
-  drafts: { total: 0, unread: 0 },
-  trash: { total: 0, unread: 0 },
-});
-
 // Download progress statuses
 const downloadStatuses = [
   { status: "QMail: Resolving QMail Servers' IP addresses...", progress: 0 },
@@ -461,6 +453,14 @@ const QMailDashboard = () => {
   const [currentFolder, setCurrentFolder] = useState("inbox");
   const [serverHealth, setServerHealth] = useState(null);
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
+
+  const [folders, setFolders] = useState([]);
+  const [mailCounts, setMailCounts] = useState({
+    inbox: { total: 0, unread: 0 },
+    sent: { total: 0, unread: 0 },
+    drafts: { total: 0, unread: 0 },
+    trash: { total: 0, unread: 0 },
+  });
 
   const unreadCount = mailCounts.inbox.unread;
 
