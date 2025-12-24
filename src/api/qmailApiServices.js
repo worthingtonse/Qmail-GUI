@@ -362,3 +362,79 @@ export const pollTaskStatus = async (
     };
   }
 };
+
+/**
+ * Sends an email via QMail.
+ * @param {Object} emailData - Email data object
+ * @param {Array<string>} emailData.to - Array of recipient addresses (required)
+ * @param {Array<string>} emailData.cc - Array of CC addresses (optional)
+ * @param {Array<string>} emailData.bcc - Array of BCC addresses (optional)
+ * @param {string} emailData.subject - Email subject (required)
+ * @param {string} emailData.subsubject - Secondary subject header (optional)
+ * @param {string} emailData.body - Email body content (required)
+ * @param {Array} emailData.attachments - Array of attachments (optional)
+ * @param {number} emailData.storage_weeks - Storage duration in weeks (default: 8)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const sendEmail = async (emailData) => {
+  try {
+    // Validate required fields
+    if (
+      !emailData.to ||
+      !Array.isArray(emailData.to) ||
+      emailData.to.length === 0
+    ) {
+      throw new Error("At least one recipient is required");
+    }
+    if (!emailData.subject) {
+      throw new Error("Subject is required");
+    }
+    if (!emailData.body) {
+      throw new Error("Email body is required");
+    }
+
+    // Build request payload
+    const payload = {
+      to: emailData.to,
+      cc: emailData.cc || [],
+      bcc: emailData.bcc || [],
+      subject: emailData.subject,
+      subsubject: emailData.subsubject || "",
+      body: emailData.body,
+      attachments: emailData.attachments || [],
+      storage_weeks: emailData.storage_weeks || 8,
+    };
+
+    const response = await fetch(`${API_BASE_URL}/mail/send`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/send:", data);
+
+    if (data && data.status === "accepted") {
+      return {
+        success: true,
+        data: {
+          status: data.status,
+          taskId: data.task_id,
+          message: data.message,
+          fileGroupGuid: data.file_group_guid,
+          fileCount: data.file_count,
+          estimatedCost: data.estimated_cost,
+        },
+      };
+    } else {
+      throw new Error(data.message || "Failed to send email");
+    }
+  } catch (error) {
+    console.error("Send email failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
+    return { success: false, error: errorMessage };
+  }
+};
