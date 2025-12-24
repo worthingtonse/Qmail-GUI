@@ -25,16 +25,10 @@ import {
   getMailList,
   getHealthStatus,
   searchEmails,
-} from "../../api/qmailApiServices";
-import "./QMailDashboard.css";
-import {
-  pingQMail,
-  getMailList,
-  getHealthStatus,
-  searchEmails,
   getMailCount,
   getMailFolders,
 } from "../../api/qmailApiServices";
+import "./QMailDashboard.css";
 
 const [folders, setFolders] = useState([]);
 const [mailCounts, setMailCounts] = useState({
