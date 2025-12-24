@@ -1,0 +1,97 @@
+{
+  "name": "cloudcoin-pro",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "public/electron.cjs",
+  "description": "CloudCoin Pro Edition - Authenticate, Store and Payout CloudCoins",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron-pack": "npm run build && electron-builder",
+    "build-portable": "npm run build && electron-builder --win portable",
+    "build-all": "npm run build && electron-builder --win --mac --linux",
+    "dist": "npm run build && electron-builder --publish=never"
+  },
+  "build": {
+    "appId": "com.cloudcoin.pro",
+    "productName": "CloudCoin Pro",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "dist/**/*",
+      "public/electron.cjs",
+      "public/preload.cjs",
+      "public/eff_large_wordlist.txt",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "public/eff_large_wordlist.txt",
+        "to": "eff_large_wordlist.txt"
+      }
+    ],
+    "portable": {
+      "artifactName": "CloudCoin-Pro-Portable.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
+      "artifactName": "CloudCoin-Pro-Setup.exe"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0",
+    "lucide-react": "^0.552.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.0.4",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.0.0",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "vite": "^4.5.3",
+    "wait-on": "^7.2.0"
+  }
+}

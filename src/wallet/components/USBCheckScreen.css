@@ -1,0 +1,311 @@
+.usb-check-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-xl);
+  position: relative;
+}
+
+.usb-check-container {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-2xl);
+  max-width: 700px;
+  width: 100%;
+  box-shadow: var(--shadow-xl);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  
+  /* Animation */
+  opacity: 0;
+  transform: scale(0.95);
+  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Glass shimmer effect */
+/* .usb-check-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.03),
+    transparent
+  ); */
+  /* animation: shimmer 3s infinite; */
+/* } */
+
+/* Icon Containers */
+.warning-icon,
+.success-icon {
+  margin-bottom: var(--space-xl);
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+}
+
+.warning-icon svg,
+.success-icon svg {
+  width: 96px;
+  height: 96px;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
+  transition: transform var(--transition-base);
+}
+
+.usb-check-container:hover .warning-icon svg,
+.usb-check-container:hover .success-icon svg {
+  transform: scale(1.05);
+}
+
+.warning-icon svg {
+  stroke: var(--accent-error);
+  stroke-width: 2;
+}
+
+.success-icon svg {
+  stroke: var(--accent-success);
+  stroke-width: 2;
+  animation: checkBounce 0.6s ease-out 0.3s;
+}
+
+@keyframes checkBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+/* Pulsing glow for warning */
+.warning-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle, rgba(248, 113, 113, 0.2), transparent 70%);
+  transform: translate(-50%, -50%);
+  animation: pulse 2s ease-in-out infinite;
+  z-index: -1;
+}
+
+.success-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 120px;
+  height: 120px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.2), transparent 70%);
+  transform: translate(-50%, -50%);
+  z-index: -1;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.6;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+
+.usb-check-container h2 {
+  font-size: clamp(1.75rem, 4vw, 2.25rem);
+  margin-bottom: var(--space-xl);
+  color: var(--text-primary);
+  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  letter-spacing: -0.02em;
+}
+
+/* Message Cards */
+.warning-message,
+.success-message {
+  text-align: left;
+  margin: var(--space-xl) 0;
+  background: var(--card-bg);
+  backdrop-filter: var(--glass-blur);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  position: relative;
+  z-index: 1;
+}
+
+.warning-message {
+  border-left: 4px solid var(--accent-error);
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.05), rgba(248, 113, 113, 0.02));
+}
+
+.success-message {
+  border-left: 4px solid var(--accent-success);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.05), rgba(52, 211, 153, 0.02));
+}
+
+.warning-message p,
+.success-message p {
+  font-size: 1rem;
+  line-height: 1.8;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-md);
+}
+
+.warning-message p:last-child,
+.success-message p:last-child {
+  margin-bottom: 0;
+}
+
+.warning-message p:first-child {
+  font-weight: 600;
+  color: var(--accent-error);
+  font-size: 1.05rem;
+}
+
+.success-message p:first-child {
+  font-weight: 600;
+  color: var(--accent-success);
+  font-size: 1.05rem;
+}
+
+/* Action Buttons */
+.actions {
+  margin-top: var(--space-2xl);
+  display: flex;
+  gap: var(--space-md);
+  justify-content: center;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.exit-button {
+  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
+  color: white;
+  padding: 16px 36px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border-radius: var(--radius-lg);
+  min-width: 160px;
+  box-shadow: var(--shadow-md);
+  transition: all var(--transition-base);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.exit-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width var(--transition-smooth), height var(--transition-smooth);
+}
+
+.exit-button:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.exit-button:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-xl);
+}
+
+.exit-button:active {
+  transform: translateY(-1px);
+}
+
+.continue-button {
+  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
+  color: white;
+  padding: 16px 36px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border-radius: var(--radius-lg);
+  min-width: 160px;
+  box-shadow: var(--shadow-md), var(--glow-success);
+  transition: all var(--transition-base);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.continue-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width var(--transition-smooth), height var(--transition-smooth);
+}
+
+.continue-button:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.continue-button:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-xl), var(--glow-success);
+}
+
+.continue-button:active {
+  transform: translateY(-1px);
+}
+
+/* Responsive Design */
+@media (max-width: 640px) {
+  .usb-check-container {
+    padding: var(--space-xl) var(--space-lg);
+  }
+  
+  .warning-icon svg,
+  .success-icon svg {
+    width: 72px;
+    height: 72px;
+  }
+  
+  .usb-check-container h2 {
+    font-size: 1.5rem;
+  }
+  
+  .warning-message p,
+  .success-message p {
+    font-size: 0.95rem;
+  }
+  
+  .actions {
+    flex-direction: column;
+  }
+  
+  .exit-button,
+  .continue-button {
+    width: 100%;
+    min-width: unset;
+  }
+}
