@@ -1764,3 +1764,29 @@
   content: " *";
   color: var(--accent-error);
 }
+
+/* Email count badge - unread (red/urgent) */
+.email-count {
+  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  min-width: 20px;
+  text-align: center;
+  margin-left: auto;
+}
+
+/* Email count badge - info (gray/neutral) */
+.email-count-info {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  min-width: 20px;
+  text-align: center;
+  margin-left: auto;
+}

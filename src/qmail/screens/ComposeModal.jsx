@@ -188,7 +188,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
               value={to}
               onChange={(e) => setTo(e.target.value)}
               disabled={isSending}
-              placeholder="0006.1.12345678 (separate multiple with commas)"
+              placeholder="write address here"
             />
           </div>
 

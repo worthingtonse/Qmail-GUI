@@ -438,3 +438,83 @@ export const sendEmail = async (emailData) => {
     return { success: false, error: errorMessage };
   }
 };
+
+/**
+ * Gets the list of available mail folders.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getMailFolders = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/folders`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/folders:", data);
+
+    if (data && Array.isArray(data.folders)) {
+      return {
+        success: true,
+        data: {
+          folders: data.folders.map((folder) => ({
+            name: folder.name,
+            displayName: folder.display_name,
+          })),
+        },
+      };
+    } else {
+      throw new Error("Invalid response from mail folders endpoint");
+    }
+  } catch (error) {
+    console.error("Get mail folders failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch mail folders.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets message counts for all folders.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getMailCount = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/count`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/count:", data);
+
+    if (data && data.counts) {
+      return {
+        success: true,
+        data: {
+          counts: {
+            inbox: {
+              total: data.counts.inbox?.total || 0,
+              unread: data.counts.inbox?.unread || 0,
+            },
+            sent: {
+              total: data.counts.sent?.total || 0,
+              unread: data.counts.sent?.unread || 0,
+            },
+            drafts: {
+              total: data.counts.drafts?.total || 0,
+              unread: data.counts.drafts?.unread || 0,
+            },
+            trash: {
+              total: data.counts.trash?.total || 0,
+              unread: data.counts.trash?.unread || 0,
+            },
+          },
+          summary: {
+            totalEmails: data.summary?.total_emails || 0,
+            totalUnread: data.summary?.total_unread || 0,
+          },
+        },
+      };
+    } else {
+      throw new Error("Invalid response from mail count endpoint");
+    }
+  } catch (error) {
+    console.error("Get mail count failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch mail counts.`;
+    return { success: false, error: errorMessage };
+  }
+};

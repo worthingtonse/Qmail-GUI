@@ -27,6 +27,22 @@ import {
   searchEmails,
 } from "../../api/qmailApiServices";
 import "./QMailDashboard.css";
+import {
+  pingQMail,
+  getMailList,
+  getHealthStatus,
+  searchEmails,
+  getMailCount,
+  getMailFolders,
+} from "../../api/qmailApiServices";
+
+const [folders, setFolders] = useState([]);
+const [mailCounts, setMailCounts] = useState({
+  inbox: { total: 0, unread: 0 },
+  sent: { total: 0, unread: 0 },
+  drafts: { total: 0, unread: 0 },
+  trash: { total: 0, unread: 0 },
+});
 
 // Download progress statuses
 const downloadStatuses = [
@@ -105,11 +121,12 @@ const EmailListItem = ({ email, onSelect, isSelected }) => (
 );
 
 // Navigation Pane
+// Navigation Pane
 const NavigationPane = ({
   activeView,
   setActiveView,
   onComposeClick,
-  unreadCount,
+  mailCounts,
   onRefresh,
   isRefreshing,
 }) => (
@@ -131,15 +148,41 @@ const NavigationPane = ({
       >
         <Inbox size={18} />
         <span>Inbox</span>
-        {unreadCount > 0 && <span className="email-count">{unreadCount}</span>}
+        {mailCounts.inbox.unread > 0 && (
+          <span className="email-count">{mailCounts.inbox.unread}</span>
+        )}
       </a>
       <a href="#" className="nav-link">
         <Star size={18} />
         <span>Starred</span>
       </a>
-      <a href="#" className="nav-link">
+      <a
+        href="#"
+        className={`nav-link ${activeView === "sent" ? "active" : ""}`}
+        onClick={(e) => {
+          e.preventDefault();
+          setActiveView("sent");
+        }}
+      >
         <Send size={18} />
         <span>Sent</span>
+        {mailCounts.sent.total > 0 && (
+          <span className="email-count-info">{mailCounts.sent.total}</span>
+        )}
+      </a>
+      <a
+        href="#"
+        className={`nav-link ${activeView === "drafts" ? "active" : ""}`}
+        onClick={(e) => {
+          e.preventDefault();
+          setActiveView("drafts");
+        }}
+      >
+        <FileEdit size={18} />
+        <span>Drafts</span>
+        {mailCounts.drafts.total > 0 && (
+          <span className="email-count-info">{mailCounts.drafts.total}</span>
+        )}
       </a>
       <a
         href="#"
@@ -163,9 +206,19 @@ const NavigationPane = ({
         <UserCircle size={18} />
         <span>Account</span>
       </a>
-      <a href="#" className="nav-link">
+      <a
+        href="#"
+        className={`nav-link ${activeView === "trash" ? "active" : ""}`}
+        onClick={(e) => {
+          e.preventDefault();
+          setActiveView("trash");
+        }}
+      >
         <Trash2 size={18} />
         <span>Trash</span>
+        {mailCounts.trash.total > 0 && (
+          <span className="email-count-info">{mailCounts.trash.total}</span>
+        )}
       </a>
     </nav>
     <div className="labels-section">
@@ -415,16 +468,20 @@ const QMailDashboard = () => {
   const [serverHealth, setServerHealth] = useState(null);
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
 
-  const unreadCount = emails.filter((e) => !e.isRead).length;
+  const unreadCount = mailCounts.inbox.unread;
 
-  // Initial load
   useEffect(() => {
     checkHealth();
+    loadFolders(); // Load available folders
+    loadMailCounts(); // Load message counts
     loadEmails("inbox");
     checkForNewMail();
 
     // Poll for new messages every 60 seconds
-    const interval = setInterval(checkForNewMail, 300000);
+    const interval = setInterval(() => {
+      checkForNewMail();
+      loadMailCounts(); // Also refresh counts
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -444,6 +501,33 @@ const QMailDashboard = () => {
     } else {
       console.error("Server health check failed:", result.error);
       setNotification("Server connection error");
+    }
+  };
+
+  const loadFolders = async () => {
+    const result = await getMailFolders();
+    if (result.success) {
+      setFolders(result.data.folders);
+      console.log("Folders loaded:", result.data.folders);
+    } else {
+      console.error("Failed to load folders:", result.error);
+      // Set default folders as fallback
+      setFolders([
+        { name: "inbox", displayName: "Inbox" },
+        { name: "sent", displayName: "Sent" },
+        { name: "drafts", displayName: "Drafts" },
+        { name: "trash", displayName: "Trash" },
+      ]);
+    }
+  };
+
+  const loadMailCounts = async () => {
+    const result = await getMailCount();
+    if (result.success) {
+      setMailCounts(result.data.counts);
+      console.log("Mail counts loaded:", result.data.counts);
+    } else {
+      console.error("Failed to load mail counts:", result.error);
     }
   };
 
@@ -621,7 +705,7 @@ const QMailDashboard = () => {
         activeView={activeView}
         setActiveView={handleFolderChange}
         onComposeClick={handleOpenCompose}
-        unreadCount={unreadCount}
+        mailCounts={mailCounts} // Pass mail counts
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
       />
