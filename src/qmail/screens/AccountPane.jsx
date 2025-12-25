@@ -10,7 +10,11 @@ import {
   DollarSign,
   Activity,
 } from "lucide-react";
-import { getHealthStatus } from "../../api/qmailApiServices";
+import {
+  getHealthStatus,
+  getServers,
+  getParityServer,
+} from "../../api/qmailApiServices";
 
 // Complete 256-row word table from qmail-protocol.md documentation
 const silverWordTable = [
@@ -175,11 +179,35 @@ const AccountPane = ({ userAccount, onAccountUpdate }) => {
   const [availability, setAvailability] = useState(null);
   const [isChecking, setIsChecking] = useState(false);
   const [serverHealth, setServerHealth] = useState(null);
-
+  const [servers, setServers] = useState([]);
+  const [parityServer, setParityServer] = useState(null);
+  const [parityStatus, setParityStatus] = useState("not_configured");
   // Check server health on component mount
   useEffect(() => {
     checkServerHealth();
+    loadServers();
   }, []);
+
+  useEffect(() => {
+    checkServerHealth();
+    loadServers();
+    loadParityServer();
+  }, []);
+
+  const loadParityServer = async () => {
+    const result = await getParityServer();
+    if (result.success) {
+      setParityStatus(result.data.status);
+      setParityServer(result.data.parityServer);
+    }
+  };
+
+  const loadServers = async () => {
+    const result = await getServers(true); // Include unavailable servers
+    if (result.success) {
+      setServers(result.data.servers);
+    }
+  };
 
   const checkServerHealth = async () => {
     const result = await getHealthStatus();
@@ -294,6 +322,74 @@ const AccountPane = ({ userAccount, onAccountUpdate }) => {
           </div>
         </div>
       )}
+
+      <div className="servers-grid glass-container">
+        <h3>RAIDA Network Status</h3>
+        <div className="servers-list">
+          {servers.map((server) => (
+            <div key={server.serverId} className="server-item">
+              <div
+                className={`server-status ${
+                  server.isAvailable ? "online" : "offline"
+                }`}
+              >
+                {server.isAvailable ? "●" : "○"}
+              </div>
+              <div className="server-info">
+                <span className="server-name">{server.serverId}</span>
+                <span className="server-address">
+                  {server.address}:{server.port}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Parity Server Status */}
+      <div className="parity-server-card glass-container">
+        <h3>Parity Server Configuration</h3>
+        <div className="parity-status">
+          <div
+            className={`status-badge ${
+              parityStatus === "configured" ? "configured" : "not-configured"
+            }`}
+          >
+            {parityStatus === "configured"
+              ? "✓ Configured"
+              : "○ Not Configured"}
+          </div>
+        </div>
+
+        {parityServer ? (
+          <div className="parity-server-info">
+            <div className="info-row">
+              <span className="label">Server ID:</span>
+              <span className="value">{parityServer.serverId}</span>
+            </div>
+            <div className="info-row">
+              <span className="label">Address:</span>
+              <span className="value">
+                {parityServer.address}:{parityServer.port}
+              </span>
+            </div>
+            <div className="info-row">
+              <span className="label">Status:</span>
+              <span
+                className={`value ${
+                  parityServer.isAvailable ? "online" : "offline"
+                }`}
+              >
+                {parityServer.isAvailable ? "Online" : "Offline"}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="not-configured-message">
+            No parity server has been configured for redundancy.
+          </p>
+        )}
+      </div>
 
       <div className="account-card glass-container">
         <div className="account-info">

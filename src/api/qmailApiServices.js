@@ -518,3 +518,222 @@ export const getMailCount = async () => {
     return { success: false, error: errorMessage };
   }
 };
+
+/**
+ * Gets complete metadata for a specific email by ID.
+ * @param {string} emailId - The unique email identifier (32-character hex string)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getEmailById = async (emailId) => {
+  try {
+    if (!emailId || emailId.length !== 32) {
+      throw new Error(
+        "Invalid email ID. Must be a 32-character hexadecimal string."
+      );
+    }
+
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/{id}:", data);
+
+    if (data && data.id) {
+      return {
+        success: true,
+        data: {
+          id: data.id,
+          from: data.from,
+          to: data.to || [],
+          cc: data.cc || [],
+          subject: data.subject,
+          timestamp: data.timestamp,
+          isRead: data.is_read,
+          folder: data.folder,
+          attachments: (data.attachments || []).map((att) => ({
+            fileType: att.file_type,
+            filename: att.filename,
+            size: att.size,
+          })),
+          bodyPreview: data.body_preview,
+        },
+      };
+    } else {
+      throw new Error("Invalid response from email endpoint");
+    }
+  } catch (error) {
+    console.error("Get email by ID failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch email.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets metadata for all attachments of a specific email.
+ * @param {string} emailId - The unique email identifier (32-character hex string)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getEmailAttachments = async (emailId) => {
+  try {
+    if (!emailId || emailId.length !== 32) {
+      throw new Error(
+        "Invalid email ID. Must be a 32-character hexadecimal string."
+      );
+    }
+
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/attachments`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/{id}/attachments:", data);
+
+    if (data) {
+      return {
+        success: true,
+        data: {
+          emailId: data.email_id,
+          attachments: (data.attachments || []).map((att) => ({
+            attachmentId: att.attachment_id,
+            name: att.name,
+            fileExtension: att.file_extension,
+            size: att.size,
+          })),
+          count: data.count || 0,
+        },
+      };
+    } else {
+      throw new Error("Invalid response from attachments endpoint");
+    }
+  } catch (error) {
+    console.error("Get email attachments failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch attachments.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets a paginated list of contacts with optional search.
+ * @param {number} page - Page number for pagination (default: 1)
+ * @param {number} limit - Number of contacts per page (default: 50, max: 200)
+ * @param {string} query - Optional search query to filter contacts
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getContacts = async (page = 1, limit = 50, query = "") => {
+  try {
+    // Build URL with query parameters
+    let url = `${API_BASE_URL}/contacts?page=${page}&limit=${limit}`;
+    if (query && query.trim() !== "") {
+      url += `&q=${encodeURIComponent(query)}`;
+    }
+
+    const response = await fetch(url);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /contacts:", data);
+
+    if (data && Array.isArray(data.contacts)) {
+      return {
+        success: true,
+        data: {
+          contacts: data.contacts.map((contact) => ({
+            userId: contact.user_id,
+            firstName: contact.first_name,
+            lastName: contact.last_name,
+            middleName: contact.middle_name,
+            autoAddress: contact.auto_address,
+            description: contact.description,
+            sendingFee: contact.sending_fee,
+            beaconId: contact.beacon_id,
+            fullName: `${contact.first_name}${
+              contact.middle_name ? " " + contact.middle_name : ""
+            } ${contact.last_name}`.trim(),
+          })),
+          pagination: {
+            page: data.pagination?.page || page,
+            limit: data.pagination?.limit || limit,
+            total: data.pagination?.total || 0,
+            totalPages: data.pagination?.total_pages || 0,
+          },
+        },
+      };
+    } else {
+      throw new Error("Invalid response from contacts endpoint");
+    }
+  } catch (error) {
+    console.error("Get contacts failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch contacts.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets information about all RAIDA servers.
+ * @param {boolean} includeUnavailable - Whether to include unavailable servers (default: false)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getServers = async (includeUnavailable = false) => {
+  try {
+    const url = `${API_BASE_URL}/data/servers?include_unavailable=${includeUnavailable}`;
+    const response = await fetch(url);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /data/servers:", data);
+
+    if (data && Array.isArray(data.servers)) {
+      return {
+        success: true,
+        data: {
+          servers: data.servers.map((server) => ({
+            serverId: server.server_id,
+            address: server.address,
+            port: server.port,
+            isAvailable: server.is_available,
+          })),
+          count: data.count || data.servers.length,
+          includeUnavailable: data.include_unavailable || includeUnavailable,
+        },
+      };
+    } else {
+      throw new Error("Invalid response from servers endpoint");
+    }
+  } catch (error) {
+    console.error("Get servers failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch servers.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets the current parity server configuration.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getParityServer = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/servers/parity`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /admin/servers/parity:", data);
+
+    if (data) {
+      return {
+        success: true,
+        data: {
+          status: data.status,
+          parityServer: data.parity_server
+            ? {
+                serverId: data.parity_server.server_id,
+                address: data.parity_server.address,
+                port: data.parity_server.port,
+                isAvailable: data.parity_server.is_available,
+              }
+            : null,
+          message: data.message,
+        },
+      };
+    } else {
+      throw new Error("Invalid response from parity server endpoint");
+    }
+  } catch (error) {
+    console.error("Get parity server failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch parity server configuration.`;
+    return { success: false, error: errorMessage };
+  }
+};

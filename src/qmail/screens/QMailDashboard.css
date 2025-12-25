@@ -1790,3 +1790,202 @@
   text-align: center;
   margin-left: auto;
 }
+
+/* Email Attachments */
+.email-attachments {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.email-attachments h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+}
+
+.attachments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+}
+
+.attachment-item:hover {
+  background: var(--card-hover);
+  border-color: var(--border-medium);
+}
+
+.attachment-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.attachment-size {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Pagination Controls */
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pagination-controls span {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* RAIDA Servers Grid */
+.servers-grid {
+  margin-top: var(--space-lg);
+}
+
+.servers-grid h3 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.servers-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.server-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.server-status {
+  font-size: 20px;
+}
+
+.server-status.online {
+  color: var(--accent-success);
+}
+
+.server-status.offline {
+  color: var(--text-muted);
+}
+
+.server-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.server-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.server-address {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Parity Server Card */
+.parity-server-card {
+  margin-top: var(--space-lg);
+}
+
+.parity-server-card h3 {
+  font-size: 18px;
+  margin-bottom: 16px;
+}
+
+.parity-status {
+  margin-bottom: 16px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.status-badge.configured {
+  background: var(--status-success-bg);
+  color: var(--accent-success);
+  border: 1px solid var(--accent-success);
+}
+
+.status-badge.not-configured {
+  background: var(--status-error-bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border-medium);
+}
+
+.parity-server-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-row .label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.info-row .value {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.info-row .value.online {
+  color: var(--accent-success);
+  font-weight: 600;
+}
+
+.info-row .value.offline {
+  color: var(--accent-error);
+  font-weight: 600;
+}
+
+.not-configured-message {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}

@@ -16,6 +16,7 @@ import {
   UserCircle,
   RefreshCw,
   AlertCircle,
+  Paperclip,
 } from "lucide-react";
 import ComposeModal from "./ComposeModal";
 import ContactsPane from "./ContactsPane";
@@ -27,6 +28,7 @@ import {
   searchEmails,
   getMailCount,
   getMailFolders,
+  getEmailById,
 } from "../../api/qmailApiServices";
 import "./QMailDashboard.css";
 
@@ -431,6 +433,32 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded }) => {
         )}
 
         {downloadState.isDownloaded && <p>{email.body}</p>}
+        {downloadState.isDownloaded && (
+          <>
+            <p>{email.body}</p>
+
+            {/* Attachments section */}
+            {emailAttachments.length > 0 && (
+              <div className="email-attachments">
+                <h4>Attachments ({emailAttachments.length})</h4>
+                <div className="attachments-list">
+                  {emailAttachments.map((attachment) => (
+                    <div
+                      key={attachment.attachmentId}
+                      className="attachment-item"
+                    >
+                      <Paperclip size={16} />
+                      <span className="attachment-name">{attachment.name}</span>
+                      <span className="attachment-size">
+                        {(attachment.size / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </main>
   );
@@ -455,6 +483,7 @@ const QMailDashboard = () => {
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
 
   const [folders, setFolders] = useState([]);
+  const [emailAttachments, setEmailAttachments] = useState([]);
   const [mailCounts, setMailCounts] = useState({
     inbox: { total: 0, unread: 0 },
     sent: { total: 0, unread: 0 },
@@ -638,11 +667,42 @@ const QMailDashboard = () => {
     setNotification("Refreshed successfully");
   };
 
-  const handleSelectEmail = (email) => {
+  const loadEmailAttachments = async (emailId) => {
+    const result = await getEmailAttachments(emailId);
+    if (result.success) {
+      setEmailAttachments(result.data.attachments);
+    } else {
+      setEmailAttachments([]);
+    }
+  };
+  const handleSelectEmail = async (email) => {
     setSelectedEmail(email);
     setEmails((currentEmails) =>
       currentEmails.map((e) => (e.id === email.id ? { ...e, isRead: true } : e))
     );
+
+    // Fetch full email details if email has an ID
+    if (email.id) {
+      setLoading(true);
+
+      // Load attachments and email details in parallel
+      loadEmailAttachments(email.id);
+      const result = await getEmailById(email.id);
+
+      if (result.success) {
+        // Update selected email with full details
+        setSelectedEmail({
+          ...email,
+          ...result.data,
+          isRead: true,
+        });
+      } else {
+        // Handle error - maybe show notification
+        console.error("Failed to load email details:", result.error);
+      }
+
+      setLoading(false);
+    }
   };
 
   const handleMarkAsDownloaded = (emailId) => {

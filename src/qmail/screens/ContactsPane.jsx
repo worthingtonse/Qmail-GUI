@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { UserPlus, Search, Trash2, RefreshCw } from "lucide-react";
 import "./QMailDashboard.css";
 import AddContactModal from "./AddContactModal";
-import { getPopularContacts } from "../../api/qmailApiServices";
+import { getPopularContacts, getContacts } from "../../api/qmailApiServices";
 
 const ContactsPane = () => {
   const [contacts, setContacts] = useState([]);
@@ -10,6 +10,33 @@ const ContactsPane = () => {
   const [isAddContactOpen, setIsAddContactOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
+  useEffect(() => {
+    loadContacts();
+  }, [currentPage, searchTerm]); // Reload when page or search changes
+
+  const loadContacts = async () => {
+    setLoading(true);
+    setError(null);
+    const result = await getContacts(currentPage, 50, searchTerm); // UPDATED
+    if (result.success) {
+      const transformedContacts = result.data.contacts.map((contact) => ({
+        id: contact.userId,
+        name: contact.fullName,
+        email: contact.autoAddress,
+        status: "none",
+        description: contact.description,
+      }));
+      setContacts(transformedContacts);
+      setTotalPages(result.data.pagination.totalPages); // ADD THIS
+    } else {
+      console.error("Failed to load contacts:", result.error);
+      setError(result.error);
+    }
+    setLoading(false);
+  };
 
   // Load popular contacts on component mount
   useEffect(() => {
@@ -175,7 +202,6 @@ const ContactsPane = () => {
             ))
           )}
         </div>
-
         <div className="drd-mock-info">
           <p>
             💡 Contact not listed? Search the Distributed Resource Directory
@@ -184,6 +210,28 @@ const ContactsPane = () => {
           <p>Popular contacts are loaded from the DRD network automatically.</p>
         </div>
       </div>
+
+      {totalPages > 1 && (
+        <div className="pagination-controls">
+          <button
+            className="secondary"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </button>
+          <span>
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            className="secondary"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </>
   );
 };
