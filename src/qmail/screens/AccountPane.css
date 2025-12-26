@@ -12,6 +12,91 @@
   min-width: 0; /* Prevent flex overflow */
 }
 
+/* Status-based field colors */
+.field-value.success {
+  background-color: rgba(16, 185, 129, 0.1);
+  border-color: var(--accent-success);
+  color: var(--accent-success);
+}
+
+.field-value.error {
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+
+.field-value.warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: var(--accent-warning);
+  color: var(--accent-warning);
+}
+
+/* ==================== SERVER LIST SECTION ==================== */
+.server-list {
+  margin-top: var(--space-xl);
+}
+
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.server-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background-color: var(--secondary-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+}
+
+.server-item:hover {
+  background-color: var(--tertiary-bg);
+  border-color: var(--border-strong);
+}
+
+.server-item.more-servers {
+  justify-content: center;
+  text-align: center;
+  color: var(--text-tertiary);
+  border-style: dashed;
+}
+
+.server-status {
+  flex-shrink: 0;
+}
+
+.server-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.server-id {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-xs);
+}
+
+.server-address {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+/* Status colors for server icons */
+.text-success {
+  color: var(--accent-success);
+}
+
+.text-danger {
+  color: var(--accent-danger);
+}
+
+
 /* ==================== ACCOUNT HEADER ==================== */
 .account-header {
   display: flex;

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { X, Send, Paperclip, Loader } from "lucide-react";
+import { X, Send, Paperclip, Loader, Users, CheckCircle, AlertCircle } from "lucide-react";
 import "./ComposeModal.css";
 import {
   getDrafts,
   sendEmail,
-  pollTaskStatus,
+  getTaskStatus,
+  getContacts,
 } from "../../api/qmailApiServices";
 
 const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
@@ -20,8 +21,21 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
   const [drafts, setDrafts] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Enhanced states for new functionality
+  const [contacts, setContacts] = useState([]);
+  const [showContactSuggestions, setShowContactSuggestions] = useState(false);
+  const [contactQuery, setContactQuery] = useState("");
+  const [taskId, setTaskId] = useState(null);
+  const [sendingStatus, setSendingStatus] = useState(null); // 'sending', 'completed', 'failed'
+  const [isPolling, setIsPolling] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState(null);
+
   useEffect(() => {
     if (isOpen) {
+      // Load contacts when modal opens
+      loadContacts();
+
       if (replyTo) {
         setTo(replyTo.senderEmail);
         setCc("");
@@ -53,6 +67,15 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
         // Load drafts when opening new compose
         loadDrafts();
       }
+
+      // Reset enhanced states
+      setShowContactSuggestions(false);
+      setContactQuery("");
+      setTaskId(null);
+      setSendingStatus(null);
+      setIsPolling(false);
+      setProgress(0);
+      setError(null);
     }
   }, [isOpen, replyTo]);
 
@@ -66,6 +89,91 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
       setDrafts([]);
     }
   };
+
+  // Load contacts for suggestions
+  const loadContacts = async () => {
+    try {
+      const result = await getContacts();
+      if (result.success) {
+        setContacts(result.data.contacts || []);
+        console.log("Contacts loaded:", result.data.contacts);
+      } else {
+        console.error("Failed to load contacts:", result.error);
+        setContacts([]);
+      }
+    } catch (error) {
+      console.error("Contact loading error:", error);
+      setContacts([]);
+    }
+  };
+
+  // Enhanced task status polling
+  const pollTaskStatus = async (taskId) => {
+    if (!taskId || !isPolling) return;
+
+    try {
+      const result = await getTaskStatus(taskId);
+      if (result.success) {
+        const { status, progress: currentProgress, message } = result.data;
+        
+        setProgress(currentProgress || 0);
+        setSendProgress(message || "Processing...");
+        
+        // Update sending status based on task status
+        if (status === "completed") {
+          setSendingStatus("completed");
+          setIsPolling(false);
+          setSendProgress("Email sent successfully!");
+          setTimeout(() => {
+            onSend({ to, cc, bcc, subject, body });
+            setIsSending(false);
+            setSendingStatus(null);
+            setSendProgress("");
+          }, 1500);
+        } else if (status === "failed" || status === "error") {
+          setSendingStatus("failed");
+          setIsPolling(false);
+          setError(message || "Failed to send email");
+          setIsSending(false);
+        } else if (status === "running" || status === "pending") {
+          setSendingStatus("sending");
+          // Continue polling
+          setTimeout(() => pollTaskStatus(taskId), 1000);
+        }
+      } else {
+        console.error("Failed to get task status:", result.error);
+        setIsPolling(false);
+        setSendingStatus("failed");
+        setError("Failed to track email status");
+        setIsSending(false);
+      }
+    } catch (error) {
+      console.error("Task polling error:", error);
+      setIsPolling(false);
+      setSendingStatus("failed");
+      setError("Failed to track email status");
+      setIsSending(false);
+    }
+  };
+
+  // Handle contact suggestions
+  const handleToChange = (value) => {
+    setTo(value);
+    setContactQuery(value);
+    setShowContactSuggestions(value.length > 1 && contacts.length > 0);
+  };
+
+  const handleContactSelect = (contact) => {
+    setTo(contact.autoAddress || contact.email || contact.fullName);
+    setShowContactSuggestions(false);
+    setContactQuery("");
+  };
+
+  // Filter contacts for suggestions
+  const filteredContacts = contacts.filter(contact =>
+    contact.fullName.toLowerCase().includes(contactQuery.toLowerCase()) ||
+    (contact.autoAddress && contact.autoAddress.toLowerCase().includes(contactQuery.toLowerCase()))
+  );
 
   if (!isOpen) {
     return null;
@@ -85,17 +193,20 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
   const handleSend = async () => {
     // Validate required fields
     if (!to || to.trim() === "") {
-      alert("Please provide at least one recipient.");
+      setError("Please provide at least one recipient.");
       return;
     }
 
     if (!subject || subject.trim() === "") {
-      alert("Please provide a subject.");
+      setError("Please provide a subject.");
       return;
     }
 
     setIsSending(true);
+    setError(null);
+    setSendingStatus("sending");
     setSendProgress("Preparing email...");
+    setProgress(0);
 
     try {
       // Parse email addresses
@@ -121,49 +232,70 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
       };
 
       setSendProgress("Sending email...");
+      setProgress(10);
 
       // Call the sendEmail API
       const result = await sendEmail(emailData);
 
       if (result.success) {
-        const taskId = result.data.taskId;
-        setSendProgress(`Email queued (Task: ${taskId.substring(0, 8)}...)`);
-
-        // Poll the task status to track sending progress
-        const pollResult = await pollTaskStatus(
-          taskId,
-          1000, // Check every 1 second
-          60, // Max 60 attempts (60 seconds)
-          (progressData) => {
-            // Update progress message
-            if (progressData.message) {
-              setSendProgress(progressData.message);
-            } else if (progressData.progress !== undefined) {
-              setSendProgress(`Progress: ${progressData.progress}%`);
-            }
-          }
-        );
-
-        if (pollResult.success) {
+        const newTaskId = result.data.taskId;
+        setTaskId(newTaskId);
+        setSendProgress(`Email queued for sending...`);
+        setProgress(20);
+        
+        // Start enhanced task status polling
+        if (newTaskId) {
+          setIsPolling(true);
+          setTimeout(() => pollTaskStatus(newTaskId), 1000);
+        } else {
+          // If no task ID, assume immediate success
+          setSendingStatus("completed");
           setSendProgress("Email sent successfully!");
-          // Wait a moment to show success message
           setTimeout(() => {
             onSend({ to, cc, bcc, subject, body });
             setIsSending(false);
+            setSendingStatus(null);
             setSendProgress("");
           }, 1500);
-        } else {
-          throw new Error(pollResult.error || "Email sending failed");
         }
       } else {
         throw new Error(result.error || "Failed to queue email");
       }
     } catch (error) {
       console.error("Send email error:", error);
-      alert(`Failed to send email: ${error.message}`);
+      setError(`Failed to send email: ${error.message}`);
       setIsSending(false);
+      setSendingStatus("failed");
       setSendProgress("");
     }
+  };
+
+  // Enhanced progress indicator
+  const renderProgressIndicator = () => {
+    if (!isSending && !sendProgress) return null;
+
+    const getIcon = () => {
+      switch (sendingStatus) {
+        case "sending":
+          return <Loader size={16} className="spinning" />;
+        case "completed":
+          return <CheckCircle size={16} style={{ color: 'var(--accent-success)' }} />;
+        case "failed":
+          return <AlertCircle size={16} style={{ color: 'var(--accent-danger)' }} />;
+        default:
+          return <Loader size={16} className="spinning" />;
+      }
+    };
+
+    return (
+      <div className="send-progress">
+        {getIcon()}
+        <span>{sendProgress}</span>
+        {progress > 0 && progress < 100 && (
+          <span>({Math.round(progress)}%)</span>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -180,16 +312,99 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
           </button>
         </div>
         <div className="compose-modal-body">
-          <div className="form-group">
-            <label htmlFor="to">To: </label>
-            <input
-              type="text"
-              id="to"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              disabled={isSending}
-              placeholder="write address here"
-            />
+          {/* Error Message */}
+          {error && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-sm)',
+              padding: 'var(--space-md)',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid var(--accent-danger)',
+              borderRadius: 'var(--radius-md)',
+              color: 'var(--accent-danger)',
+              marginBottom: 'var(--space-md)'
+            }}>
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Enhanced To field with contact suggestions */}
+          <div className="form-group" style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <label htmlFor="to" style={{ flex: 'none' }}>To: </label>
+              <div style={{ flex: 1, position: 'relative' }}>
+                <input
+                  type="text"
+                  id="to"
+                  value={to}
+                  onChange={(e) => handleToChange(e.target.value)}
+                  disabled={isSending}
+                  placeholder="write address here"
+                  style={{ width: '100%', paddingRight: '40px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowContactSuggestions(!showContactSuggestions)}
+                  disabled={isSending}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-tertiary)',
+                    cursor: 'pointer',
+                    padding: '4px'
+                  }}
+                >
+                  <Users size={16} />
+                </button>
+              </div>
+            </div>
+            
+            {/* Contact Suggestions */}
+            {showContactSuggestions && filteredContacts.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                backgroundColor: 'var(--card-bg)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-md)',
+                boxShadow: 'var(--shadow-lg)',
+                zIndex: 1000,
+                maxHeight: '200px',
+                overflowY: 'auto'
+              }}>
+                {filteredContacts.slice(0, 5).map((contact, index) => (
+                  <div 
+                    key={contact.userId || index} 
+                    onClick={() => handleContactSelect(contact)}
+                    style={{
+                      padding: 'var(--space-md)',
+                      cursor: 'pointer',
+                      borderBottom: index < filteredContacts.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+                      ':hover': {
+                        backgroundColor: 'var(--card-hover)'
+                      }
+                    }}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--card-hover)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                  >
+                    <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                      {contact.fullName}
+                    </div>
+                    <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>
+                      {contact.autoAddress}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Advanced options toggle */}
@@ -280,11 +495,17 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
             />
           </div>
 
-          {/* Progress indicator */}
-          {isSending && sendProgress && (
-            <div className="send-progress">
-              <Loader size={16} className="spinning" />
-              <span>{sendProgress}</span>
+          {/* Enhanced Progress indicator */}
+          {renderProgressIndicator()}
+
+          {/* Draft info */}
+          {drafts.length > 0 && !isSending && (
+            <div style={{
+              fontSize: 'var(--font-size-sm)',
+              color: 'var(--text-tertiary)',
+              padding: 'var(--space-sm) 0'
+            }}>
+              {drafts.length} draft{drafts.length !== 1 ? 's' : ''} available
             </div>
           )}
         </div>
@@ -294,7 +515,22 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
             onClick={handleSend}
             disabled={isSending}
           >
-            <Send size={16} /> {isSending ? "Sending..." : "Send"}
+            {sendingStatus === "sending" ? (
+              <>
+                <Loader size={16} className="spinning" />
+                Sending...
+              </>
+            ) : sendingStatus === "completed" ? (
+              <>
+                <CheckCircle size={16} />
+                Sent!
+              </>
+            ) : (
+              <>
+                <Send size={16} />
+                Send
+              </>
+            )}
           </button>
           <button className="attach-button secondary" disabled={isSending}>
             <Paperclip size={16} /> Attach

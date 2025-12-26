@@ -1,5 +1,7 @@
 /* ==================== EMAIL LIST PANE STYLES ==================== */
-
+.email-list-header {
+ padding: var(--space-md)
+}
 .email-list-pane {
   width: var(--email-list-width);
   flex-shrink: 0;
@@ -14,8 +16,9 @@
 .search-bar-container {
   padding: var(--space-md);
   position: relative;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: none;
   background-color: var(--secondary-bg);
+  margin-bottom: 0
 }
 
 .search-input {

@@ -15,8 +15,19 @@ import {
   CreditCard,
   AlertTriangle,
   Check,
-  X
+  X,
+  Server,
+  Globe,
+  Database,
+  Heart,
+  Wifi,
+  WifiOff
 } from "lucide-react";
+import { 
+  getHealthStatus, 
+  getServers, 
+  getParityServer 
+} from "../../api/qmailApiServices";
 import "./AccountPane.css";
 
 const AccountPane = () => {
@@ -24,6 +35,15 @@ const AccountPane = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  
+  // API Data States
+  const [serverHealth, setServerHealth] = useState(null);
+  const [raidaServers, setRaidaServers] = useState([]);
+  const [parityServer, setParityServer] = useState(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [serversLoading, setServersLoading] = useState(false);
+  const [parityLoading, setParityLoading] = useState(false);
+  
   const [accountSettings, setAccountSettings] = useState({
     notifications: true,
     darkMode: true,
@@ -95,7 +115,7 @@ const AccountPane = () => {
     }
   ]);
 
-  // Simulate data loading
+  // Load all data on component mount
   useEffect(() => {
     loadAccountData();
   }, []);
@@ -105,16 +125,70 @@ const AccountPane = () => {
     setError(null);
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Load all data in parallel
+      await Promise.all([
+        loadHealthStatus(),
+        loadServers(),
+        loadParityServer()
+      ]);
       
-      // Data is already set in state for testing
-      console.log("Account data loaded successfully");
+      console.log("All account data loaded successfully");
     } catch (err) {
       console.error("Error loading account data:", err);
-      setError("Failed to load account data");
+      setError("Failed to load some account data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadHealthStatus = async () => {
+    setHealthLoading(true);
+    try {
+      const result = await getHealthStatus();
+      if (result.success) {
+        setServerHealth(result.data);
+        console.log("Health status loaded:", result.data);
+      } else {
+        console.error("Failed to load health status:", result.error);
+      }
+    } catch (error) {
+      console.error("Health status error:", error);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  const loadServers = async () => {
+    setServersLoading(true);
+    try {
+      const result = await getServers(true); // Include unavailable servers
+      if (result.success) {
+        setRaidaServers(result.data.servers);
+        console.log("RAIDA servers loaded:", result.data.servers);
+      } else {
+        console.error("Failed to load servers:", result.error);
+      }
+    } catch (error) {
+      console.error("Servers loading error:", error);
+    } finally {
+      setServersLoading(false);
+    }
+  };
+
+  const loadParityServer = async () => {
+    setParityLoading(true);
+    try {
+      const result = await getParityServer();
+      if (result.success) {
+        setParityServer(result.data);
+        console.log("Parity server loaded:", result.data);
+      } else {
+        console.error("Failed to load parity server:", result.error);
+      }
+    } catch (error) {
+      console.error("Parity server error:", error);
+    } finally {
+      setParityLoading(false);
     }
   };
 
@@ -145,7 +219,14 @@ const AccountPane = () => {
     // Here you would implement actual security actions
   };
 
-  if (loading) {
+  // Calculate server statistics
+  const serverStats = {
+    total: raidaServers.length,
+    online: raidaServers.filter(s => s.isAvailable).length,
+    offline: raidaServers.filter(s => !s.isAvailable).length
+  };
+
+  if (loading && !serverHealth && raidaServers.length === 0) {
     return (
       <div className="account-pane">
         <div className="loading-state">
@@ -156,7 +237,7 @@ const AccountPane = () => {
     );
   }
 
-  if (error) {
+  if (error && !serverHealth && raidaServers.length === 0) {
     return (
       <div className="account-pane">
         <div className="error-section">
@@ -197,6 +278,57 @@ const AccountPane = () => {
       </div>
 
       <div className="account-content">
+        {/* Server Health Section */}
+        <div className="profile-section">
+          <div className="section-header">
+            <h3 className="section-title">
+              <Heart size={20} />
+              Server Status
+            </h3>
+            <button
+              className="edit-profile-btn secondary"
+              onClick={loadHealthStatus}
+              disabled={healthLoading}
+            >
+              <RefreshCw size={16} className={healthLoading ? "spinning" : ""} />
+              Refresh
+            </button>
+          </div>
+          
+          <div className="profile-details">
+            <div className="profile-field">
+              <label className="field-label">Service Status</label>
+              <div className={`field-value ${serverHealth?.status === 'healthy' ? 'success' : 'error'}`}>
+                {healthLoading ? 'Checking...' : (serverHealth?.status || 'Unknown')}
+              </div>
+            </div>
+            
+            <div className="profile-field">
+              <label className="field-label">Service Name</label>
+              <div className="field-value">
+                {serverHealth?.service || 'QMail Client Core'}
+              </div>
+            </div>
+            
+            <div className="profile-field">
+              <label className="field-label">Version</label>
+              <div className="field-value">
+                {serverHealth?.version || 'Unknown'}
+              </div>
+            </div>
+            
+            <div className="profile-field">
+              <label className="field-label">Last Check</label>
+              <div className="field-value">
+                {serverHealth?.timestamp ? 
+                  new Date(serverHealth.timestamp).toLocaleString() : 
+                  'Never'
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Profile Section */}
         <div className="profile-section">
           <div className="section-header">
@@ -239,8 +371,13 @@ const AccountPane = () => {
             </div>
             
             <div className="profile-field">
-              <label className="field-label">QMail Auto Address</label>
-              <div className="field-value">
+              <label className="field-label">QMail Address</label>
+              <div 
+                className={`field-value ${isEditing ? 'editable' : ''}`}
+                contentEditable={isEditing}
+                onBlur={(e) => handleProfileUpdate('autoAddress', e.target.textContent)}
+                suppressContentEditableWarning={true}
+              >
                 {userProfile.autoAddress}
               </div>
             </div>
@@ -255,7 +392,7 @@ const AccountPane = () => {
             <div className="profile-field">
               <label className="field-label">Join Date</label>
               <div className="field-value">
-                {new Date(userProfile.joinDate).toLocaleDateString('en-US', {
+                {new Date(userProfile.joinDate).toLocaleDateString(undefined, {
                   year: 'numeric',
                   month: 'long', 
                   day: 'numeric'
@@ -267,6 +404,146 @@ const AccountPane = () => {
               <label className="field-label">Last Login</label>
               <div className="field-value">
                 {userProfile.lastLogin}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* RAIDA Network Status Section */}
+        <div className="balance-section">
+          <div className="section-header">
+            <h3 className="section-title">
+              <Server size={20} />
+              RAIDA Network Status
+            </h3>
+            <button
+              className="edit-profile-btn secondary"
+              onClick={loadServers}
+              disabled={serversLoading}
+            >
+              <RefreshCw size={16} className={serversLoading ? "spinning" : ""} />
+              Refresh
+            </button>
+          </div>
+          
+          <div className="balance-grid">
+            <div className="balance-card total">
+              <div className="balance-label">Total Servers</div>
+              <div className="balance-value">{serverStats.total}</div>
+              <div className="balance-description">RAIDA network nodes</div>
+            </div>
+            
+            <div className="balance-card verified">
+              <div className="balance-label">Online</div>
+              <div className="balance-value">{serverStats.online}</div>
+              <div className="balance-description">Available servers</div>
+            </div>
+            
+            <div className="balance-card counterfeit">
+              <div className="balance-label">Offline</div>
+              <div className="balance-value">{serverStats.offline}</div>
+              <div className="balance-description">Unavailable servers</div>
+            </div>
+            
+            <div className="balance-card suspect">
+              <div className="balance-label">Uptime</div>
+              <div className="balance-value">
+                {serverStats.total > 0 ? 
+                  Math.round((serverStats.online / serverStats.total) * 100) : 0}%
+              </div>
+              <div className="balance-description">Network availability</div>
+            </div>
+          </div>
+
+          {/* Server List */}
+          {raidaServers.length > 0 && (
+            <div className="server-list">
+              <h4 className="text-sm text-secondary" style={{marginBottom: 'var(--space-md)'}}>
+                Server Details
+              </h4>
+              <div className="server-grid">
+                {raidaServers.slice(0, 10).map((server) => (
+                  <div key={server.serverId} className="server-item">
+                    <div className="server-status">
+                      {server.isAvailable ? (
+                        <Wifi size={16} className="text-success" />
+                      ) : (
+                        <WifiOff size={16} className="text-danger" />
+                      )}
+                    </div>
+                    <div className="server-info">
+                      <div className="server-id">Server {server.serverId}</div>
+                      <div className="server-address">{server.address}:{server.port}</div>
+                    </div>
+                  </div>
+                ))}
+                {raidaServers.length > 10 && (
+                  <div className="server-item more-servers">
+                    <div className="server-info">
+                      <div className="server-id">+{raidaServers.length - 10} more</div>
+                      <div className="server-address">Additional servers</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Parity Server Configuration Section */}
+        <div className="profile-section">
+          <div className="section-header">
+            <h3 className="section-title">
+              <Database size={20} />
+              Parity Server Configuration
+            </h3>
+            <button
+              className="edit-profile-btn secondary"
+              onClick={loadParityServer}
+              disabled={parityLoading}
+            >
+              <RefreshCw size={16} className={parityLoading ? "spinning" : ""} />
+              Refresh
+            </button>
+          </div>
+          
+          <div className="profile-details">
+            <div className="profile-field">
+              <label className="field-label">Configuration Status</label>
+              <div className={`field-value ${parityServer?.status === 'configured' ? 'success' : 'warning'}`}>
+                {parityLoading ? 'Loading...' : (parityServer?.status || 'Not Configured')}
+              </div>
+            </div>
+            
+            {parityServer?.parityServer && (
+              <>
+                <div className="profile-field">
+                  <label className="field-label">Server ID</label>
+                  <div className="field-value">
+                    {parityServer.parityServer.serverId}
+                  </div>
+                </div>
+                
+                <div className="profile-field">
+                  <label className="field-label">Server Address</label>
+                  <div className="field-value">
+                    {parityServer.parityServer.address}:{parityServer.parityServer.port}
+                  </div>
+                </div>
+                
+                <div className="profile-field">
+                  <label className="field-label">Availability</label>
+                  <div className={`field-value ${parityServer.parityServer.isAvailable ? 'success' : 'error'}`}>
+                    {parityServer.parityServer.isAvailable ? 'Available' : 'Unavailable'}
+                  </div>
+                </div>
+              </>
+            )}
+            
+            <div className="profile-field">
+              <label className="field-label">Message</label>
+              <div className="field-value">
+                {parityServer?.message || 'No parity server configured'}
               </div>
             </div>
           </div>

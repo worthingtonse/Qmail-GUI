@@ -137,7 +137,8 @@ display: flex;
 /* ==================== SEARCH BAR ==================== */
 .search-bar-container {
   position: relative;
-  margin-bottom: var(--space-lg);
+  /* margin-bottom: var(--space-lg); */
+  border-bottom: none;
 }
 
 .search-input {
