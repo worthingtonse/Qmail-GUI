@@ -1,0 +1,455 @@
+@import "./QMailDashboard.css";
+/* ==================== COMPOSE MODAL STYLES ==================== */
+
+.compose-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-lg);
+  backdrop-filter: blur(4px);
+}
+
+.compose-modal {
+  background-color: var(--secondary-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 800px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ==================== MODAL HEADER ==================== */
+.compose-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-xl);
+  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--secondary-bg);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+}
+
+.compose-modal-header h3 {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.close-modal-btn {
+  padding: var(--space-sm);
+  background-color: transparent;
+  color: var(--text-tertiary);
+  border: none;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-modal-btn:hover:not(:disabled) {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.close-modal-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ==================== MODAL BODY ==================== */
+.compose-modal-body {
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--primary-bg);
+}
+
+/* ==================== FORM GROUPS ==================== */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.form-group label {
+  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.form-group input,
+.form-group textarea {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  transition: all var(--transition-base);
+  width: 100%;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background-color: var(--card-hover);
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.form-group input:disabled,
+.form-group textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: var(--border-subtle);
+}
+
+/* ==================== TEXTAREA SPECIFIC ==================== */
+.form-group-textarea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.form-group-textarea textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 200px;
+  font-family: var(--font-family);
+  line-height: 1.5;
+}
+
+/* ==================== ADVANCED OPTIONS ==================== */
+.advanced-toggle {
+  margin: var(--space-sm) 0;
+}
+
+.toggle-advanced-btn {
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  font-size: var(--font-size-sm);
+  padding: var(--space-sm) 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  transition: all var(--transition-base);
+  font-weight: 500;
+}
+
+.toggle-advanced-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.toggle-advanced-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ==================== NUMBER INPUT ==================== */
+.form-group input[type="number"] {
+  max-width: 200px;
+}
+
+/* ==================== SEND PROGRESS ==================== */
+.send-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-md);
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.send-progress span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.send-progress .spinning {
+  color: var(--accent-primary);
+  animation: spin 1s linear infinite;
+}
+
+/* ==================== MODAL FOOTER ==================== */
+.compose-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--secondary-bg);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+}
+
+.send-button {
+  background-color: var(--accent-primary);
+  color: white;
+  padding: var(--space-md) var(--space-xl);
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.send-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.send-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.attach-button {
+  background-color: var(--card-bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-medium);
+  padding: var(--space-md) var(--space-xl);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.attach-button:hover:not(:disabled) {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.attach-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.attach-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ==================== ADD CONTACT MODAL VARIANT ==================== */
+.add-contact-modal {
+  max-width: 500px;
+}
+
+.add-contact-modal .compose-modal-body {
+  min-height: 200px;
+}
+
+.add-contact-modal .form-group input {
+  font-size: var(--font-size-base);
+}
+
+/* ==================== REQUIRED FIELD INDICATORS ==================== */
+.form-group label {
+  position: relative;
+}
+
+.form-group label[for="to"]::after,
+.form-group label[for="subject"]::after,
+.form-group label[for="body"]::after {
+  content: " *";
+  color: var(--accent-danger);
+  font-weight: 600;
+}
+
+/* ==================== RESPONSIVE DESIGN ==================== */
+@media (max-width: 1024px) {
+  .compose-modal-overlay {
+    padding: var(--space-md);
+  }
+
+  .compose-modal {
+    max-width: 100%;
+    max-height: 95vh;
+  }
+
+  .compose-modal-header,
+  .compose-modal-body,
+  .compose-modal-footer {
+    padding: var(--space-lg);
+  }
+
+  .compose-modal-footer {
+    flex-direction: column;
+  }
+
+  .send-button,
+  .attach-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .compose-modal-overlay {
+    padding: var(--space-sm);
+    align-items: flex-start;
+    padding-top: var(--space-lg);
+  }
+
+  .compose-modal {
+    max-height: calc(100vh - var(--space-2xl));
+  }
+
+  .compose-modal-header,
+  .compose-modal-body,
+  .compose-modal-footer {
+    padding: var(--space-md);
+  }
+
+  .compose-modal-header h3 {
+    font-size: var(--font-size-lg);
+  }
+
+  .form-group-textarea {
+    min-height: 150px;
+  }
+
+  .form-group-textarea textarea {
+    min-height: 150px;
+  }
+
+  .form-group input[type="number"] {
+    max-width: 100%;
+  }
+
+  .compose-modal-footer {
+    gap: var(--space-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  .compose-modal-overlay {
+    padding: 0;
+  }
+
+  .compose-modal {
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100vh;
+  }
+
+  .compose-modal-header {
+    border-radius: 0;
+  }
+
+  .compose-modal-footer {
+    border-radius: 0;
+  }
+
+  .form-group-textarea {
+    min-height: 120px;
+  }
+
+  .form-group-textarea textarea {
+    min-height: 120px;
+  }
+}
+
+/* ==================== ACCESSIBILITY ==================== */
+@media (prefers-reduced-motion: reduce) {
+  .compose-modal {
+    animation: none;
+  }
+
+  .send-button,
+  .attach-button,
+  .close-modal-btn,
+  .toggle-advanced-btn {
+    transition: none;
+    transform: none;
+  }
+
+  .send-progress {
+    animation: none;
+  }
+}
+
+/* Focus styles for keyboard navigation */
+.close-modal-btn:focus,
+.send-button:focus,
+.attach-button:focus,
+.toggle-advanced-btn:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Focus trap for modal */
+.compose-modal-overlay {
+  contain: layout style;
+}
+
+/* ==================== HIGH CONTRAST MODE ==================== */
+@media (prefers-contrast: high) {
+  .compose-modal {
+    border: 2px solid var(--text-primary);
+  }
+
+  .send-button,
+  .attach-button {
+    border: 2px solid currentColor;
+  }
+
+  .form-group input:focus,
+  .form-group textarea:focus {
+    border: 2px solid var(--accent-primary);
+  }
+}

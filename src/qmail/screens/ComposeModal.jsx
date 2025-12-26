@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Send, Paperclip, Loader } from "lucide-react";
-import "./QMailDashboard.css";
+import "./ComposeModal.css";
 import {
   getDrafts,
   sendEmail,
@@ -181,7 +181,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
         </div>
         <div className="compose-modal-body">
           <div className="form-group">
-            <label htmlFor="to">To: *</label>
+            <label htmlFor="to">To: </label>
             <input
               type="text"
               id="to"
@@ -258,7 +258,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
           )}
 
           <div className="form-group">
-            <label htmlFor="subject">Subject: *</label>
+            <label htmlFor="subject">Subject: </label>
             <input
               type="text"
               id="subject"
@@ -269,7 +269,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
             />
           </div>
           <div className="form-group form-group-textarea">
-            <label htmlFor="body">Message: *</label>
+            <label htmlFor="body">Message: </label>
             <textarea
               id="body"
               placeholder="Write your message..."

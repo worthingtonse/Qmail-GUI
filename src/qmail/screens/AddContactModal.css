@@ -1,0 +1,283 @@
+@import "./QMailDashboard.css";
+/* ==================== ADD CONTACT MODAL STYLES ==================== */
+
+/* The AddContactModal uses the same base modal styles from ComposeModal.css */
+/* This file contains specific styles and overrides for the add contact functionality */
+
+.add-contact-modal {
+  max-width: 500px;
+  min-width: 400px;
+}
+
+.add-contact-modal .compose-modal-body {
+  min-height: auto;
+  padding: var(--space-xl);
+}
+
+/* ==================== CONTACT FORM FIELDS ==================== */
+.add-contact-modal .form-group {
+  margin-bottom: var(--space-lg);
+}
+
+.add-contact-modal .form-group:last-child {
+  margin-bottom: 0;
+}
+
+.add-contact-modal .form-group label {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-sm);
+  display: block;
+}
+
+.add-contact-modal .form-group input {
+  width: 100%;
+  padding: var(--space-md);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  transition: all var(--transition-base);
+}
+
+.add-contact-modal .form-group input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background-color: var(--card-hover);
+}
+
+.add-contact-modal .form-group input::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ==================== CONTACT NAME FIELD ==================== */
+#contact-name {
+  font-weight: 500;
+}
+
+/* ==================== CONTACT EMAIL FIELD ==================== */
+#contact-email {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.5px;
+}
+
+/* ==================== SAVE BUTTON ==================== */
+.add-contact-modal .compose-modal-footer {
+  padding: var(--space-lg) var(--space-xl);
+  justify-content: flex-end;
+}
+
+.add-contact-modal .send-button {
+  background-color: var(--accent-success);
+  color: white;
+  padding: var(--space-md) var(--space-xl);
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 140px;
+  justify-content: center;
+}
+
+.add-contact-modal .send-button:hover:not(:disabled) {
+  background-color: #059669;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.add-contact-modal .send-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.add-contact-modal .send-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ==================== MODAL HEADER CUSTOMIZATION ==================== */
+.add-contact-modal .compose-modal-header h3 {
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* ==================== VALIDATION STYLES ==================== */
+.add-contact-modal .form-group input.error {
+  border-color: var(--accent-danger);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.add-contact-modal .form-group input.success {
+  border-color: var(--accent-success);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.error-message {
+  color: var(--accent-danger);
+  font-size: var(--font-size-xs);
+  margin-top: var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.success-message {
+  color: var(--accent-success);
+  font-size: var(--font-size-xs);
+  margin-top: var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* ==================== FIELD HINTS ==================== */
+.field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-xs);
+  line-height: 1.4;
+}
+
+.field-hint.email-hint {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background-color: var(--card-bg);
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-secondary);
+}
+
+/* ==================== RESPONSIVE DESIGN ==================== */
+@media (max-width: 768px) {
+  .add-contact-modal {
+    max-width: 100%;
+    min-width: 0;
+    margin: var(--space-md);
+  }
+
+  .add-contact-modal .compose-modal-body {
+    padding: var(--space-lg);
+  }
+
+  .add-contact-modal .compose-modal-footer {
+    padding: var(--space-lg);
+  }
+
+  .add-contact-modal .send-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .add-contact-modal {
+    margin: var(--space-sm);
+    border-radius: var(--radius-md);
+  }
+
+  .add-contact-modal .compose-modal-body,
+  .add-contact-modal .compose-modal-header,
+  .add-contact-modal .compose-modal-footer {
+    padding: var(--space-md);
+  }
+
+  .add-contact-modal .compose-modal-header h3 {
+    font-size: var(--font-size-lg);
+  }
+
+  .field-hint.email-hint {
+    padding: var(--space-sm);
+    font-size: 10px;
+  }
+}
+
+/* ==================== ACCESSIBILITY ENHANCEMENTS ==================== */
+.add-contact-modal .form-group input:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.add-contact-modal .send-button:focus {
+  outline: 2px solid var(--accent-success);
+  outline-offset: 2px;
+}
+
+/* ==================== ANIMATION FOR SUCCESS STATE ==================== */
+@keyframes successPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.add-contact-modal .send-button.success-state {
+  animation: successPulse 1s ease-out;
+}
+
+/* ==================== LOADING STATE ==================== */
+.add-contact-modal .send-button.loading {
+  position: relative;
+  color: transparent;
+}
+
+.add-contact-modal .send-button.loading::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 50%;
+  left: 50%;
+  margin-left: -8px;
+  margin-top: -8px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  color: white;
+}
+
+/* ==================== HIGH CONTRAST SUPPORT ==================== */
+@media (prefers-contrast: high) {
+  .add-contact-modal .form-group input {
+    border: 2px solid var(--text-primary);
+  }
+
+  .add-contact-modal .form-group input:focus {
+    border: 2px solid var(--accent-primary);
+    outline: 2px solid var(--accent-primary);
+  }
+
+  .add-contact-modal .send-button {
+    border: 2px solid var(--accent-success);
+  }
+}
+
+/* ==================== REDUCED MOTION SUPPORT ==================== */
+@media (prefers-reduced-motion: reduce) {
+  .add-contact-modal .send-button,
+  .add-contact-modal .form-group input {
+    transition: none;
+  }
+
+  .add-contact-modal .send-button.success-state {
+    animation: none;
+  }
+
+  .add-contact-modal .send-button.loading::after {
+    animation: none;
+  }
+}

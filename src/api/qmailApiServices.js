@@ -610,56 +610,73 @@ export const getEmailAttachments = async (emailId) => {
 };
 
 /**
- * Gets a paginated list of contacts with optional search.
- * @param {number} page - Page number for pagination (default: 1)
- * @param {number} limit - Number of contacts per page (default: 50, max: 200)
+ * Gets the list of contacts with optional search.
  * @param {string} query - Optional search query to filter contacts
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const getContacts = async (page = 1, limit = 50, query = "") => {
+export const getContacts = async (query = "") => {
   try {
-    // Build URL with query parameters
-    let url = `${API_BASE_URL}/contacts?page=${page}&limit=${limit}`;
-    if (query && query.trim() !== "") {
-      url += `&q=${encodeURIComponent(query)}`;
-    }
-
+    // Always call the base endpoint without search params
+    const url = `${API_BASE_URL}/contacts`;
+    
+    console.log("Fetching contacts from:", url);
+    
     const response = await fetch(url);
-    const data = await handleResponse(response);
-
+    
+    // Check if response is ok before trying to parse JSON
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
     console.log("Data received from /contacts:", data);
 
+    let contacts = [];
+
+    // Handle different possible response formats
     if (data && Array.isArray(data.contacts)) {
-      return {
-        success: true,
-        data: {
-          contacts: data.contacts.map((contact) => ({
-            userId: contact.user_id,
-            firstName: contact.first_name,
-            lastName: contact.last_name,
-            middleName: contact.middle_name,
-            autoAddress: contact.auto_address,
-            description: contact.description,
-            sendingFee: contact.sending_fee,
-            beaconId: contact.beacon_id,
-            fullName: `${contact.first_name}${
-              contact.middle_name ? " " + contact.middle_name : ""
-            } ${contact.last_name}`.trim(),
-          })),
-          pagination: {
-            page: data.pagination?.page || page,
-            limit: data.pagination?.limit || limit,
-            total: data.pagination?.total || 0,
-            totalPages: data.pagination?.total_pages || 0,
-          },
-        },
-      };
+      contacts = data.contacts;
+    } else if (data && Array.isArray(data)) {
+      contacts = data;
     } else {
-      throw new Error("Invalid response from contacts endpoint");
+      throw new Error("Invalid response format from contacts endpoint");
     }
+
+    // Transform the contacts
+    let transformedContacts = contacts.map((contact) => ({
+      userId: contact.user_id || contact.userId || Math.random().toString(36).substr(2, 9),
+      firstName: contact.first_name || contact.firstName || "",
+      lastName: contact.last_name || contact.lastName || "",
+      middleName: contact.middle_name || contact.middleName || "",
+      autoAddress: contact.auto_address || contact.autoAddress || contact.email || "",
+      description: contact.description || "",
+      sendingFee: contact.sending_fee || contact.sendingFee || 0,
+      beaconId: contact.beacon_id || contact.beaconId || "",
+      fullName: `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() || contact.name || "Unknown Contact",
+    }));
+
+    // If we have a search query, filter the results client-side
+    if (query && query.trim() !== "") {
+      const searchTerm = query.trim().toLowerCase();
+      transformedContacts = transformedContacts.filter((contact) =>
+        contact.fullName.toLowerCase().includes(searchTerm) ||
+        contact.autoAddress.toLowerCase().includes(searchTerm) ||
+        (contact.firstName && contact.firstName.toLowerCase().includes(searchTerm)) ||
+        (contact.lastName && contact.lastName.toLowerCase().includes(searchTerm)) ||
+        (contact.description && contact.description.toLowerCase().includes(searchTerm))
+      );
+    }
+
+    return {
+      success: true,
+      data: {
+        contacts: transformedContacts,
+        total: transformedContacts.length,
+      },
+    };
   } catch (error) {
     console.error("Get contacts failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to fetch contacts.`;
+    const errorMessage = `Failed to fetch contacts: ${error.message}`;
     return { success: false, error: errorMessage };
   }
 };

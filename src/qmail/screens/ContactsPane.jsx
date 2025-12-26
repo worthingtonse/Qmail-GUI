@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { UserPlus, Search, Trash2, RefreshCw } from "lucide-react";
-import "./QMailDashboard.css";
+import { UserPlus, Search, Trash2, RefreshCw, Users, TrendingUp } from "lucide-react";
+import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
 import { getPopularContacts, getContacts } from "../../api/qmailApiServices";
 
@@ -10,17 +10,37 @@ const ContactsPane = () => {
   const [isAddContactOpen, setIsAddContactOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
+  const [isSearching, setIsSearching] = useState(false);
+  const [currentMode, setCurrentMode] = useState("contacts"); // "contacts" or "popular"
 
+  // Load regular contacts on component mount
   useEffect(() => {
     loadContacts();
-  }, [currentPage, searchTerm]); // Reload when page or search changes
+  }, []);
+
+  // Handle search with debouncing
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      setIsSearching(!!searchTerm.trim());
+      if (searchTerm.trim()) {
+        setCurrentMode("search");
+        loadContacts();
+      } else if (currentMode === "search") {
+        // If we were searching and now cleared, go back to regular contacts
+        setCurrentMode("contacts");
+        loadContacts();
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(debounceTimer);
+  }, [searchTerm]);
 
   const loadContacts = async () => {
-    setLoading(true);
-    setError(null);
-    const result = await getContacts(currentPage, 50, searchTerm); // UPDATED
+  setLoading(true);
+  setError(null);
+  
+  try {
+    const result = await getContacts(searchTerm.trim());
     if (result.success) {
       const transformedContacts = result.data.contacts.map((contact) => ({
         id: contact.userId,
@@ -30,39 +50,49 @@ const ContactsPane = () => {
         description: contact.description,
       }));
       setContacts(transformedContacts);
-      setTotalPages(result.data.pagination.totalPages); // ADD THIS
     } else {
       console.error("Failed to load contacts:", result.error);
-      setError(result.error);
+      setError(`Failed to load contacts: ${result.error}`);
+      setContacts([]);
     }
-    setLoading(false);
-  };
-
-  // Load popular contacts on component mount
-  useEffect(() => {
-    loadPopularContacts();
-  }, []);
+  } catch (err) {
+    console.error("Error in loadContacts:", err);
+    setError(`Network error: ${err.message}. Is the QMail server running?`);
+    setContacts([]);
+  }
+  
+  setLoading(false);
+};
 
   const loadPopularContacts = async () => {
     setLoading(true);
     setError(null);
-    const result = await getPopularContacts(20);
-    if (result.success) {
-      // Transform API data to match your contact structure
-      const transformedContacts = result.data.contacts.map((contact) => ({
-        id: contact.userId,
-        name: contact.fullName,
-        email: contact.autoAddress,
-        status: determineStatus(contact.popularity), // Map popularity to status badge
-        description: contact.description,
-        popularity: contact.popularity,
-        contactCount: contact.contactCount,
-      }));
-      setContacts(transformedContacts);
-    } else {
-      console.error("Failed to load contacts:", result.error);
-      setError(result.error);
+    setCurrentMode("popular");
+    
+    try {
+      const result = await getPopularContacts(50);
+      if (result.success) {
+        const transformedContacts = result.data.contacts.map((contact) => ({
+          id: contact.userId,
+          name: contact.fullName,
+          email: contact.autoAddress,
+          status: determineStatus(contact.popularity),
+          description: contact.description,
+          popularity: contact.popularity,
+          contactCount: contact.contactCount,
+        }));
+        setContacts(transformedContacts);
+      } else {
+        console.error("Failed to load popular contacts:", result.error);
+        setError(result.error);
+        setContacts([]);
+      }
+    } catch (err) {
+      console.error("Error in loadPopularContacts:", err);
+      setError("Failed to load popular contacts");
+      setContacts([]);
     }
+    
     setLoading(false);
   };
 
@@ -97,11 +127,33 @@ const ContactsPane = () => {
     }
   };
 
-  const filteredContacts = contacts.filter(
-    (contact) =>
-      contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleRefresh = () => {
+    if (currentMode === "popular") {
+      loadPopularContacts();
+    } else {
+      loadContacts();
+    }
+  };
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+    setError(null); // Clear any previous errors when typing
+  };
+
+  const switchToPopularContacts = () => {
+    setSearchTerm("");
+    setIsSearching(false);
+    setError(null);
+    loadPopularContacts();
+  };
+
+  const switchToRegularContacts = () => {
+    setSearchTerm("");
+    setIsSearching(false);
+    setError(null);
+    setCurrentMode("contacts");
+    loadContacts();
+  };
 
   return (
     <>
@@ -115,15 +167,33 @@ const ContactsPane = () => {
           <h2>Contacts & DRD Search</h2>
           <div className="contacts-header-actions">
             <button
-              className="refresh-button secondary"
-              onClick={loadPopularContacts}
+              className="refresh-btn secondary"
+              onClick={handleRefresh}
               disabled={loading}
+              title="Refresh contacts"
             >
               <RefreshCw size={16} className={loading ? "spinning" : ""} />
             </button>
             <button
+              className={`contacts-btn ${currentMode === "contacts" ? "active" : "secondary"}`}
+              onClick={switchToRegularContacts}
+              disabled={loading}
+              title="View your contacts"
+            >
+             <Users size={16} /> 
+            </button>
+            <button
+              className={`popular-contacts-btn ${currentMode === "popular" ? "active" : "secondary"}`}
+              onClick={switchToPopularContacts}
+              disabled={loading}
+              title="View popular contacts from DRD" 
+            >
+              <TrendingUp size={16} />
+            </button>
+            <button
               className="add-contact-btn primary"
               onClick={() => setIsAddContactOpen(true)}
+              title="Add new contact"
             >
               <UserPlus size={16} /> Add Contact
             </button>
@@ -137,7 +207,7 @@ const ContactsPane = () => {
             placeholder="Search contacts or DRD alias..."
             className="search-input"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={handleSearchChange}
           />
         </div>
 
@@ -146,7 +216,7 @@ const ContactsPane = () => {
             <p>Error loading contacts: {error}</p>
             <button
               className="retry-button secondary"
-              onClick={loadPopularContacts}
+              onClick={handleRefresh}
             >
               Retry
             </button>
@@ -157,81 +227,101 @@ const ContactsPane = () => {
           {loading ? (
             <div className="loading-state">
               <RefreshCw size={32} className="spinning" />
-              <p>Loading contacts...</p>
+              <p>
+                {searchTerm.trim() 
+                  ? `Searching for "${searchTerm}"...` 
+                  : currentMode === "popular" 
+                    ? "Loading popular contacts..." 
+                    : "Loading contacts..."
+                }
+              </p>
             </div>
-          ) : filteredContacts.length === 0 ? (
+          ) : contacts.length === 0 ? (
             <div className="empty-state">
               <UserPlus size={48} />
-              <p>{searchTerm ? "No contacts found" : "No contacts yet"}</p>
-              <button
-                className="add-contact-btn primary"
-                onClick={() => setIsAddContactOpen(true)}
-              >
-                <UserPlus size={16} /> Add Your First Contact
-              </button>
+              <p>
+                {searchTerm.trim() 
+                  ? `No contacts found for "${searchTerm}". Try a different search term or check the DRD network.` 
+                  : currentMode === "popular"
+                    ? "No popular contacts available at the moment."
+                    : "No contacts in your list yet."
+                }
+              </p>
+              {!searchTerm.trim() && currentMode !== "popular" && (
+                <button
+                  className="add-contact-btn primary"
+                  onClick={() => setIsAddContactOpen(true)}
+                >
+                  <UserPlus size={16} /> Add Your First Contact
+                </button>
+              )}
             </div>
           ) : (
-            filteredContacts.map((contact) => (
-              <div key={contact.id} className="contact-item">
-                <div className={`contact-avatar status-${contact.status}`}>
-                  <span>{contact.name.charAt(0).toUpperCase()}</span>
+            <div className="contacts-results">
+              {searchTerm.trim() && (
+                <div className="search-results-info">
+                   Found {contacts.length} contact{contacts.length !== 1 ? 's' : ''} for "{searchTerm}"
                 </div>
-                <div className="contact-details">
-                  <div className="contact-name">{contact.name}</div>
-                  <div className="contact-email">{contact.email}</div>
-                  {contact.description && (
-                    <div className="contact-description">
-                      {contact.description}
-                    </div>
-                  )}
-                  {contact.popularity > 0 && (
-                    <div className="contact-stats">
-                      Popularity: {contact.popularity} | Contacts:{" "}
-                      {contact.contactCount}
-                    </div>
-                  )}
+              )}
+              {!searchTerm.trim() && currentMode === "popular" && (
+                <div className="mode-info">
+                   Showing {contacts.length} popular contacts from the DRD network
                 </div>
-                <button
-                  className="contact-action-btn danger"
-                  onClick={() => handleDeleteContact(contact.id)}
-                  title="Delete contact"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            ))
+              )}
+              {contacts.map((contact) => (
+                <div key={contact.id} className="contact-item">
+                  <div className={`contact-avatar status-${contact.status}`}>
+                    <span>{contact.name.charAt(0).toUpperCase()}</span>
+                  </div>
+                  <div className="contact-details">
+                    <div className="contact-name">{contact.name}</div>
+                    <div className="contact-email">{contact.email}</div>
+                    {contact.description && (
+                      <div className="contact-description">
+                        {contact.description}
+                      </div>
+                    )}
+                    {contact.popularity > 0 && (
+                      <div className="contact-stats">
+                        Popularity: {contact.popularity} | Contacts:{" "}
+                        {contact.contactCount}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="contact-action-btn danger"
+                    onClick={() => handleDeleteContact(contact.id)}
+                    title="Delete contact"
+                  >
+                    <Trash2 size={16} color="white" />
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
+
+        {/* Show info text based on current mode */}
         <div className="drd-mock-info">
-          <p>
-            💡 Contact not listed? Search the Distributed Resource Directory
-            (DRD) by their alias above.
-          </p>
-          <p>Popular contacts are loaded from the DRD network automatically.</p>
+          {searchTerm.trim() ? (
+            <p>
+               Searching the Distributed Resource Directory (DRD) for "{searchTerm}".
+            </p>
+          ) : currentMode === "popular" ? (
+            <p>
+               Showing trending contacts from the DRD network. Use search to find specific contacts.
+            </p>
+          ) : (
+            <>
+              <p>
+                 Contact not listed? Search the Distributed Resource Directory
+                (DRD) by their alias above.
+              </p>
+              <p>Use the "Popular" button to see trending contacts from the DRD network.</p>
+            </>
+          )}
         </div>
       </div>
-
-      {totalPages > 1 && (
-        <div className="pagination-controls">
-          <button
-            className="secondary"
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-          >
-            Previous
-          </button>
-          <span>
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            className="secondary"
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-          >
-            Next
-          </button>
-        </div>
-      )}
     </>
   );
 };

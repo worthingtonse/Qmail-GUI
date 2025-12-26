@@ -30,7 +30,10 @@ import {
   getMailFolders,
   getEmailById,
 } from "../../api/qmailApiServices";
-import "./QMailDashboard.css";
+
+import "./NavigationPane.css";
+import "./EmailListPane.css";
+import "./ReadingPane.css"; 
 
 // Download progress statuses
 const downloadStatuses = [

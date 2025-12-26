@@ -1,0 +1,546 @@
+@import "./QMailDashboard.css";
+/* ==================== CONTACTS PANE STYLES ==================== */
+
+.contacts-pane {
+  flex: 1;
+  background-color: var(--primary-bg);
+  padding: var(--space-2xl);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ==================== CONTACTS HEADER ==================== */
+.contacts-header {
+display: flex;
+  flex-direction: column;  /* Stack header and buttons vertically */
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.contacts-header-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.contacts-header h2 {
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+}
+
+.contacts-header-actions {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+  flex-wrap: nowrap;
+  width: 100%;
+  justify-content: flex-start;  /* Align to start to prevent overflow */
+}
+
+
+.contacts-btn,
+.popular-contacts-btn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  min-width: 80px;  /* Set minimum width */
+}
+
+.add-contact-btn {
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  margin-left: auto;  /* Push to the right */
+}
+
+.refresh-btn {
+  padding: var(--space-sm);
+  min-width: 32px;
+  height: 32px;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+/* Tooltip styles */
+.contacts-btn::after,
+.popular-contacts-btn::after,
+.add-contact-btn::after,
+.refresh-btn::after {
+  content: attr(title);
+  position: absolute;
+  bottom: -32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--primary-bg);
+  color: var(--text-primary);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-base);
+  z-index: 1000;
+  border: 1px solid var(--border-medium);
+  box-shadow: var(--shadow-md);
+}
+
+.contacts-btn:hover::after,
+.popular-contacts-btn:hover::after,
+.add-contact-btn:hover::after,
+.refresh-btn:hover::after {
+  opacity: 1;
+}
+
+
+.contacts-btn.active,
+.popular-contacts-btn.active {
+  background-color: var(--accent-primary);
+  color: white;
+}
+
+.contacts-btn:hover:not(.active):not(:disabled),
+.popular-contacts-btn:hover:not(.active):not(:disabled) {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
+}
+
+
+.refresh-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ==================== SEARCH BAR ==================== */
+.search-bar-container {
+  position: relative;
+  margin-bottom: var(--space-lg);
+}
+
+.search-input {
+  width: 100%;
+  padding: var(--space-md) var(--space-md) var(--space-md) 40px;  /* Fixed left padding */
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);  /* Smaller font */
+  transition: all var(--transition-base);
+}
+
+.search-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-icon {
+position: absolute;
+  left: var(--space-lg);  /* Fixed position */
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  width: 16px;  /* Smaller icon */
+  height: 16px;
+  z-index: 1;
+  pointer-events: none;  /* Prevent interference */
+}
+
+/* ==================== CONTACT LIST ==================== */
+.contact-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.contacts-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.search-results-info,
+.mode-info {
+  background-color: var(--card-bg);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--border-medium);
+  margin-bottom: var(--space-lg);
+}
+
+.search-results-info {
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--accent-primary);
+}
+
+.mode-info {
+  background-color: rgba(251, 146, 60, 0.1);
+  border-color: rgba(251, 146, 60, 0.3);
+  color: var(--accent-warning);
+}
+
+/* ==================== CONTACT ITEM ==================== */
+.contact-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-base);
+  cursor: pointer;
+}
+
+.contact-item:hover {
+  background-color: var(--card-hover);
+  border-color: var(--border-strong);
+  /* transform: translateY(-1px); */
+  box-shadow: var(--shadow-sm);
+}
+
+/* ==================== CONTACT AVATAR ==================== */
+.contact-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: var(--surface-bg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: var(--font-size-lg);
+  border: 3px solid transparent;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Status indicators */
+.contact-avatar.status-gold {
+  border-color: var(--tier-gold);
+  background: linear-gradient(135deg, var(--tier-gold), #f59e0b);
+  color: var(--primary-bg);
+}
+
+.contact-avatar.status-silver {
+  border-color: var(--tier-silver);
+  background: linear-gradient(135deg, var(--tier-silver), #9ca3af);
+  color: var(--primary-bg);
+}
+
+.contact-avatar.status-bronze {
+  border-color: var(--tier-bronze);
+  background: linear-gradient(135deg, var(--tier-bronze), #92400e);
+  color: white;
+}
+
+.contact-avatar.status-none {
+  border-color: var(--border-medium);
+}
+
+/* ==================== CONTACT DETAILS ==================== */
+.contact-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-name {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-email {
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  margin-bottom: var(--space-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-description {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-stats {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  display: flex;
+  gap: var(--space-md);
+}
+
+/* ==================== CONTACT ACTION BUTTON ==================== */
+.contact-action-btn {
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  flex-shrink: 0;
+  min-width: 32px;  /* Ensure minimum clickable area */
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contact-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.contact-action-btn.danger {
+  color: var(--accent-danger);
+  background-color: transparent;
+}
+
+.contact-action-btn.danger:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--accent-danger);
+}
+
+/* ==================== LOADING AND EMPTY STATES ==================== */
+.contact-list .loading-state {
+  height: 100%;
+  min-height: 400px;
+  justify-content: center;
+}
+
+.contact-list .loading-state svg {
+  width: 48px;
+  height: 48px;
+  color: var(--accent-primary);
+  margin-bottom: var(--space-lg);
+}
+
+.contact-list .loading-state p {
+  color: var(--text-secondary);
+  font-size: var(--font-size-base);
+}
+
+.contact-list .empty-state {
+  height: 100%;
+  min-height: 400px;
+  justify-content: center;
+}
+
+.contact-list .empty-state svg {
+  width: 64px;
+  height: 64px;
+  color: var(--text-muted);
+  margin-bottom: var(--space-xl);
+}
+
+.contact-list .empty-state h3 {
+  font-size: var(--font-size-xl);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-lg);
+}
+
+.contact-list .empty-state p {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  max-width: 400px;
+  text-align: center;
+  margin-bottom: var(--space-xl);
+}
+
+/* ==================== ERROR MESSAGE ==================== */
+.error-message {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--accent-danger);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  margin: var(--space-lg) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  color: var(--accent-danger);
+}
+
+.retry-button {
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+}
+
+/* ==================== DRD INFO ==================== */
+.drd-mock-info {
+  margin-top: var(--space-xl);
+  padding: var(--space-lg);
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  border-left: 4px solid var(--accent-secondary);
+}
+
+.drd-mock-info p {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  margin: var(--space-sm) 0;
+}
+
+.drd-mock-info p:last-child {
+  margin-bottom: 0;
+}
+
+/* ==================== RESPONSIVE DESIGN ==================== */
+@media (max-width: 1024px) {
+  .contacts-pane {
+    padding: var(--space-xl);
+  }
+
+  .contacts-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-md);
+  }
+
+  .contacts-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  .contact-item {
+    padding: var(--space-md);
+    gap: var(--space-sm);
+  }
+
+  .contact-avatar {
+    width: 40px;
+    height: 40px;
+    font-size: var(--font-size-base);
+  }
+}
+
+@media (max-width: 768px) {
+  .contacts-pane {
+    padding: var(--space-lg);
+  }
+
+  .contacts-header h2 {
+    font-size: var(--font-size-xl);
+  }
+
+  .contacts-header-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .contacts-btn,
+  .popular-contacts-btn,
+  .add-contact-btn,
+  .refresh-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .contact-item {
+    flex-direction: column;
+    text-align: center;
+    gap: var(--space-md);
+  }
+
+  .contact-details {
+    width: 100%;
+  }
+
+  .contact-name,
+  .contact-email,
+  .contact-description {
+    white-space: normal;
+    text-overflow: clip;
+    overflow: visible;
+  }
+
+  .contact-stats {
+    justify-content: center;
+  }
+
+  .contact-action-btn {
+    align-self: flex-end;
+  }
+
+  .search-bar-container {
+    margin-bottom: var(--space-lg);
+  }
+
+  .drd-mock-info {
+    margin-top: var(--space-lg);
+    padding: var(--space-md);
+  }
+}
+
+/* ==================== ACCESSIBILITY ==================== */
+@media (prefers-reduced-motion: reduce) {
+  .contact-item {
+    transition: none;
+    transform: none;
+  }
+
+  .contact-action-btn {
+    transition: none;
+  }
+}
+
+/* Focus styles for keyboard navigation */
+.contact-item:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.contact-action-btn:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.contacts-btn:focus,
+.popular-contacts-btn:focus,
+.add-contact-btn:focus,
+.refresh-btn:focus {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}

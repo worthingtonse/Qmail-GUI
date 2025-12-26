@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { X, UserPlus } from "lucide-react";
-import "./QMailDashboard.css";
-
+import "./AddContactModal.css";
 const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
