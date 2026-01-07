@@ -30,7 +30,7 @@ import {
 } from "../../api/qmailApiServices";
 import "./AccountPane.css";
 
-const AccountPane = () => {
+const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
   // State management
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -428,9 +428,27 @@ const AccountPane = () => {
           
           <div className="balance-grid">
             <div className="balance-card total">
-              <div className="balance-label">Total Servers</div>
-              <div className="balance-value">{serverStats.total}</div>
-              <div className="balance-description">RAIDA network nodes</div>
+              <div className="balance-label">Total Coins</div>
+              <div className="balance-value">{walletBalance?.totalCoins || 0}</div>
+              <div className="balance-description">All coins in wallet</div>
+            </div>
+            
+            <div className="balance-card verified">
+              <div className="balance-label">Bank (Ready)</div>
+              <div className="balance-value">{walletBalance?.folders.bank.coins || 0}</div>
+              <div className="balance-description">{walletBalance?.folders.bank.value.toFixed(1) || 0} CC value</div>
+            </div>
+            
+            <div className="balance-card counterfeit">
+              <div className="balance-label">Fracked (Needs Repair)</div>
+              <div className="balance-value">{walletBalance?.folders.fracked.coins || 0}</div>
+              <div className="balance-description">{walletBalance?.folders.fracked.value.toFixed(1) || 0} CC value</div>
+            </div>
+            
+            <div className="balance-card suspect">
+              <div className="balance-label">Limbo (Processing)</div>
+              <div className="balance-value">{walletBalance?.folders.limbo.coins || 0}</div>
+              <div className="balance-description">{walletBalance?.folders.limbo.value.toFixed(1) || 0} CC value</div>
             </div>
             
             <div className="balance-card verified">

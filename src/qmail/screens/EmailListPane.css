@@ -393,3 +393,24 @@
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* ==================== PAGINATION CONTROLS ==================== */
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--secondary-bg);
+}
+
+.pagination-controls button {
+  min-width: 100px;
+}
+
+.page-info {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}

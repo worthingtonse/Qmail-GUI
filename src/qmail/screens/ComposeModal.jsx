@@ -8,7 +8,7 @@ import {
   getContacts,
 } from "../../api/qmailApiServices";
 
-const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
+const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -191,6 +191,13 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo }) => {
   };
 
   const handleSend = async () => {
+
+    // Check wallet balance first (passed as prop)
+    if (walletBalance && walletBalance.folders.bank.value < 1) {
+      setError("Insufficient balance. You need at least 1 CC to send an email.");
+      return;
+    }
+
     // Validate required fields
     if (!to || to.trim() === "") {
       setError("Please provide at least one recipient.");

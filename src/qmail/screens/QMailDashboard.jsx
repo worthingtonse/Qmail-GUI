@@ -8,8 +8,6 @@ import {
   Search,
   Star,
   Tag,
-  UserCheck,
-  UserX,
   ShieldAlert,
   Users,
   Reply,
@@ -17,6 +15,7 @@ import {
   RefreshCw,
   AlertCircle,
   Paperclip,
+  Coins
 } from "lucide-react";
 import ComposeModal from "./ComposeModal";
 import ContactsPane from "./ContactsPane";
@@ -30,7 +29,8 @@ import {
   getMailFolders,
   getEmailById,
   getDrafts,
-  getEmailAttachments
+  getEmailAttachments,
+  getWalletBalance
 } from "../../api/qmailApiServices";
 
 import "./NavigationPane.css";
@@ -121,9 +121,20 @@ const NavigationPane = ({
   mailCounts,
   onRefresh,
   isRefreshing,
-  draftsCount
+  draftsCount,
+  serverHealth,
+  walletBalance
 }) => (
-  <aside className="navigation-pane">
+ <aside className="navigation-pane">
+    {/* Wallet Balance Display */}
+    {walletBalance && (
+      <div className="wallet-balance-header">
+        <div className="balance-info">
+          <Coins size={16} />
+          <span className="balance-value">{walletBalance.totalValue.toFixed(1)} CC</span>
+        </div>
+      </div>
+    )}
     <div className="compose-button-container">
       <button className="compose-button primary" onClick={onComposeClick}>
         <FileEdit size={18} />
@@ -247,9 +258,18 @@ const NavigationPane = ({
         <RefreshCw size={16} className={isRefreshing ? "spinning" : ""} />
         <span>{isRefreshing ? "Refreshing..." : "Refresh"}</span>
       </button>
+      
+      {/* Connection Status Indicator */}
+      <div className="connection-status">
+        <div className={`status-dot ${serverHealth?.status === "healthy" ? "status-online" : "status-offline"}`}></div>
+        <span className="status-text">
+          {serverHealth?.status === "healthy" ? "Connected" : "Offline"}
+        </span>
+      </div>
     </div>
   </aside>
 );
+
 
 // Email List Pane
 const EmailListPane = ({
@@ -258,7 +278,10 @@ const EmailListPane = ({
   selectedEmail,
   onSearch,
   isLoading,
-  currentFolder
+  currentFolder,
+  currentPage,        
+  totalCount,         
+  onPageChange 
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -327,6 +350,29 @@ const EmailListPane = ({
             />
           ))
         )}
+
+        {/* Pagination Controls */}
+      {totalCount > 50 && (
+        <div className="pagination-controls">
+          <button
+            className="secondary"
+            disabled={currentPage === 0}
+            onClick={() => onPageChange(currentPage - 1)}
+          >
+            Previous
+          </button>
+          <span className="page-info">
+            Page {currentPage + 1} of {Math.ceil(totalCount / 50)}
+          </span>
+          <button
+            className="secondary"
+            disabled={(currentPage + 1) * 50 >= totalCount}
+            onClick={() => onPageChange(currentPage + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
       </div>
     </section>
   );
@@ -518,12 +564,17 @@ const QMailDashboard = () => {
   const [emails, setEmails] = useState([]);
   const [drafts, setDrafts] = useState([]);
   const [selectedEmail, setSelectedEmail] = useState(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalEmailCount, setTotalEmailCount] = useState(0);
+  const EMAILS_PER_PAGE = 50;
   const [mailCounts, setMailCounts] = useState({
     inbox: { unread: 0, total: 0 },
     sent: { unread: 0, total: 0 },
     drafts: { unread: 0, total: 0 },
     trash: { unread: 0, total: 0 }
   });
+  const [previousMailCounts, setPreviousMailCounts] = useState({});
+  const [walletBalance, setWalletBalance] = useState(null);
   const [folders, setFolders] = useState([]);
   const [messageCount, setMessageCount] = useState(0);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -540,16 +591,37 @@ const QMailDashboard = () => {
   });
 
   // Load initial data
-  useEffect(() => {
+useEffect(() => {
     loadInitialData();
-    
-    // Auto-refresh every 2 minutes
-    const interval = setInterval(() => {
-      checkForNewMail();
+
+    // Periodic mail count polling (60 seconds)
+    const mailCountInterval = setInterval(() => {
+      loadMailCounts();
+    }, 60000);
+
+    // Periodic health check heartbeat (30 seconds)
+    const healthInterval = setInterval(() => {
+      loadServerHealth();
+    }, 30000);
+
+    // Periodic wallet balance check (2 minutes)
+    const walletInterval = setInterval(() => {
+      loadWalletBalance();
     }, 120000);
 
+    // Check health and balance when window regains focus
+    const handleFocus = () => {
+      console.log("Window regained focus - checking health and balance");
+      loadServerHealth();
+      loadWalletBalance();
+    };
+    window.addEventListener('focus', handleFocus);
+
     return () => {
-      clearInterval(interval);
+      clearInterval(mailCountInterval);
+      clearInterval(healthInterval);
+      clearInterval(walletInterval);
+      window.removeEventListener('focus', handleFocus);
       if (searchDebounceTimer) {
         clearTimeout(searchDebounceTimer);
       }
@@ -564,11 +636,14 @@ const QMailDashboard = () => {
     }
   }, [notification]);
 
-  const loadInitialData = async () => {
+ const loadInitialData = async () => {
     setLoading(true);
     try {
-      // Load health status first
-      await loadServerHealth();
+      // Load health status and wallet balance first
+      await Promise.all([
+        loadServerHealth(),
+        loadWalletBalance()
+      ]);
       
       // Load folders and mail counts
       await Promise.all([
@@ -595,14 +670,51 @@ const QMailDashboard = () => {
       const result = await getHealthStatus();
       if (result.success) {
         setServerHealth(result.data);
-        console.log("Server health loaded:", result.data);
+        console.log("Server health:", result.data.status, "- Version:", result.data.version);
       } else {
         console.error("Failed to load server health:", result.error);
-        setServerHealth({ status: "error", message: result.error });
+        setServerHealth({ 
+          status: "disconnected", 
+          message: result.error,
+          service: "QMail Client Core",
+          version: "unknown"
+        });
       }
     } catch (error) {
       console.error("Health check error:", error);
-      setServerHealth({ status: "error", message: "Health check failed" });
+      setServerHealth({ 
+        status: "disconnected", 
+        message: "Backend not responding",
+        service: "QMail Client Core",
+        version: "unknown"
+      });
+    }
+  };
+
+  const loadWalletBalance = async () => {
+    try {
+      const result = await getWalletBalance();
+      if (result.success) {
+        setWalletBalance(result.data);
+        console.log("Wallet balance loaded:", result.data.totalValue, "CC");
+        
+        // Check for warnings (missing wallet folders, etc.)
+        if (result.data.warnings && result.data.warnings.length > 0) {
+          console.warn("Wallet warnings:", result.data.warnings);
+          setNotification("Wallet needs attention - check Account page");
+        }
+        
+        // Alert if balance is zero
+        if (result.data.totalCoins === 0) {
+          console.warn("No coins in wallet");
+        }
+      } else {
+        console.error("Failed to load wallet balance:", result.error);
+        setWalletBalance(null);
+      }
+    } catch (error) {
+      console.error("Wallet balance error:", error);
+      setWalletBalance(null);
     }
   };
 
@@ -668,8 +780,34 @@ const QMailDashboard = () => {
   const loadMailCounts = async () => {
     const result = await getMailCount();
     if (result.success) {
-      setMailCounts(result.data.counts);
-      console.log("Mail counts loaded:", result.data.counts);
+      const newCounts = result.data.counts;
+      const summary = result.data.summary;
+      
+      // Check if inbox count increased (new mail arrived)
+      if (previousMailCounts.inbox && 
+          newCounts.inbox.total > previousMailCounts.inbox.total) {
+        const newMailCount = newCounts.inbox.total - previousMailCounts.inbox.total;
+        setNotification(`${newMailCount} new email${newMailCount > 1 ? 's' : ''} arrived!`);
+        
+        // Auto-refresh inbox if user is viewing it
+        if (currentFolder === 'inbox') {
+          console.log("New mail detected - auto-refreshing inbox");
+          loadEmails('inbox');
+        }
+      }
+      
+      // Update browser tab title with unread count
+      if (summary.total_unread > 0) {
+        document.title = `(${summary.total_unread}) QMail - ${currentFolder}`;
+      } else {
+        document.title = `QMail - ${currentFolder}`;
+      }
+      
+      // Save current counts for next comparison
+      setPreviousMailCounts(newCounts);
+      setMailCounts(newCounts);
+      
+      console.log("Mail counts loaded:", newCounts, "| Unread:", summary.total_unread);
     } else {
       console.error("Failed to load mail counts:", result.error);
     }
@@ -707,28 +845,26 @@ const QMailDashboard = () => {
         return;
       }
 
-      // Handle regular email folders
-      const result = await getMailList(folder, 50, 0);
+     // Handle regular email folders
+      const offset = currentPage * EMAILS_PER_PAGE;
+      const result = await getMailList(folder, EMAILS_PER_PAGE, offset);
       if (result.success) {
-        // Transform API data to match your email structure
+        setTotalEmailCount(result.data.totalCount);
+        // Transform API data to match UI structure
         const transformedEmails = result.data.emails.map((email) => ({
-          id: email.id || Date.now() + Math.random(),
+          id: email.id,
           sender: email.sender || "Unknown",
-          senderEmail: email.senderEmail || email.from || "",
+          senderEmail: email.senderEmail || "",
           subject: email.subject || "No Subject",
-          body: email.body || email.content || "",
-          preview:
-            email.preview ||
-            email.snippet ||
-            (email.body ? email.body.substring(0, 100) : ""),
-          timestamp:
-            email.timestamp || email.date || new Date().toLocaleTimeString(),
-          isRead: email.isRead || email.read || false,
-          isDownloaded: email.isDownloaded || false,
+          body: email.body || "",
+          preview: email.preview || email.subject || "",
+          timestamp: email.receivedTimestamp || email.timestamp,
+          isRead: email.isRead || false,
+          isDownloaded: false, // Will be set when user clicks download
           tags: email.tags || [],
-          starred: email.starred || false,
-          annoyanceReported: email.annoyanceReported || false,
-          senderStatus: email.senderStatus || "none",
+          starred: email.isStarred || false,
+          annoyanceReported: false,
+          senderStatus: "none", // Will be determined later from contacts
         }));
         setEmails(transformedEmails);
         if (transformedEmails.length > 0 && !selectedEmail) {
@@ -751,7 +887,16 @@ const QMailDashboard = () => {
   const handleFolderChange = (folder) => {
     setCurrentFolder(folder);
     setActiveView(folder);
-    setSelectedEmail(null); // Clear selection when changing folders
+    setSelectedEmail(null);
+    
+    // Update browser tab title
+    const unreadCount = mailCounts[folder]?.unread || 0;
+    if (unreadCount > 0) {
+      document.title = `(${unreadCount}) QMail - ${folder}`;
+    } else {
+      document.title = `QMail - ${folder}`;
+    }
+    
     loadEmails(folder);
   };
 
@@ -889,6 +1034,10 @@ const QMailDashboard = () => {
     setIsComposeOpen(false);
     setReplyToEmail(null);
     setNotification("Email Sent!");
+    
+    // Refresh wallet balance after sending (coins were spent)
+    loadWalletBalance();
+    
     // Refresh drafts in case a draft was sent
     loadDrafts();
   };
@@ -896,6 +1045,11 @@ const QMailDashboard = () => {
   const handleAccountUpdate = (newAccountDetails) => {
     setUserAccount((prev) => ({ ...prev, ...newAccountDetails }));
     setNotification(`Account upgraded to ${newAccountDetails.status}!`);
+  };
+
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    loadEmails(currentFolder);
   };
 
   return (
@@ -914,6 +1068,7 @@ const QMailDashboard = () => {
         onClose={() => setIsComposeOpen(false)}
         onSend={handleSendEmail}
         replyTo={replyToEmail}
+         walletBalance={walletBalance}
       />
 
       <NavigationPane
@@ -924,6 +1079,8 @@ const QMailDashboard = () => {
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         draftsCount={drafts.length}
+        serverHealth={serverHealth}
+         walletBalance={walletBalance} 
       />
 
       {(activeView === "inbox" || activeView === "sent" || activeView === "drafts" || activeView === "trash") && (
@@ -935,6 +1092,9 @@ const QMailDashboard = () => {
             onSearch={handleSearch}
             isLoading={loading}
             currentFolder={currentFolder}
+            currentPage={currentPage}
+            totalCount={totalEmailCount}
+            onPageChange={handlePageChange}
           />
           <ReadingPane
             email={selectedEmail}
@@ -950,6 +1110,7 @@ const QMailDashboard = () => {
         <AccountPane
           userAccount={userAccount}
           onAccountUpdate={handleAccountUpdate}
+          walletBalance={walletBalance} 
         />
       )}
     </div>

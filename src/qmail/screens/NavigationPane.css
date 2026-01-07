@@ -12,9 +12,43 @@
   overflow-y: auto;
 }
 
+/* ==================== WALLET BALANCE HEADER ==================== */
+.wallet-balance-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(135deg, #aaddcc, #059669);
+  border-radius: var(--radius-md);
+  margin: 0 var(--space-lg) var(--space-md);
+}
+
+.balance-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--primary-bg);
+}
+
+.balance-value {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--primary-bg);
+}
+
+.low-balance-warning {
+  color: var(--accent-danger);
+  background-color: rgba(239, 68, 68, 0.1);
+  padding: var(--space-xs);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+}
+
+
 /* ==================== COMPOSE BUTTON ==================== */
 .compose-button-container {
- padding: 0 var(--space-lg) var(--space-lg);
+ padding: 0 var(--space-lg) var(--space-md);
 }
 
 .compose-button {
@@ -175,7 +209,7 @@ margin-top: var(--space-lg);  /* Reduced margin */
 
 /* ==================== REFRESH SECTION ==================== */
 .refresh-container {
- padding: var(--space-lg);
+ padding: var(--space-md);
   margin-top: auto;
   border-top: 1px solid var(--border-subtle);
 }
@@ -210,6 +244,39 @@ margin-top: var(--space-lg);  /* Reduced margin */
   height: 14px;
 }
 
+/* ==================== CONNECTION STATUS INDICATOR ==================== */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.status-online {
+  background-color: var(--status-online);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.status-dot.status-offline {
+  background-color: var(--status-offline);
+}
+
+.status-text {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+
 /* ==================== RESPONSIVE DESIGN ==================== */
 @media (max-width: 1024px) {
   .navigation-pane {
@@ -221,6 +288,11 @@ margin-top: var(--space-lg);  /* Reduced margin */
     overflow-x: auto;
     overflow-y: visible;
     padding: var(--space-lg);
+  }
+
+   .wallet-balance-header {
+    margin: 0 0 var(--space-lg);
+    border-radius: 0;
   }
 
   .compose-button-container {
@@ -261,6 +333,13 @@ margin-top: var(--space-lg);  /* Reduced margin */
   .refresh-button {
     min-width: 100px;
     white-space: nowrap;
+  }
+
+   .connection-status {
+    padding: 0;
+    margin-top: 0;
+    margin-left: var(--space-lg);
+    border-top: none;
   }
 }
 

@@ -115,11 +115,29 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
     console.log("Data received from /mail/list:", data);
 
     if (data && Array.isArray(data.emails)) {
+      // Transform backend response to match frontend expectations
+      const transformedEmails = data.emails.map((email) => ({
+        id: email.EmailID,
+        subject: email.Subject || "No Subject",
+        sender: "Unknown", // Backend doesn't provide sender in list view
+        senderEmail: "",
+        timestamp: email.ReceivedTimestamp || email.SentTimestamp,
+        sentTimestamp: email.SentTimestamp,
+        receivedTimestamp: email.ReceivedTimestamp,
+        isRead: email.is_read || false,
+        isStarred: email.is_starred || false,
+        isTrashed: email.is_trashed || false,
+        folder: email.folder || folder,
+        // Add preview as empty - will be filled when full email is loaded
+        preview: "",
+        body: ""
+      }));
+
       return {
         success: true,
         data: {
           folder: data.folder || folder,
-          emails: data.emails,
+          emails: transformedEmails,
           totalCount: data.total_count || 0,
           limit: data.limit || limit,
           offset: data.offset || offset,
@@ -186,6 +204,12 @@ export const getDrafts = async () => {
 
 /**
  * Pings the QMail server to check for new messages and beacon status.
+ * This endpoint performs an immediate RAIDA beacon check, bypassing the background monitor.
+ * Use cases:
+ * - On application startup to get current mail state
+ * - When user clicks "Refresh" button to force immediate check
+ * - To detect if Identity Coin needs healing (Status 200 Invalid AN)
+ * 
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 export const pingQMail = async () => {
@@ -194,22 +218,38 @@ export const pingQMail = async () => {
     const data = await handleResponse(response);
 
     console.log("Data received from /qmail/ping:", data);
-
-    if (data && data.status === "ok") {
-      return {
-        success: true,
-        data: {
-          status: data.status,
-          timestamp: data.timestamp,
-          beaconStatus: data.beacon_status,
-          hasMail: data.has_mail || false,
-          messageCount: data.message_count || 0,
-          messages: data.messages || [],
-        },
-      };
-    } else {
-      throw new Error("Invalid response from qmail ping endpoint");
+// Handle different status responses
+    if (data && data.status) {
+      // Handle error status (offline, etc.)
+      if (data.status === "error") {
+        return {
+          success: false,
+          error: data.message || "Server returned error status"
+        };
+      }
+      
+      // Handle ok and healing statuses
+      if (data.status === "ok" || data.status === "healing") {
+        return {
+          success: true,
+          data: {
+            status: data.status,
+            timestamp: data.timestamp,
+            beaconStatus: data.beacon_status,
+            hasMail: data.has_mail || false,
+            messageCount: data.message_count || 0,
+            messages: data.messages || [],
+            // Healing indicates Identity Coin is being repaired
+            isHealing: data.status === "healing",
+            healingMessage: data.status === "healing" 
+              ? "Repairing mailbox identity... please wait." 
+              : null
+          },
+        };
+      }
     }
+    
+    throw new Error("Invalid response from qmail ping endpoint");
   } catch (error) {
     console.error("QMail ping failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to ping QMail server.`;
@@ -485,27 +525,10 @@ export const getMailCount = async () => {
       return {
         success: true,
         data: {
-          counts: {
-            inbox: {
-              total: data.counts.inbox?.total || 0,
-              unread: data.counts.inbox?.unread || 0,
-            },
-            sent: {
-              total: data.counts.sent?.total || 0,
-              unread: data.counts.sent?.unread || 0,
-            },
-            drafts: {
-              total: data.counts.drafts?.total || 0,
-              unread: data.counts.drafts?.unread || 0,
-            },
-            trash: {
-              total: data.counts.trash?.total || 0,
-              unread: data.counts.trash?.unread || 0,
-            },
-          },
-          summary: {
-            totalEmails: data.summary?.total_emails || 0,
-            totalUnread: data.summary?.total_unread || 0,
+          counts: data.counts,
+          summary: data.summary || {
+            total_emails: 0,
+            total_unread: 0,
           },
         },
       };
@@ -751,6 +774,53 @@ export const getParityServer = async () => {
   } catch (error) {
     console.error("Get parity server failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch parity server configuration.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Gets the wallet balance and coin distribution across folders.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getWalletBalance = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/wallet/balance`);
+    const data = await handleResponse(response);
+
+    console.log("Data received from /wallet/balance:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          walletPath: data.wallet_path,
+          walletName: data.wallet_name,
+          totalCoins: data.total_coins,
+          totalValue: data.total_value,
+          folders: {
+            bank: {
+              coins: data.folders.bank_coins,
+              value: data.folders.bank_value
+            },
+            fracked: {
+              coins: data.folders.fracked_coins,
+              value: data.folders.fracked_value
+            },
+            limbo: {
+              coins: data.folders.limbo_coins,
+              value: data.folders.limbo_value
+            }
+          },
+          denominations: data.denominations,
+          warnings: data.warnings || []
+        },
+      };
+    } else {
+      throw new Error("Invalid response from wallet balance endpoint");
+    }
+  } catch (error) {
+    console.error("Get wallet balance failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to fetch wallet balance.`;
     return { success: false, error: errorMessage };
   }
 };
