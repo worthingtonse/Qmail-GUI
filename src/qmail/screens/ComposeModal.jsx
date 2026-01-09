@@ -1,14 +1,34 @@
 import React, { useState, useEffect } from "react";
-import { X, Send, Paperclip, Loader, Users, CheckCircle, AlertCircle } from "lucide-react";
+import {
+  X,
+  Send,
+  Paperclip,
+  Loader,
+  Users,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import "./ComposeModal.css";
 import {
   getDrafts,
   sendEmail,
   getTaskStatus,
   getContacts,
+  getServers,
+  getParityServer,
+  saveDraft,
+  updateDraft,
 } from "../../api/qmailApiServices";
 
-const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
+const ComposeModal = ({
+  isOpen,
+  onClose,
+  onSend,
+  replyTo,
+  editDraft,
+  walletBalance,
+  onDraftSaved 
+}) => {
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -20,6 +40,11 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
   const [sendProgress, setSendProgress] = useState("");
   const [drafts, setDrafts] = useState([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState(null);
+  const [canSend, setCanSend] = useState(true);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [currentDraftId, setCurrentDraftId] = useState(null);
 
   // Enhanced states for new functionality
   const [contacts, setContacts] = useState([]);
@@ -35,14 +60,30 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
     if (isOpen) {
       // Load contacts when modal opens
       loadContacts();
+      checkNetworkStatus();
 
-      if (replyTo) {
+      if (editDraft) {
+        // Load draft for editing
+        setCurrentDraftId(editDraft.id);
+        setTo(editDraft.to || "");
+        setCc(editDraft.cc || "");
+        setBcc(editDraft.bcc || "");
+        setSubject(editDraft.subject || "");
+        setSubsubject(editDraft.subsubject || "");
+        setBody(editDraft.body || "");
+        setStorageWeeks(editDraft.storageWeeks || 8);
+        setSendProgress("");
+        setShowAdvanced(false);
+        console.log("Editing draft:", editDraft);
+      } else if (replyTo) {
+        // Handle reply
         setTo(replyTo.senderEmail);
         setCc("");
         setBcc("");
         setSubject(`Re: ${replyTo.subject}`);
         setSubsubject("");
         setStorageWeeks(8);
+        setCurrentDraftId(null);
         // Only include the body if the email has been "downloaded"
         if (replyTo.isDownloaded) {
           setBody(
@@ -64,6 +105,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
         setStorageWeeks(8);
         setSendProgress("");
         setShowAdvanced(false);
+        setCurrentDraftId(null);
         // Load drafts when opening new compose
         loadDrafts();
       }
@@ -76,8 +118,10 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
       setIsPolling(false);
       setProgress(0);
       setError(null);
+      setIsSavingDraft(false);
+      setDraftSaved(false);
     }
-  }, [isOpen, replyTo]);
+  }, [isOpen, replyTo, editDraft]);
 
   const loadDrafts = async () => {
     const result = await getDrafts();
@@ -115,10 +159,10 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
       const result = await getTaskStatus(taskId);
       if (result.success) {
         const { status, progress: currentProgress, message } = result.data;
-        
+
         setProgress(currentProgress || 0);
         setSendProgress(message || "Processing...");
-        
+
         // Update sending status based on task status
         if (status === "completed") {
           setSendingStatus("completed");
@@ -156,6 +200,117 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
     }
   };
 
+  const checkNetworkStatus = async () => {
+    try {
+      const [serversResult, parityResult] = await Promise.all([
+        getServers(),
+        getParityServer(),
+      ]);
+
+      if (serversResult.success && parityResult.success) {
+        const availableCount = serversResult.data.availableServers;
+        const totalCount = serversResult.data.totalServers;
+        const parityConfigured = parityResult.data.configured;
+
+        // Need at least 6 servers (simple majority) and parity configured
+        const sufficientServers = availableCount >= 6;
+
+        setNetworkStatus({
+          availableServers: availableCount,
+          totalServers: totalCount,
+          parityConfigured: parityConfigured,
+          sufficient: sufficientServers,
+        });
+
+        setCanSend(sufficientServers);
+
+        if (!sufficientServers) {
+          setError(
+            `Insufficient RAIDA servers available (${availableCount}/${totalCount}). Need at least 6.`
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Network status check failed:", error);
+      setCanSend(false);
+      setError("Unable to verify network status");
+    }
+  };
+
+  // Auto-save draft functionality
+  // Smart draft save/update functionality
+ // Smart draft save/update functionality
+const handleSaveDraft = async () => {
+  // Only save if there's some content
+  if (!subject.trim() && !body.trim()) {
+    return;
+  }
+
+  setIsSavingDraft(true);
+  setError(null);
+
+  try {
+    const draftData = {
+      subject,
+      body,
+      to,
+      cc,
+      bcc,
+      subsubject
+    };
+
+    let result;
+    
+    // If we have a draft ID, update existing draft
+    if (currentDraftId) {
+      result = await updateDraft(currentDraftId, draftData);
+      console.log("Draft updated:", result.data);
+    } else {
+      // Otherwise create new draft
+      result = await saveDraft(draftData);
+      if (result.success && result.data.draftId) {
+        setCurrentDraftId(result.data.draftId);
+      }
+      console.log("New draft saved:", result.data);
+    }
+    
+    if (result.success) {
+      setDraftSaved(true);
+      
+      // Clear the saved indicator after 2 seconds
+      setTimeout(() => setDraftSaved(false), 2000);
+      
+      // Reload drafts list in modal
+      await loadDrafts();
+      
+      // IMPORTANT: Call parent to refresh main draft list
+      if (onDraftSaved) {
+        await onDraftSaved();
+      }
+    } else {
+      console.error("Failed to save/update draft:", result.error);
+      setError(currentDraftId ? "Failed to update draft" : "Failed to save draft");
+    }
+  } catch (error) {
+    console.error("Draft save/update error:", error);
+    setError(currentDraftId ? "Failed to update draft" : "Failed to save draft");
+  } finally {
+    setIsSavingDraft(false);
+  }
+};
+
+  // Load an existing draft into the compose form
+  const loadDraftIntoCompose = (draft) => {
+    setCurrentDraftId(draft.id || draft.DraftID);
+    setTo(draft.to || draft.To || "");
+    setCc(draft.cc || draft.CC || "");
+    setBcc(draft.bcc || draft.BCC || "");
+    setSubject(draft.subject || draft.Subject || "");
+    setSubsubject(draft.subsubject || draft.SubSubject || "");
+    setBody(draft.body || draft.Body || "");
+    setDraftSaved(false);
+  };
+
   // Handle contact suggestions
   const handleToChange = (value) => {
     setTo(value);
@@ -170,9 +325,11 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
   };
 
   // Filter contacts for suggestions
-  const filteredContacts = contacts.filter(contact =>
-    contact.fullName.toLowerCase().includes(contactQuery.toLowerCase()) ||
-    (contact.autoAddress && contact.autoAddress.toLowerCase().includes(contactQuery.toLowerCase()))
+  const filteredContacts = contacts.filter(
+    (contact) =>
+      contact.fullName.toLowerCase().includes(contactQuery.toLowerCase()) ||
+      (contact.autoAddress &&
+        contact.autoAddress.toLowerCase().includes(contactQuery.toLowerCase()))
   );
 
   if (!isOpen) {
@@ -191,10 +348,11 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
   };
 
   const handleSend = async () => {
-
     // Check wallet balance first (passed as prop)
     if (walletBalance && walletBalance.folders.bank.value < 1) {
-      setError("Insufficient balance. You need at least 1 CC to send an email.");
+      setError(
+        "Insufficient balance. You need at least 1 CC to send an email."
+      );
       return;
     }
 
@@ -249,7 +407,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
         setTaskId(newTaskId);
         setSendProgress(`Email queued for sending...`);
         setProgress(20);
-        
+
         // Start enhanced task status polling
         if (newTaskId) {
           setIsPolling(true);
@@ -286,9 +444,13 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
         case "sending":
           return <Loader size={16} className="spinning" />;
         case "completed":
-          return <CheckCircle size={16} style={{ color: 'var(--accent-success)' }} />;
+          return (
+            <CheckCircle size={16} style={{ color: "var(--accent-success)" }} />
+          );
         case "failed":
-          return <AlertCircle size={16} style={{ color: 'var(--accent-danger)' }} />;
+          return (
+            <AlertCircle size={16} style={{ color: "var(--accent-danger)" }} />
+          );
         default:
           return <Loader size={16} className="spinning" />;
       }
@@ -309,39 +471,73 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
     <div className="compose-modal-overlay">
       <div className="compose-modal glass-container">
         <div className="compose-modal-header">
-          <h3>{replyTo ? "Reply to Message" : "New Message"}</h3>
-          <button
-            onClick={onClose}
-            className="close-modal-btn ghost"
-            disabled={isSending}
-          >
+          <h3>
+            {editDraft ? "Edit Draft" : replyTo ? "Reply" : "Compose Email"}
+          </h3>
+          <button className="close-modal-btn ghost" onClick={onClose}>
             <X size={20} />
           </button>
         </div>
         <div className="compose-modal-body">
           {/* Error Message */}
           {error && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-sm)',
-              padding: 'var(--space-md)',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid var(--accent-danger)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--accent-danger)',
-              marginBottom: 'var(--space-md)'
-            }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-sm)",
+                padding: "var(--space-md)",
+                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                border: "1px solid var(--accent-danger)",
+                borderRadius: "var(--radius-md)",
+                color: "var(--accent-danger)",
+                marginBottom: "var(--space-md)",
+              }}
+            >
               <AlertCircle size={16} />
               <span>{error}</span>
             </div>
           )}
 
+          {/* Network Status Warning */}
+          {networkStatus && !networkStatus.sufficient && (
+            <div
+              className="network-warning"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-sm)",
+                padding: "var(--space-md)",
+                backgroundColor: "rgba(245, 158, 11, 0.1)",
+                border: "1px solid rgba(245, 158, 11, 0.3)",
+                borderRadius: "var(--radius-md)",
+                color: "#f59e0b",
+                fontSize: "var(--font-size-sm)",
+                marginBottom: "var(--space-md)",
+              }}
+            >
+              <AlertCircle size={16} />
+              <span>
+                Network Status: {networkStatus.availableServers}/
+                {networkStatus.totalServers} RAIDA servers available
+                {!networkStatus.parityConfigured && " | Parity not configured"}
+              </span>
+            </div>
+          )}
+
           {/* Enhanced To field with contact suggestions */}
-          <div className="form-group" style={{ position: 'relative' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-              <label htmlFor="to" style={{ flex: 'none' }}>To: </label>
-              <div style={{ flex: 1, position: 'relative' }}>
+          <div className="form-group" style={{ position: "relative" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--space-sm)",
+              }}
+            >
+              <label htmlFor="to" style={{ flex: "none" }}>
+                To:{" "}
+              </label>
+              <div style={{ flex: 1, position: "relative" }}>
                 <input
                   type="text"
                   id="to"
@@ -349,63 +545,81 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
                   onChange={(e) => handleToChange(e.target.value)}
                   disabled={isSending}
                   placeholder="write address here"
-                  style={{ width: '100%', paddingRight: '40px' }}
+                  style={{ width: "100%", paddingRight: "40px" }}
                 />
                 <button
                   type="button"
-                  onClick={() => setShowContactSuggestions(!showContactSuggestions)}
+                  onClick={() =>
+                    setShowContactSuggestions(!showContactSuggestions)
+                  }
                   disabled={isSending}
                   style={{
-                    position: 'absolute',
-                    right: '8px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-tertiary)',
-                    cursor: 'pointer',
-                    padding: '4px'
+                    position: "absolute",
+                    right: "8px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-tertiary)",
+                    cursor: "pointer",
+                    padding: "4px",
                   }}
                 >
                   <Users size={16} />
                 </button>
               </div>
             </div>
-            
+
             {/* Contact Suggestions */}
             {showContactSuggestions && filteredContacts.length > 0 && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                backgroundColor: 'var(--card-bg)',
-                border: '1px solid var(--border-medium)',
-                borderRadius: 'var(--radius-md)',
-                boxShadow: 'var(--shadow-lg)',
-                zIndex: 1000,
-                maxHeight: '200px',
-                overflowY: 'auto'
-              }}>
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  backgroundColor: "var(--card-bg)",
+                  border: "1px solid var(--border-medium)",
+                  borderRadius: "var(--radius-md)",
+                  boxShadow: "var(--shadow-lg)",
+                  zIndex: 1000,
+                  maxHeight: "200px",
+                  overflowY: "auto",
+                }}
+              >
                 {filteredContacts.slice(0, 5).map((contact, index) => (
-                  <div 
-                    key={contact.userId || index} 
+                  <div
+                    key={contact.userId || index}
                     onClick={() => handleContactSelect(contact)}
                     style={{
-                      padding: 'var(--space-md)',
-                      cursor: 'pointer',
-                      borderBottom: index < filteredContacts.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                      ':hover': {
-                        backgroundColor: 'var(--card-hover)'
-                      }
+                      padding: "var(--space-md)",
+                      cursor: "pointer",
+                      borderBottom:
+                        index < filteredContacts.length - 1
+                          ? "1px solid var(--border-subtle)"
+                          : "none",
+                      ":hover": {
+                        backgroundColor: "var(--card-hover)",
+                      },
                     }}
-                    onMouseEnter={(e) => e.target.style.backgroundColor = 'var(--card-hover)'}
-                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                    onMouseEnter={(e) =>
+                      (e.target.style.backgroundColor = "var(--card-hover)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.target.style.backgroundColor = "transparent")
+                    }
                   >
-                    <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                    <div
+                      style={{ fontWeight: 500, color: "var(--text-primary)" }}
+                    >
                       {contact.fullName}
                     </div>
-                    <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>
+                    <div
+                      style={{
+                        fontSize: "var(--font-size-sm)",
+                        color: "var(--text-tertiary)",
+                      }}
+                    >
                       {contact.autoAddress}
                     </div>
                   </div>
@@ -506,7 +720,7 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
           {renderProgressIndicator()}
 
           {/* Draft info */}
-          {drafts.length > 0 && !isSending && (
+          {/* {drafts.length > 0 && !isSending && (
             <div style={{
               fontSize: 'var(--font-size-sm)',
               color: 'var(--text-tertiary)',
@@ -514,13 +728,16 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
             }}>
               {drafts.length} draft{drafts.length !== 1 ? 's' : ''} available
             </div>
-          )}
+          )} */}
         </div>
         <div className="compose-modal-footer">
           <button
             className="send-button primary"
             onClick={handleSend}
-            disabled={isSending}
+            disabled={isSending || !canSend}
+            title={
+              !canSend ? "Network unavailable - cannot send" : "Send email"
+            }
           >
             {sendingStatus === "sending" ? (
               <>
@@ -539,8 +756,28 @@ const ComposeModal = ({ isOpen, onClose, onSend, replyTo, walletBalance }) => {
               </>
             )}
           </button>
-          <button className="attach-button secondary" disabled={isSending}>
-            <Paperclip size={16} /> Attach
+
+          <button
+            className="attach-button secondary"
+            onClick={handleSaveDraft}
+            disabled={
+              isSending || isSavingDraft || (!subject.trim() && !body.trim())
+            }
+            title="Save as draft"
+          >
+            {isSavingDraft ? (
+              <>
+                <Loader size={16} className="spinning" />
+                Saving...
+              </>
+            ) : draftSaved ? (
+              <>
+                <CheckCircle size={16} />
+                Saved
+              </>
+            ) : (
+              <>Save Draft</>
+            )}
           </button>
         </div>
       </div>

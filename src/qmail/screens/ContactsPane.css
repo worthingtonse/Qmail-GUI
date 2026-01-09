@@ -137,24 +137,26 @@ display: flex;
 /* ==================== SEARCH BAR ==================== */
 .search-bar-container {
   position: relative;
-  /* margin-bottom: var(--space-lg); */
-  border-bottom: none;
+  background-color: #1a1d24 !important;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 20px;
 }
 
 .search-input {
   width: 100%;
-  padding: var(--space-md) var(--space-md) var(--space-md) 40px;  /* Fixed left padding */
-  background-color: var(--card-bg);
+  padding: var(--space-md) var(--space-md) var(--space-md) 44px !important;
+  background-color: #0f1115 !important;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);  /* Smaller font */
+  color: var(--text-primary) !important;
+  font-size: var(--font-size-sm) !important;
   transition: all var(--transition-base);
 }
-
 .search-input:focus {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background-color: #0f1115 !important;
 }
 
 .search-input::placeholder {
@@ -162,15 +164,15 @@ display: flex;
 }
 
 .search-icon {
-position: absolute;
-  left: var(--space-lg);  /* Fixed position */
+  position: absolute;
+  left: calc(var(--space-md) + 12px);
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
-  width: 16px;  /* Smaller icon */
+  width: 16px;
   height: 16px;
   z-index: 1;
-  pointer-events: none;  /* Prevent interference */
+  pointer-events: none;
 }
 
 /* ==================== CONTACT LIST ==================== */

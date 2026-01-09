@@ -2,8 +2,7 @@
 // This file contains all QMail-specific API call functions.
 
 // Define the base URL for your local server
-const API_BASE_URL = "http://127.0.0.1:8080/api";
-
+const API_BASE_URL = "http://localhost:8080/api"
 /**
  * A helper function to handle fetch responses.
  * It checks for network errors and non-ok responses.
@@ -198,6 +197,109 @@ export const getDrafts = async () => {
   } catch (error) {
     console.error("Get drafts failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch drafts.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Saves a new draft email.
+ * @param {Object} draftData - Draft email data
+ * @param {string} draftData.subject - Email subject
+ * @param {string} draftData.body - Email body content
+ * @param {string} [draftData.to] - Recipient address (optional)
+ * @param {string} [draftData.cc] - CC recipients (optional)
+ * @param {string} [draftData.bcc] - BCC recipients (optional)
+ * @param {string} [draftData.subsubject] - Sub-subject (optional)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const saveDraft = async (draftData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/draft`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        subject: draftData.subject || "",
+        body: draftData.body || "",
+        to: draftData.to || "",
+        cc: draftData.cc || "",
+        bcc: draftData.bcc || "",
+        subsubject: draftData.subsubject || ""
+      })
+    });
+    
+    const data = await handleResponse(response);
+    
+    console.log("Data received from /mail/draft:", data);
+    
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message || "Draft saved successfully",
+          draftId: data.draft_id,
+          timestamp: data.timestamp
+        }
+      };
+    } else {
+      throw new Error(data.error || "Invalid response from draft endpoint");
+    }
+  } catch (error) {
+    console.error("Save draft failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to save draft.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Updates an existing draft email.
+ * @param {string} draftId - The ID of the draft to update
+ * @param {Object} draftData - Draft email data
+ * @param {string} draftData.subject - Email subject
+ * @param {string} draftData.body - Email body content
+ * @param {string} [draftData.to] - Recipient address (optional)
+ * @param {string} [draftData.cc] - CC recipients (optional)
+ * @param {string} [draftData.bcc] - BCC recipients (optional)
+ * @param {string} [draftData.subsubject] - Sub-subject (optional)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const updateDraft = async (draftId, draftData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/draft/${draftId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        subject: draftData.subject || "",
+        body: draftData.body || "",
+        to: draftData.to || "",
+        cc: draftData.cc || "",
+        bcc: draftData.bcc || "",
+        subsubject: draftData.subsubject || ""
+      })
+    });
+    
+    const data = await handleResponse(response);
+    
+    console.log("Data received from PUT /mail/draft:", data);
+    
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message || "Draft updated successfully",
+          draftId: draftId,
+          timestamp: data.timestamp
+        }
+      };
+    } else {
+      throw new Error(data.error || "Invalid response from update draft endpoint");
+    }
+  } catch (error) {
+    console.error("Update draft failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to update draft.`;
     return { success: false, error: errorMessage };
   }
 };
@@ -721,14 +823,9 @@ export const getServers = async (includeUnavailable = false) => {
       return {
         success: true,
         data: {
-          servers: data.servers.map((server) => ({
-            serverId: server.server_id,
-            address: server.address,
-            port: server.port,
-            isAvailable: server.is_available,
-          })),
-          count: data.count || data.servers.length,
-          includeUnavailable: data.include_unavailable || includeUnavailable,
+          servers: data.servers,
+          totalServers: data.count || data.servers.length,
+          availableServers: data.servers.filter(s => s.is_available).length
         },
       };
     } else {
@@ -736,8 +833,7 @@ export const getServers = async (includeUnavailable = false) => {
     }
   } catch (error) {
     console.error("Get servers failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to fetch servers.`;
-    return { success: false, error: errorMessage };
+    return { success: false, error: error.message };
   }
 };
 
@@ -760,12 +856,12 @@ export const getParityServer = async () => {
           parityServer: data.parity_server
             ? {
                 serverId: data.parity_server.server_id,
-                address: data.parity_server.address,
+                address: data.parity_server.ip_address,  // ← Changed from address to ip_address
                 port: data.parity_server.port,
                 isAvailable: data.parity_server.is_available,
               }
             : null,
-          message: data.message,
+          message: data.message || (data.status === 'configured' ? 'Parity server configured' : 'Not configured'),
         },
       };
     } else {
@@ -774,6 +870,39 @@ export const getParityServer = async () => {
   } catch (error) {
     console.error("Get parity server failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch parity server configuration.`;
+    return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Triggers manual sync of user directory and server records from RAIDA
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const syncData = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/sync`, {
+      method: 'POST'
+    });
+    const data = await handleResponse(response);
+
+    console.log("Data received from /admin/sync:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message || 'Sync completed',
+          usersUpdated: data.users_synced || 0,
+          serversUpdated: data.servers_synced || 0,
+          timestamp: data.timestamp
+        },
+      };
+    } else {
+      throw new Error("Invalid response from sync endpoint");
+    }
+  } catch (error) {
+    console.error("Sync data failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to sync data.`;
     return { success: false, error: errorMessage };
   }
 };
@@ -824,3 +953,648 @@ export const getWalletBalance = async () => {
     return { success: false, error: errorMessage };
   }
 };
+
+/**
+ * Marks an email as read or unread
+ * @param {string} emailId - The email ID
+ * @param {boolean} isRead - true to mark as read, false for unread
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const markEmailRead = async (emailId, isRead = true) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/read`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ is_read: isRead })
+    });
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/{id}/read:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message,
+          emailId: emailId,
+          isRead: isRead
+        },
+      };
+    } else {
+      throw new Error("Invalid response from mark read endpoint");
+    }
+  } catch (error) {
+    console.error("Mark email read failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Moves an email to a different folder
+ * @param {string} emailId - The email ID
+ * @param {string} folder - Target folder (inbox, sent, drafts, trash)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const moveEmail = async (emailId, folder) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/move`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ folder: folder })
+    });
+    const data = await handleResponse(response);
+
+    console.log("Data received from /mail/{id}/move:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message,
+          emailId: emailId,
+          folder: folder
+        },
+      };
+    } else {
+      throw new Error("Invalid response from move email endpoint");
+    }
+  } catch (error) {
+    console.error("Move email failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Deletes an email (moves to trash)
+ * @param {string} emailId - The email ID
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const deleteEmail = async (emailId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}`, {
+      method: 'DELETE'
+    });
+    const data = await handleResponse(response);
+
+    console.log("Data received from DELETE /mail/{id}:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message,
+          emailId: emailId
+        },
+      };
+    } else {
+      throw new Error("Invalid response from delete email endpoint");
+    }
+  } catch (error) {
+    console.error("Delete email failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// --- src/api/qmailApiServices.js ---
+// Enhanced with MOCK MODE for testing without backend
+
+// import { 
+//   MOCK_MODE, 
+//   mockApiResponses 
+// } from './mockDataService';
+
+// // Define the base URL for your local server
+// const API_BASE_URL = "http://127.0.0.1:8080/api";
+
+// /**
+//  * A helper function to handle fetch responses.
+//  */
+// const handleResponse = async (response) => {
+//   if (!response.ok) {
+//     throw new Error(
+//       `Server responded with ${response.status} ${response.statusText}`
+//     );
+//   }
+//   const data = await response.json();
+//   return data;
+// };
+
+// /**
+//  * Gets the health status of the QMail Client Core service.
+//  */
+// export const getHealthStatus = async () => {
+//   if (MOCK_MODE) return mockApiResponses.health();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/health`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.status) {
+//       return {
+//         success: true,
+//         data: {
+//           status: data.status,
+//           service: data.service || "QMail Client Core",
+//           version: data.version || "unknown",
+//           timestamp: data.timestamp || Date.now(),
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from health endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Health check failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets the wallet balance and coin distribution.
+//  */
+// export const getWalletBalance = async () => {
+//   if (MOCK_MODE) return mockApiResponses.walletBalance();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/wallet/balance`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           walletPath: data.wallet_path,
+//           walletName: data.wallet_name,
+//           totalCoins: data.total_coins,
+//           totalValue: data.total_value,
+//           folders: {
+//             bank: {
+//               coins: data.folders.bank_coins,
+//               value: data.folders.bank_value
+//             },
+//             fracked: {
+//               coins: data.folders.fracked_coins,
+//               value: data.folders.fracked_value
+//             },
+//             limbo: {
+//               coins: data.folders.limbo_coins,
+//               value: data.folders.limbo_value
+//             }
+//           },
+//           denominations: data.denominations,
+//           warnings: data.warnings || []
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from wallet balance endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get wallet balance failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets the list of mail folders.
+//  */
+// export const getMailFolders = async () => {
+//   if (MOCK_MODE) return mockApiResponses.mailFolders();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/folders`);
+//     const data = await handleResponse(response);
+
+//     if (data && Array.isArray(data.folders)) {
+//       return {
+//         success: true,
+//         data: { folders: data.folders }
+//       };
+//     } else {
+//       throw new Error("Invalid response from folders endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get folders failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets mail counts for all folders.
+//  */
+// export const getMailCount = async () => {
+//   if (MOCK_MODE) return mockApiResponses.mailCount();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/count`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.counts) {
+//       return {
+//         success: true,
+//         data: {
+//           counts: data.counts,
+//           summary: data.summary
+//         }
+//       };
+//     } else {
+//       throw new Error("Invalid response from mail count endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get mail count failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets the list of emails from a specific folder.
+//  */
+// export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
+//   if (MOCK_MODE) return mockApiResponses.mailList(folder, limit, offset);
+  
+//   try {
+//     const url = `${API_BASE_URL}/mail/list?folder=${folder}&limit=${limit}&offset=${offset}`;
+//     const response = await fetch(url);
+//     const data = await handleResponse(response);
+
+//     if (data && Array.isArray(data.emails)) {
+//       const transformedEmails = data.emails.map((email) => ({
+//         id: email.EmailID,
+//         subject: email.Subject || "No Subject",
+//         sender: "Unknown",
+//         senderEmail: "",
+//         timestamp: email.ReceivedTimestamp || email.SentTimestamp,
+//         sentTimestamp: email.SentTimestamp,
+//         receivedTimestamp: email.ReceivedTimestamp,
+//         isRead: email.is_read || false,
+//         isStarred: email.is_starred || false,
+//         isTrashed: email.is_trashed || false,
+//         folder: email.folder || folder,
+//         preview: "",
+//         body: ""
+//       }));
+
+//       return {
+//         success: true,
+//         data: {
+//           folder: data.folder || folder,
+//           emails: transformedEmails,
+//           totalCount: data.total_count || 0,
+//           limit: data.limit || limit,
+//           offset: data.offset || offset,
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from mail list endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get mail list failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets full details of a specific email by ID.
+//  * This is THE KEY ENDPOINT for the workflow you described.
+//  * 
+//  * Call this when:
+//  * 1. User clicks on an email in the list
+//  * 2. After receiving a "new mail" notification
+//  * 3. After performing actions (read/unread, star, etc.)
+//  * 4. For deep-linking support
+//  */
+// export const getEmailById = async (emailId) => {
+//   if (MOCK_MODE) return mockApiResponses.getEmailById(emailId);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       const email = data.email;
+      
+//       return {
+//         success: true,
+//         data: {
+//           id: email.EmailID,
+//           subject: email.Subject,
+//           sender: email.sender || "Unknown",
+//           senderEmail: email.sender_email || "",
+//           body: email.body || "",
+//           timestamp: email.ReceivedTimestamp || email.SentTimestamp,
+//           sentTimestamp: email.SentTimestamp,
+//           receivedTimestamp: email.ReceivedTimestamp,
+//           isRead: email.is_read,
+//           isStarred: email.is_starred,
+//           isTrashed: email.is_trashed,
+//           folder: email.folder,
+//           downloaded: email.downloaded,
+//           lockerCode: email.locker_code,
+//           needsDownload: !email.downloaded && email.locker_code && email.locker_code !== "0000000000000000000000000000000000000000000000000000000000000000"
+//         }
+//       };
+//     } else {
+//       throw new Error("Invalid response from get email endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get email by ID failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Downloads email content from RAIDA servers.
+//  * Call this when getEmailById returns downloaded: false
+//  */
+// export const downloadEmailContent = async (emailId) => {
+//   if (MOCK_MODE) return mockApiResponses.downloadEmail(emailId);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/download/${emailId}`, {
+//       method: 'POST'
+//     });
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           message: data.message,
+//           email: data.email
+//         }
+//       };
+//     } else {
+//       throw new Error("Invalid response from download endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Download email failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets attachments for a specific email.
+//  */
+// export const getEmailAttachments = async (emailId) => {
+//   if (MOCK_MODE) return mockApiResponses.getAttachments(emailId);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/attachments`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           attachments: data.attachments || []
+//         }
+//       };
+//     } else {
+//       throw new Error("Invalid response from attachments endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Get attachments failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Gets the list of draft emails.
+//  */
+// export const getDrafts = async () => {
+//   if (MOCK_MODE) return mockApiResponses.drafts();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/drafts`);
+//     const data = await handleResponse(response);
+
+//     if (data.error || data.status === "error") {
+//       return {
+//         success: true,
+//         data: {
+//           drafts: [],
+//           error: data.error,
+//           details: data.details,
+//         },
+//       };
+//     }
+
+//     if (data && Array.isArray(data.drafts)) {
+//       return {
+//         success: true,
+//         data: { drafts: data.drafts },
+//       };
+//     } else {
+//       return {
+//         success: true,
+//         data: { drafts: [] },
+//       };
+//     }
+//   } catch (error) {
+//     console.error("Get drafts failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Pings the QMail server to check for new messages.
+//  */
+// export const pingQMail = async () => {
+//   if (MOCK_MODE) return mockApiResponses.ping();
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/qmail/ping`);
+//     const data = await handleResponse(response);
+
+//     if (data && data.status) {
+//       if (data.status === "error") {
+//         return {
+//           success: false,
+//           error: data.message || "Server returned error status"
+//         };
+//       }
+      
+//       if (data.status === "ok" || data.status === "healing") {
+//         return {
+//           success: true,
+//           data: {
+//             status: data.status,
+//             timestamp: data.timestamp,
+//             beaconStatus: data.beacon_status,
+//             hasMail: data.has_mail || false,
+//             messageCount: data.message_count || 0,
+//             messages: data.messages || []
+//           }
+//         };
+//       }
+//     }
+//     throw new Error("Invalid ping response");
+//   } catch (error) {
+//     console.error("Ping failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Searches emails across all folders.
+//  */
+// export const searchEmails = async (query, limit = 50, offset = 0) => {
+//   if (MOCK_MODE) return mockApiResponses.search(query, limit, offset);
+  
+//   try {
+//     const url = `${API_BASE_URL}/mail/search?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
+//     const response = await fetch(url);
+//     const data = await handleResponse(response);
+
+//     if (data && Array.isArray(data.results)) {
+//       return {
+//         success: true,
+//         data: {
+//           results: data.results,
+//           total: data.total || data.results.length
+//         }
+//       };
+//     } else {
+//       throw new Error("Invalid response from search endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Search failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Marks an email as read or unread.
+//  */
+// export const markEmailRead = async (emailId, isRead = true) => {
+//   if (MOCK_MODE) return mockApiResponses.markRead(emailId, isRead);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/read`, {
+//       method: 'PUT',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({ is_read: isRead })
+//     });
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           message: data.message,
+//           emailId: emailId,
+//           isRead: isRead
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from mark read endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Mark email read failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Moves an email to a different folder.
+//  */
+// export const moveEmail = async (emailId, folder) => {
+//   if (MOCK_MODE) return mockApiResponses.moveEmail(emailId, folder);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/move`, {
+//       method: 'PUT',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({ folder: folder })
+//     });
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           message: data.message,
+//           emailId: emailId,
+//           folder: folder
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from move email endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Move email failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Deletes an email (moves to trash).
+//  */
+// export const deleteEmail = async (emailId) => {
+//   if (MOCK_MODE) return mockApiResponses.deleteEmail(emailId);
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}`, {
+//       method: 'DELETE'
+//     });
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           message: data.message,
+//           emailId: emailId
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from delete email endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Delete email failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };
+
+// /**
+//  * Triggers manual sync (mock only supports this as no-op)
+//  */
+// export const syncData = async () => {
+//   if (MOCK_MODE) {
+//     return {
+//       success: true,
+//       data: {
+//         message: 'Mock sync completed',
+//         usersUpdated: 0,
+//         serversUpdated: 0,
+//         timestamp: Date.now()
+//       }
+//     };
+//   }
+  
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/admin/sync`, {
+//       method: 'POST'
+//     });
+//     const data = await handleResponse(response);
+
+//     if (data && data.status === "success") {
+//       return {
+//         success: true,
+//         data: {
+//           message: data.message || 'Sync completed',
+//           usersUpdated: data.users_synced || 0,
+//           serversUpdated: data.servers_synced || 0,
+//           timestamp: data.timestamp
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from sync endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Sync data failed:", error);
+//     return { success: false, error: error.message };
+//   }
+// };

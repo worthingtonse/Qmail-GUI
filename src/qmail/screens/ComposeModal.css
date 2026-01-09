@@ -307,6 +307,19 @@
   font-weight: 500;
 }
 
+.network-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background-color: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-md);
+  color: #f59e0b;
+  font-size: var(--font-size-sm);
+  margin-bottom: var(--space-md);
+}
+
 /* ==================== DRAFT COUNT ==================== */
 .draft-count {
   font-size: var(--font-size-sm);

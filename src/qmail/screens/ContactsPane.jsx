@@ -12,31 +12,40 @@ const ContactsPane = () => {
   const [error, setError] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
   const [currentMode, setCurrentMode] = useState("contacts"); // "contacts" or "popular"
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Load regular contacts on component mount
-  useEffect(() => {
-    loadContacts();
-  }, []);
+ // Load regular contacts on component mount
+useEffect(() => {
+  loadContacts();
+  setIsInitialLoad(false);
+}, []);
 
   // Handle search with debouncing
-  useEffect(() => {
-    const debounceTimer = setTimeout(() => {
-      setIsSearching(!!searchTerm.trim());
-      if (searchTerm.trim()) {
-        setCurrentMode("search");
-        loadContacts();
-      } else if (currentMode === "search") {
-        // If we were searching and now cleared, go back to regular contacts
-        setCurrentMode("contacts");
-        loadContacts();
-      }
-    }, 300); // 300ms debounce
+// Handle search with debouncing
+useEffect(() => {
+  if (!searchTerm.trim()) {
+    if (currentMode === "search") {
+      setCurrentMode("contacts");
+    }
+    return;
+  }
 
-    return () => clearTimeout(debounceTimer);
-  }, [searchTerm]);
+  const debounceTimer = setTimeout(() => {
+    setCurrentMode("search");
+    loadContacts();
+  }, 300);
 
-  const loadContacts = async () => {
-  setLoading(true);
+  return () => clearTimeout(debounceTimer);
+}, [searchTerm]);
+
+const loadContacts = async () => {
+  // Never show loader when list is empty OR when searching
+  const shouldShowLoader = contacts.length > 0 && currentMode !== "search";
+  
+  if (shouldShowLoader) {
+    setLoading(true);
+  }
   setError(null);
   
   try {
@@ -64,37 +73,40 @@ const ContactsPane = () => {
   setLoading(false);
 };
 
-  const loadPopularContacts = async () => {
+ const loadPopularContacts = async () => {
+  // Never show loader when list is empty
+  if (contacts.length > 0) {
     setLoading(true);
-    setError(null);
-    setCurrentMode("popular");
-    
-    try {
-      const result = await getPopularContacts(50);
-      if (result.success) {
-        const transformedContacts = result.data.contacts.map((contact) => ({
-          id: contact.userId,
-          name: contact.fullName,
-          email: contact.autoAddress,
-          status: determineStatus(contact.popularity),
-          description: contact.description,
-          popularity: contact.popularity,
-          contactCount: contact.contactCount,
-        }));
-        setContacts(transformedContacts);
-      } else {
-        console.error("Failed to load popular contacts:", result.error);
-        setError(result.error);
-        setContacts([]);
-      }
-    } catch (err) {
-      console.error("Error in loadPopularContacts:", err);
-      setError("Failed to load popular contacts");
+  }
+  setError(null);
+  setCurrentMode("popular");
+  
+  try {
+    const result = await getPopularContacts(50);
+    if (result.success) {
+      const transformedContacts = result.data.contacts.map((contact) => ({
+        id: contact.userId,
+        name: contact.fullName,
+        email: contact.autoAddress,
+        status: determineStatus(contact.popularity),
+        description: contact.description,
+        popularity: contact.popularity,
+        contactCount: contact.contactCount,
+      }));
+      setContacts(transformedContacts);
+    } else {
+      console.error("Failed to load popular contacts:", result.error);
+      setError(result.error);
       setContacts([]);
     }
-    
-    setLoading(false);
-  };
+  } catch (err) {
+    console.error("Error in loadPopularContacts:", err);
+    setError("Failed to load popular contacts");
+    setContacts([]);
+  }
+  
+  setLoading(false);
+};
 
   // Determine badge status based on popularity or contact count
   const determineStatus = (popularity) => {
@@ -128,12 +140,22 @@ const ContactsPane = () => {
   };
 
   const handleRefresh = () => {
+  // Don't show loader when refreshing empty list
+  if (contacts.length === 0) {
     if (currentMode === "popular") {
       loadPopularContacts();
     } else {
       loadContacts();
     }
-  };
+    return;
+  }
+  
+  if (currentMode === "popular") {
+    loadPopularContacts();
+  } else {
+    loadContacts();
+  }
+};
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);

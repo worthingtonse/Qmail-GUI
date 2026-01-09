@@ -351,7 +351,7 @@ input::placeholder, textarea::placeholder {
   position: fixed;
   bottom: var(--space-xl);
   right: var(--space-xl);
-  background-color: var(--accent-success);
+  background-color: var(--surface-bg);
   color: white;
   padding: var(--space-lg) var(--space-xl);
   border-radius: var(--radius-lg);
@@ -359,7 +359,17 @@ input::placeholder, textarea::placeholder {
   z-index: 1000;
   font-weight: 500;
   animation: slideIn 0.3s ease;
+  max-width: 500px;
 }
+
+.notification-popup.success {
+  background-color: var(--accent-success);
+}
+
+.notification-popup.error {
+  background-color: var(--accent-danger);
+}
+
 
 /* Health Warning */
 .health-warning {

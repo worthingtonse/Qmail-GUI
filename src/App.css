@@ -326,13 +326,13 @@ input[type="checkbox"] {
 }
 
 /* Default glass cursor */
-* {
-   cursor: initial;
+/* * { */
+   /* cursor: initial; */
   /* cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="coinGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="%23FFD700"/><stop offset="50%" stop-color="%23FFF"/><stop offset="100%" stop-color="%23FFD700"/></linearGradient></defs><ellipse cx="12" cy="12" rx="10" ry="8" fill="url(%23coinGrad)" stroke="%23DAA520" stroke-width="1.5"/><text x="12" y="15" text-anchor="middle" fill="%23B8860B" font-size="6" font-weight="bold">CC</text></svg>') 12 12, auto; */
-}
+/* } */
 
 /* Interactive elements - glass pointer */
-button, 
+/* button, 
 .nav-tab,
 .nav-tab svg,
 .nav-tab span,
@@ -346,7 +346,7 @@ input[type="submit"],
 input[type="button"],
 input[type="checkbox"] {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(167,139,250,0.2)" stroke="rgba(167,139,250,0.5)" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="rgba(167,139,250,0.9)"/></svg>') 12 12, pointer !important;
-}
+} */
 
 /* Input fields - glass text cursor */
 input[type="text"],
@@ -359,11 +359,11 @@ textarea,
 }
 
 /* Hover states - enhanced glass cursor */
-button:hover,
+/* button:hover,
 .nav-tab:hover,
 a:hover {
   cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12" fill="rgba(167,139,250,0.3)" stroke="rgba(167,139,250,0.7)" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="rgba(167,139,250,1)"/><circle cx="14" cy="14" r="8" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"/></svg>') 14 14, pointer !important;
-}
+} */
 
 /* Disabled elements - glass disabled cursor */
 button:disabled,
