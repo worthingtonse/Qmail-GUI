@@ -130,7 +130,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.webContents.openDevTools();
+  // mainWindow.webContents.openDevTools();
   
   mainWindow.webContents.on('did-finish-load', () => {
     log('Window loaded');
