@@ -505,81 +505,81 @@ export const pollTaskStatus = async (
   }
 };
 
-/**
- * Sends an email via QMail.
- * @param {Object} emailData - Email data object
- * @param {Array<string>} emailData.to - Array of recipient addresses (required)
- * @param {Array<string>} emailData.cc - Array of CC addresses (optional)
- * @param {Array<string>} emailData.bcc - Array of BCC addresses (optional)
- * @param {string} emailData.subject - Email subject (required)
- * @param {string} emailData.subsubject - Secondary subject header (optional)
- * @param {string} emailData.body - Email body content (required)
- * @param {Array} emailData.attachments - Array of attachments (optional)
- * @param {number} emailData.storage_weeks - Storage duration in weeks (default: 8)
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- */
-export const sendEmail = async (emailData) => {
-  try {
-    // Validate required fields
-    if (
-      !emailData.to ||
-      !Array.isArray(emailData.to) ||
-      emailData.to.length === 0
-    ) {
-      throw new Error("At least one recipient is required");
-    }
-    if (!emailData.subject) {
-      throw new Error("Subject is required");
-    }
-    if (!emailData.body) {
-      throw new Error("Email body is required");
-    }
+// /**
+//  * Sends an email via QMail.
+//  * @param {Object} emailData - Email data object
+//  * @param {Array<string>} emailData.to - Array of recipient addresses (required)
+//  * @param {Array<string>} emailData.cc - Array of CC addresses (optional)
+//  * @param {Array<string>} emailData.bcc - Array of BCC addresses (optional)
+//  * @param {string} emailData.subject - Email subject (required)
+//  * @param {string} emailData.subsubject - Secondary subject header (optional)
+//  * @param {string} emailData.body - Email body content (required)
+//  * @param {Array} emailData.attachments - Array of attachments (optional)
+//  * @param {number} emailData.storage_weeks - Storage duration in weeks (default: 8)
+//  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+//  */
+// export const sendEmail = async (emailData) => {
+//   try {
+//     // Validate required fields
+//     if (
+//       !emailData.to ||
+//       !Array.isArray(emailData.to) ||
+//       emailData.to.length === 0
+//     ) {
+//       throw new Error("At least one recipient is required");
+//     }
+//     if (!emailData.subject) {
+//       throw new Error("Subject is required");
+//     }
+//     if (!emailData.body) {
+//       throw new Error("Email body is required");
+//     }
 
-    // Build request payload
-    const payload = {
-      to: emailData.to,
-      cc: emailData.cc || [],
-      bcc: emailData.bcc || [],
-      subject: emailData.subject,
-      subsubject: emailData.subsubject || "",
-      body: emailData.body,
-      attachments: emailData.attachments || [],
-      storage_weeks: emailData.storage_weeks || 8,
-    };
+//     // Build request payload
+//     const payload = {
+//       to: emailData.to,
+//       cc: emailData.cc || [],
+//       bcc: emailData.bcc || [],
+//       subject: emailData.subject,
+//       subsubject: emailData.subsubject || "",
+//       body: emailData.body,
+//       attachments: emailData.attachments || [],
+//       storage_weeks: emailData.storage_weeks || 8,
+//     };
 
-    const response = await fetch(`${API_BASE_URL}/mail/send`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+//     const response = await fetch(`${API_BASE_URL}/mail/send`, {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify(payload),
+//     });
 
-    const data = await handleResponse(response);
+//     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/send:", data);
+//     console.log("Data received from /mail/send:", data);
 
-    if (data && data.status === "accepted") {
-      return {
-        success: true,
-        data: {
-          status: data.status,
-          taskId: data.task_id,
-          message: data.message,
-          fileGroupGuid: data.file_group_guid,
-          fileCount: data.file_count,
-          estimatedCost: data.estimated_cost,
-        },
-      };
-    } else {
-      throw new Error(data.message || "Failed to send email");
-    }
-  } catch (error) {
-    console.error("Send email failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
-    return { success: false, error: errorMessage };
-  }
-};
+//     if (data && data.status === "accepted") {
+//       return {
+//         success: true,
+//         data: {
+//           status: data.status,
+//           taskId: data.task_id,
+//           message: data.message,
+//           fileGroupGuid: data.file_group_guid,
+//           fileCount: data.file_count,
+//           estimatedCost: data.estimated_cost,
+//         },
+//       };
+//     } else {
+//       throw new Error(data.message || "Failed to send email");
+//     }
+//   } catch (error) {
+//     console.error("Send email failed:", error);
+//     const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
+//     return { success: false, error: errorMessage };
+//   }
+// };
 
 /**
  * Gets the list of available mail folders.
@@ -1059,542 +1059,137 @@ export const deleteEmail = async (emailId) => {
   }
 };
 
-// --- src/api/qmailApiServices.js ---
-// Enhanced with MOCK MODE for testing without backend
+// Locker download with polling
+export const downloadLockerCoins = async (lockerCode, onProgress) => {
+  try {
+    const cleanCode = lockerCode.replace(/-/g, '').trim();
+    
+    // if (cleanCode.length !== 8) {
+    //   throw new Error('Locker code must be 8 characters');
+    // }
 
-// import { 
-//   MOCK_MODE, 
-//   mockApiResponses 
-// } from './mockDataService';
+    // Format with hyphen XXX-XXXXX
+    const formattedCode = cleanCode.slice(0, 3) + '-' + cleanCode.slice(3);
 
-// // Define the base URL for your local server
-// const API_BASE_URL = "http://127.0.0.1:8080/api";
+    const response = await fetch(`${API_BASE_URL}/locker/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locker_code: formattedCode })
+    });
 
-// /**
-//  * A helper function to handle fetch responses.
-//  */
-// const handleResponse = async (response) => {
-//   if (!response.ok) {
-//     throw new Error(
-//       `Server responded with ${response.status} ${response.statusText}`
-//     );
-//   }
-//   const data = await response.json();
-//   return data;
-// };
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || errorData.details || 'Failed to download coins');
+    }
 
-// /**
-//  * Gets the health status of the QMail Client Core service.
-//  */
-// export const getHealthStatus = async () => {
-//   if (MOCK_MODE) return mockApiResponses.health();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/health`);
-//     const data = await handleResponse(response);
+    const data = await response.json();
 
-//     if (data && data.status) {
-//       return {
-//         success: true,
-//         data: {
-//           status: data.status,
-//           service: data.service || "QMail Client Core",
-//           version: data.version || "unknown",
-//           timestamp: data.timestamp || Date.now(),
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from health endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Health check failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+    // Check for immediate error
+    if (data.status === 'error') {
+      throw new Error(data.error || data.details || 'Invalid locker code');
+    }
 
-// /**
-//  * Gets the wallet balance and coin distribution.
-//  */
-// export const getWalletBalance = async () => {
-//   if (MOCK_MODE) return mockApiResponses.walletBalance();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/wallet/balance`);
-//     const data = await handleResponse(response);
+    // If task_id exists, poll for status
+    if (data.id || data.task_id) {
+      const taskId = data.id || data.task_id;
+      return await pollTaskStatus(taskId, onProgress);
+    }
 
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           walletPath: data.wallet_path,
-//           walletName: data.wallet_name,
-//           totalCoins: data.total_coins,
-//           totalValue: data.total_value,
-//           folders: {
-//             bank: {
-//               coins: data.folders.bank_coins,
-//               value: data.folders.bank_value
-//             },
-//             fracked: {
-//               coins: data.folders.fracked_coins,
-//               value: data.folders.fracked_value
-//             },
-//             limbo: {
-//               coins: data.folders.limbo_coins,
-//               value: data.folders.limbo_value
-//             }
-//           },
-//           denominations: data.denominations,
-//           warnings: data.warnings || []
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from wallet balance endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get wallet balance failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+    return data;
+  } catch (error) {
+    console.error('Locker download error:', error);
+    throw error;
+  }
+};
 
-// /**
-//  * Gets the list of mail folders.
-//  */
-// export const getMailFolders = async () => {
-//   if (MOCK_MODE) return mockApiResponses.mailFolders();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/folders`);
-//     const data = await handleResponse(response);
+// Create mailbox after locker download
+export const createMailbox = async (address, domain, lockerCode, recoveryEmail = null) => {
+  try {
+    const cleanCode = lockerCode.replace(/-/g, '').trim();
+    
+    // Convert to hex
+    const hexCode = Array.from(cleanCode)
+      .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('');
 
-//     if (data && Array.isArray(data.folders)) {
-//       return {
-//         success: true,
-//         data: { folders: data.folders }
-//       };
-//     } else {
-//       throw new Error("Invalid response from folders endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get folders failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+    const response = await fetch(`${API_BASE_URL}/mail/create-mailbox`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address,
+        domain,
+        locker_code: hexCode,
+        recovery_email: recoveryEmail
+      })
+    });
 
-// /**
-//  * Gets mail counts for all folders.
-//  */
-// export const getMailCount = async () => {
-//   if (MOCK_MODE) return mockApiResponses.mailCount();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/count`);
-//     const data = await handleResponse(response);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || errorData.details || 'Failed to create mailbox');
+    }
 
-//     if (data && data.counts) {
-//       return {
-//         success: true,
-//         data: {
-//           counts: data.counts,
-//           summary: data.summary
-//         }
-//       };
-//     } else {
-//       throw new Error("Invalid response from mail count endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get mail count failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+    const data = await response.json();
 
-// /**
-//  * Gets the list of emails from a specific folder.
-//  */
-// export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
-//   if (MOCK_MODE) return mockApiResponses.mailList(folder, limit, offset);
-  
-//   try {
-//     const url = `${API_BASE_URL}/mail/list?folder=${folder}&limit=${limit}&offset=${offset}`;
-//     const response = await fetch(url);
-//     const data = await handleResponse(response);
+    if (data.status === 'error') {
+      throw new Error(data.error || data.details || 'Failed to create mailbox');
+    }
 
-//     if (data && Array.isArray(data.emails)) {
-//       const transformedEmails = data.emails.map((email) => ({
-//         id: email.EmailID,
-//         subject: email.Subject || "No Subject",
-//         sender: "Unknown",
-//         senderEmail: "",
-//         timestamp: email.ReceivedTimestamp || email.SentTimestamp,
-//         sentTimestamp: email.SentTimestamp,
-//         receivedTimestamp: email.ReceivedTimestamp,
-//         isRead: email.is_read || false,
-//         isStarred: email.is_starred || false,
-//         isTrashed: email.is_trashed || false,
-//         folder: email.folder || folder,
-//         preview: "",
-//         body: ""
-//       }));
+    return data;
+  } catch (error) {
+    console.error('Create mailbox error:', error);
+    throw error;
+  }
+};
 
-//       return {
-//         success: true,
-//         data: {
-//           folder: data.folder || folder,
-//           emails: transformedEmails,
-//           totalCount: data.total_count || 0,
-//           limit: data.limit || limit,
-//           offset: data.offset || offset,
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from mail list endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get mail list failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Gets full details of a specific email by ID.
-//  * This is THE KEY ENDPOINT for the workflow you described.
-//  * 
-//  * Call this when:
-//  * 1. User clicks on an email in the list
-//  * 2. After receiving a "new mail" notification
-//  * 3. After performing actions (read/unread, star, etc.)
-//  * 4. For deep-linking support
-//  */
-// export const getEmailById = async (emailId) => {
-//   if (MOCK_MODE) return mockApiResponses.getEmailById(emailId);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}`);
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       const email = data.email;
-      
-//       return {
-//         success: true,
-//         data: {
-//           id: email.EmailID,
-//           subject: email.Subject,
-//           sender: email.sender || "Unknown",
-//           senderEmail: email.sender_email || "",
-//           body: email.body || "",
-//           timestamp: email.ReceivedTimestamp || email.SentTimestamp,
-//           sentTimestamp: email.SentTimestamp,
-//           receivedTimestamp: email.ReceivedTimestamp,
-//           isRead: email.is_read,
-//           isStarred: email.is_starred,
-//           isTrashed: email.is_trashed,
-//           folder: email.folder,
-//           downloaded: email.downloaded,
-//           lockerCode: email.locker_code,
-//           needsDownload: !email.downloaded && email.locker_code && email.locker_code !== "0000000000000000000000000000000000000000000000000000000000000000"
-//         }
-//       };
-//     } else {
-//       throw new Error("Invalid response from get email endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get email by ID failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Downloads email content from RAIDA servers.
-//  * Call this when getEmailById returns downloaded: false
-//  */
-// export const downloadEmailContent = async (emailId) => {
-//   if (MOCK_MODE) return mockApiResponses.downloadEmail(emailId);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/download/${emailId}`, {
-//       method: 'POST'
-//     });
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           message: data.message,
-//           email: data.email
-//         }
-//       };
-//     } else {
-//       throw new Error("Invalid response from download endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Download email failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Gets attachments for a specific email.
-//  */
-// export const getEmailAttachments = async (emailId) => {
-//   if (MOCK_MODE) return mockApiResponses.getAttachments(emailId);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/attachments`);
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           attachments: data.attachments || []
-//         }
-//       };
-//     } else {
-//       throw new Error("Invalid response from attachments endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Get attachments failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Gets the list of draft emails.
-//  */
-// export const getDrafts = async () => {
-//   if (MOCK_MODE) return mockApiResponses.drafts();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/drafts`);
-//     const data = await handleResponse(response);
-
-//     if (data.error || data.status === "error") {
-//       return {
-//         success: true,
-//         data: {
-//           drafts: [],
-//           error: data.error,
-//           details: data.details,
-//         },
-//       };
-//     }
-
-//     if (data && Array.isArray(data.drafts)) {
-//       return {
-//         success: true,
-//         data: { drafts: data.drafts },
-//       };
-//     } else {
-//       return {
-//         success: true,
-//         data: { drafts: [] },
-//       };
-//     }
-//   } catch (error) {
-//     console.error("Get drafts failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Pings the QMail server to check for new messages.
-//  */
-// export const pingQMail = async () => {
-//   if (MOCK_MODE) return mockApiResponses.ping();
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/qmail/ping`);
-//     const data = await handleResponse(response);
-
-//     if (data && data.status) {
-//       if (data.status === "error") {
-//         return {
-//           success: false,
-//           error: data.message || "Server returned error status"
-//         };
-//       }
-      
-//       if (data.status === "ok" || data.status === "healing") {
-//         return {
-//           success: true,
-//           data: {
-//             status: data.status,
-//             timestamp: data.timestamp,
-//             beaconStatus: data.beacon_status,
-//             hasMail: data.has_mail || false,
-//             messageCount: data.message_count || 0,
-//             messages: data.messages || []
-//           }
-//         };
-//       }
-//     }
-//     throw new Error("Invalid ping response");
-//   } catch (error) {
-//     console.error("Ping failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Searches emails across all folders.
-//  */
-// export const searchEmails = async (query, limit = 50, offset = 0) => {
-//   if (MOCK_MODE) return mockApiResponses.search(query, limit, offset);
-  
-//   try {
-//     const url = `${API_BASE_URL}/mail/search?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
-//     const response = await fetch(url);
-//     const data = await handleResponse(response);
-
-//     if (data && Array.isArray(data.results)) {
-//       return {
-//         success: true,
-//         data: {
-//           results: data.results,
-//           total: data.total || data.results.length
-//         }
-//       };
-//     } else {
-//       throw new Error("Invalid response from search endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Search failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Marks an email as read or unread.
-//  */
-// export const markEmailRead = async (emailId, isRead = true) => {
-//   if (MOCK_MODE) return mockApiResponses.markRead(emailId, isRead);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/read`, {
-//       method: 'PUT',
-//       headers: { 'Content-Type': 'application/json' },
-//       body: JSON.stringify({ is_read: isRead })
-//     });
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           message: data.message,
-//           emailId: emailId,
-//           isRead: isRead
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from mark read endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Mark email read failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Moves an email to a different folder.
-//  */
-// export const moveEmail = async (emailId, folder) => {
-//   if (MOCK_MODE) return mockApiResponses.moveEmail(emailId, folder);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/move`, {
-//       method: 'PUT',
-//       headers: { 'Content-Type': 'application/json' },
-//       body: JSON.stringify({ folder: folder })
-//     });
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           message: data.message,
-//           emailId: emailId,
-//           folder: folder
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from move email endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Move email failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Deletes an email (moves to trash).
-//  */
-// export const deleteEmail = async (emailId) => {
-//   if (MOCK_MODE) return mockApiResponses.deleteEmail(emailId);
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/mail/${emailId}`, {
-//       method: 'DELETE'
-//     });
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           message: data.message,
-//           emailId: emailId
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from delete email endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Delete email failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// /**
-//  * Triggers manual sync (mock only supports this as no-op)
-//  */
-// export const syncData = async () => {
-//   if (MOCK_MODE) {
-//     return {
-//       success: true,
-//       data: {
-//         message: 'Mock sync completed',
-//         usersUpdated: 0,
-//         serversUpdated: 0,
-//         timestamp: Date.now()
-//       }
-//     };
-//   }
-  
-//   try {
-//     const response = await fetch(`${API_BASE_URL}/admin/sync`, {
-//       method: 'POST'
-//     });
-//     const data = await handleResponse(response);
-
-//     if (data && data.status === "success") {
-//       return {
-//         success: true,
-//         data: {
-//           message: data.message || 'Sync completed',
-//           usersUpdated: data.users_synced || 0,
-//           serversUpdated: data.servers_synced || 0,
-//           timestamp: data.timestamp
-//         },
-//       };
-//     } else {
-//       throw new Error("Invalid response from sync endpoint");
-//     }
-//   } catch (error) {
-//     console.error("Sync data failed:", error);
-//     return { success: false, error: error.message };
-//   }
-// };
+/**
+ * Sends an email
+ * @param {Object} emailData
+ * @param {string} emailData.to - Recipient address
+ * @param {string} emailData.subject - Email subject
+ * @param {string} emailData.body - Email body
+ * @param {string} [emailData.cc] - CC recipients
+ * @param {string} [emailData.bcc] - BCC recipients
+ * @param {string} [emailData.subsubject] - Sub-subject
+ * @param {Array} [emailData.attachments] - File attachments
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const sendEmail = async (emailData) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: emailData.to,
+        subject: emailData.subject || "",
+        body: emailData.body || "",
+        cc: emailData.cc || "",
+        bcc: emailData.bcc || "",
+        subsubject: emailData.subsubject || "",
+        attachments: emailData.attachments || []
+      })
+    });
+    
+    const data = await handleResponse(response);
+    
+    console.log("Data received from /mail/send:", data);
+    
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message || "Email sent successfully",
+          taskId: data.task_id,
+          timestamp: data.timestamp
+        }
+      };
+    } else {
+      throw new Error(data.error || "Invalid response from send endpoint");
+    }
+  } catch (error) {
+    console.error("Send email failed:", error);
+    const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
+    return { success: false, error: errorMessage };
+  }
+};

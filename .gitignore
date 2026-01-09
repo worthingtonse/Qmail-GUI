@@ -29,3 +29,6 @@ lh/
 *.njsproj
 *.sln
 *.sw?
+
+backend/
+release/

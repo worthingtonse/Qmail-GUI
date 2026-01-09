@@ -347,93 +347,156 @@ const handleSaveDraft = async () => {
       .filter((email) => email.length > 0);
   };
 
+  // const handleSend = async () => {
+
+  //   // Check wallet balance first (passed as prop)
+  //   if (walletBalance && walletBalance.folders.bank.value < 1) {
+  //     setError(
+  //       "Insufficient balance. You need at least 1 CC to send an email."
+  //     );
+  //     return;
+  //   }
+
+  //   // Validate required fields
+  //   if (!to || to.trim() === "") {
+  //     setError("Please provide at least one recipient.");
+  //     return;
+  //   }
+
+  //   if (!subject || subject.trim() === "") {
+  //     setError("Please provide a subject.");
+  //     return;
+  //   }
+
+  //   setIsSending(true);
+  //   setError(null);
+  //   setSendingStatus("sending");
+  //   setSendProgress("Preparing email...");
+  //   setProgress(0);
+
+  //   try {
+  //     // Parse email addresses
+  //     const toList = parseEmailList(to);
+  //     const ccList = parseEmailList(cc);
+  //     const bccList = parseEmailList(bcc);
+
+  //     // Validate email lists
+  //     if (toList.length === 0) {
+  //       throw new Error("At least one recipient is required");
+  //     }
+
+  //     // Build email data object matching the API structure
+  //     const emailData = {
+  //       to: toList,
+  //       cc: ccList,
+  //       bcc: bccList,
+  //       subject: subject.trim(),
+  //       subsubject: subsubject.trim() || "",
+  //       body: body || "",
+  //       attachments: [], // No attachments support yet
+  //       storage_weeks: storageWeeks,
+  //     };
+
+  //     setSendProgress("Sending email...");
+  //     setProgress(10);
+
+  //     // Call the sendEmail API
+  //     const result = await sendEmail(emailData);
+
+  //     if (result.success) {
+  //       const newTaskId = result.data.taskId;
+  //       setTaskId(newTaskId);
+  //       setSendProgress(`Email queued for sending...`);
+  //       setProgress(20);
+
+  //       // Start enhanced task status polling
+  //       if (newTaskId) {
+  //         setIsPolling(true);
+  //         setTimeout(() => pollTaskStatus(newTaskId), 1000);
+  //       } else {
+  //         // If no task ID, assume immediate success
+  //         setSendingStatus("completed");
+  //         setSendProgress("Email sent successfully!");
+  //         setTimeout(() => {
+  //           onSend({ to, cc, bcc, subject, body });
+  //           setIsSending(false);
+  //           setSendingStatus(null);
+  //           setSendProgress("");
+  //         }, 1500);
+  //       }
+  //     } else {
+  //       throw new Error(result.error || "Failed to queue email");
+  //     }
+  //   } catch (error) {
+  //     console.error("Send email error:", error);
+  //     setError(`Failed to send email: ${error.message}`);
+  //     setIsSending(false);
+  //     setSendingStatus("failed");
+  //     setSendProgress("");
+  //   }
+  // };
+
   const handleSend = async () => {
-    // Check wallet balance first (passed as prop)
-    if (walletBalance && walletBalance.folders.bank.value < 1) {
-      setError(
-        "Insufficient balance. You need at least 1 CC to send an email."
-      );
-      return;
-    }
+  // Validation
+  if (!to.trim()) {
+    setError("Please enter a recipient address");
+    return;
+  }
+  if (!subject.trim()) {
+    setError("Please enter a subject");
+    return;
+  }
+  if (!body.trim()) {
+    setError("Please enter a message");
+    return;
+  }
 
-    // Validate required fields
-    if (!to || to.trim() === "") {
-      setError("Please provide at least one recipient.");
-      return;
-    }
+  setIsSending(true);
+  setSendingStatus("sending");
+  setSendProgress("Preparing email...");
+  setError(null);
 
-    if (!subject || subject.trim() === "") {
-      setError("Please provide a subject.");
-      return;
-    }
+  try {
+    const emailData = {
+      to: to.trim(),
+      subject: subject.trim(),
+      body: body.trim(),
+      cc: cc.trim(),
+      bcc: bcc.trim(),
+      subsubject: subsubject.trim(),
+      attachments: []
+    };
 
-    setIsSending(true);
-    setError(null);
-    setSendingStatus("sending");
-    setSendProgress("Preparing email...");
-    setProgress(0);
+    const result = await sendEmail(emailData);
 
-    try {
-      // Parse email addresses
-      const toList = parseEmailList(to);
-      const ccList = parseEmailList(cc);
-      const bccList = parseEmailList(bcc);
-
-      // Validate email lists
-      if (toList.length === 0) {
-        throw new Error("At least one recipient is required");
-      }
-
-      // Build email data object matching the API structure
-      const emailData = {
-        to: toList,
-        cc: ccList,
-        bcc: bccList,
-        subject: subject.trim(),
-        subsubject: subsubject.trim() || "",
-        body: body || "",
-        attachments: [], // No attachments support yet
-        storage_weeks: storageWeeks,
-      };
-
-      setSendProgress("Sending email...");
-      setProgress(10);
-
-      // Call the sendEmail API
-      const result = await sendEmail(emailData);
-
-      if (result.success) {
-        const newTaskId = result.data.taskId;
-        setTaskId(newTaskId);
-        setSendProgress(`Email queued for sending...`);
-        setProgress(20);
-
-        // Start enhanced task status polling
-        if (newTaskId) {
-          setIsPolling(true);
-          setTimeout(() => pollTaskStatus(newTaskId), 1000);
-        } else {
-          // If no task ID, assume immediate success
-          setSendingStatus("completed");
-          setSendProgress("Email sent successfully!");
-          setTimeout(() => {
-            onSend({ to, cc, bcc, subject, body });
-            setIsSending(false);
-            setSendingStatus(null);
-            setSendProgress("");
-          }, 1500);
-        }
+    if (result.success) {
+      // Start polling if we have a task ID
+      if (result.data.taskId) {
+        setTaskId(result.data.taskId);
+        setIsPolling(true);
+        pollTaskStatus(result.data.taskId);
       } else {
-        throw new Error(result.error || "Failed to queue email");
+        // If no task ID, assume immediate success
+        setSendingStatus("completed");
+        setSendProgress("Email sent successfully!");
+        setTimeout(() => {
+          onSend(emailData);
+          setIsSending(false);
+          setSendingStatus(null);
+          setSendProgress("");
+        }, 1500);
       }
-    } catch (error) {
-      console.error("Send email error:", error);
-      setError(`Failed to send email: ${error.message}`);
-      setIsSending(false);
-      setSendingStatus("failed");
-      setSendProgress("");
+    } else {
+      throw new Error(result.error || "Failed to send email");
     }
-  };
+  } catch (error) {
+    console.error("Send error:", error);
+    setError(error.message || "Failed to send email");
+    setIsSending(false);
+    setSendingStatus("failed");
+    setSendProgress("");
+  }
+};
 
   // Enhanced progress indicator
   const renderProgressIndicator = () => {

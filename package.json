@@ -1,10 +1,10 @@
 {
-  "name": "cloudcoin-pro",
+  "name": "q-mail",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "main": "public/electron.cjs",
-  "description": "CloudCoin Pro Edition - Authenticate, Store and Payout CloudCoins",
+  "main": "electron.cjs",
+  "description": "QMail-Decentralized.Quantum-Safe.Unsurveillable.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -18,34 +18,33 @@
     "dist": "npm run build && electron-builder --publish=never"
   },
   "build": {
-    "appId": "com.cloudcoin.pro",
-    "productName": "CloudCoin Pro",
+    "appId": "com.qmail.app",
+    "productName": "QMail",
     "directories": {
-      "output": "dist"
+      "output": "release"
     },
     "files": [
       "dist/**/*",
-      "public/electron.cjs",
-      "public/preload.cjs",
-      "public/eff_large_wordlist.txt",
+      "electron.cjs",
+      "preload.cjs",
       "node_modules/**/*"
     ],
     "extraResources": [
       {
         "from": "public/eff_large_wordlist.txt",
         "to": "eff_large_wordlist.txt"
+      },
+      {
+        "from": "backend/qmail-backend.exe",
+        "to": "backend/qmail-backend.exe"
+      },
+      {
+        "from": "backend/config",
+        "to": "backend/config"
       }
     ],
     "portable": {
-      "artifactName": "CloudCoin-Pro-Portable.exe"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowElevation": false,
-      "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": false,
-      "createStartMenuShortcut": false,
-      "artifactName": "CloudCoin-Pro-Setup.exe"
+      "artifactName": "QMail.exe"
     },
     "win": {
       "target": [
@@ -54,22 +53,9 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "public/icon.ico"
-    },
-    "mac": {
-      "target": "dmg",
-      "category": "public.app-category.finance"
-    },
-    "linux": {
-      "target": "AppImage"
     }
   },
   "dependencies": {
