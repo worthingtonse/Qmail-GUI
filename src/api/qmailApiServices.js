@@ -2,7 +2,7 @@
 // This file contains all QMail-specific API call functions.
 
 // Define the base URL for your local server
-const API_BASE_URL = "http://localhost:8080/api"
+const API_BASE_URL = "http://localhost:8080/api";
 /**
  * A helper function to handle fetch responses.
  * It reads the exact backend error payload even on non-ok responses.
@@ -10,14 +10,16 @@ const API_BASE_URL = "http://localhost:8080/api"
  */
 const handleResponse = async (response) => {
   let data;
-  
+
   try {
     // 1. Always attempt to parse the JSON first, even if it's an error status
     data = await response.json();
   } catch (e) {
     // 2. If it's not JSON (like a raw server crash or HTML page) and not OK, throw standard error
     if (!response.ok) {
-      throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Server responded with ${response.status} ${response.statusText}`,
+      );
     }
     return null;
   }
@@ -26,7 +28,11 @@ const handleResponse = async (response) => {
   if (!response.ok) {
     // Extract the exact error message from your Python backend
     // It checks 'error', then 'details', then 'message'
-    const backendError = data.error || data.details || data.message || `Server responded with ${response.status}`;
+    const backendError =
+      data.error ||
+      data.details ||
+      data.message ||
+      `Server responded with ${response.status}`;
     throw new Error(backendError);
   }
 
@@ -130,7 +136,7 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
       const transformedEmails = data.emails.map((email) => ({
         id: email.EmailID,
         subject: email.Subject || "No Subject",
-        sender: "Unknown", // Backend doesn't provide sender in list view
+        sender: "Unknown",
         senderEmail: "",
         timestamp: email.ReceivedTimestamp || email.SentTimestamp,
         sentTimestamp: email.SentTimestamp,
@@ -138,10 +144,11 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
         isRead: email.is_read || false,
         isStarred: email.is_starred || false,
         isTrashed: email.is_trashed || false,
+        isDownloaded: email.downloaded,
+
         folder: email.folder || folder,
-        // Add preview as empty - will be filled when full email is loaded
         preview: "",
-        body: ""
+        body: "",
       }));
 
       return {
@@ -227,9 +234,9 @@ export const getDrafts = async () => {
 export const saveDraft = async (draftData) => {
   try {
     const response = await fetch(`${API_BASE_URL}/mail/draft`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         subject: draftData.subject || "",
@@ -237,22 +244,22 @@ export const saveDraft = async (draftData) => {
         to: draftData.to || "",
         cc: draftData.cc || "",
         bcc: draftData.bcc || "",
-        subsubject: draftData.subsubject || ""
-      })
+        subsubject: draftData.subsubject || "",
+      }),
     });
-    
+
     const data = await handleResponse(response);
-    
+
     console.log("Data received from /mail/draft:", data);
-    
+
     if (data && data.status === "success") {
       return {
         success: true,
         data: {
           message: data.message || "Draft saved successfully",
           draftId: data.draft_id,
-          timestamp: data.timestamp
-        }
+          timestamp: data.timestamp,
+        },
       };
     } else {
       throw new Error(data.error || "Invalid response from draft endpoint");
@@ -279,9 +286,9 @@ export const saveDraft = async (draftData) => {
 export const updateDraft = async (draftId, draftData) => {
   try {
     const response = await fetch(`${API_BASE_URL}/mail/draft/${draftId}`, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         subject: draftData.subject || "",
@@ -289,25 +296,27 @@ export const updateDraft = async (draftId, draftData) => {
         to: draftData.to || "",
         cc: draftData.cc || "",
         bcc: draftData.bcc || "",
-        subsubject: draftData.subsubject || ""
-      })
+        subsubject: draftData.subsubject || "",
+      }),
     });
-    
+
     const data = await handleResponse(response);
-    
+
     console.log("Data received from PUT /mail/draft:", data);
-    
+
     if (data && data.status === "success") {
       return {
         success: true,
         data: {
           message: data.message || "Draft updated successfully",
           draftId: draftId,
-          timestamp: data.timestamp
-        }
+          timestamp: data.timestamp,
+        },
       };
     } else {
-      throw new Error(data.error || "Invalid response from update draft endpoint");
+      throw new Error(
+        data.error || "Invalid response from update draft endpoint",
+      );
     }
   } catch (error) {
     console.error("Update draft failed:", error);
@@ -323,7 +332,7 @@ export const updateDraft = async (draftId, draftData) => {
  * - On application startup to get current mail state
  * - When user clicks "Refresh" button to force immediate check
  * - To detect if Identity Coin needs healing (Status 200 Invalid AN)
- * 
+ *
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 /**
@@ -342,10 +351,10 @@ export const pingQMail = async () => {
       if (data.status === "error") {
         return {
           success: false,
-          error: data.message || "Server returned error status"
+          error: data.message || "Server returned error status",
         };
       }
-      
+
       // Handle ok and healing statuses
       if (data.status === "ok" || data.status === "healing") {
         return {
@@ -354,23 +363,25 @@ export const pingQMail = async () => {
             status: data.status,
             timestamp: data.timestamp,
             // FIX 1: Default to 'good' if status is 'ok' but beacon_status is missing
-            beaconStatus: data.beacon_status || (data.status === 'ok' ? 'good' : 'unknown'),
+            beaconStatus:
+              data.beacon_status || (data.status === "ok" ? "good" : "unknown"),
             // FIX 2: Check notification_count for mail presence
-            hasMail: data.has_mail || (data.notification_count > 0) || false,
+            hasMail: data.has_mail || data.notification_count > 0 || false,
             // FIX 3: Map notification_count to messageCount (which frontend expects)
             messageCount: data.message_count || data.notification_count || 0,
             messages: data.messages || [],
-            
+
             // Healing logic
             isHealing: data.status === "healing",
-            healingMessage: data.status === "healing" 
-              ? "Repairing mailbox identity... please wait." 
-              : null
+            healingMessage:
+              data.status === "healing"
+                ? "Repairing mailbox identity... please wait."
+                : null,
           },
         };
       }
     }
-    
+
     throw new Error("Invalid response from qmail ping endpoint");
   } catch (error) {
     console.error("QMail ping failed:", error);
@@ -464,68 +475,67 @@ export const searchEmails = async (query, limit = 50, offset = 0) => {
 };
 
 // Enhanced task status polling
-  // const pollTaskStatus = async (currentTaskId) => {
-  //   // Removed the !isPolling check here to prevent stale closure aborts on the first call
-  //   if (!currentTaskId) return;
+// const pollTaskStatus = async (currentTaskId) => {
+//   // Removed the !isPolling check here to prevent stale closure aborts on the first call
+//   if (!currentTaskId) return;
 
-  //   try {
-  //     const result = await getTaskStatus(currentTaskId);
-      
-  //     if (result.success) {
-  //       // Correctly extract the mapped fields from your qmailApiServices.js getTaskStatus response
-  //       const { 
-  //         state, 
-  //         progress: currentProgress, 
-  //         message, 
-  //         isFinished, 
-  //         isSuccessful, 
-  //         error: taskError 
-  //       } = result.data;
+//   try {
+//     const result = await getTaskStatus(currentTaskId);
 
-  //       setProgress(currentProgress || 0);
-  //       setSendProgress(message || "Processing...");
+//     if (result.success) {
+//       // Correctly extract the mapped fields from your qmailApiServices.js getTaskStatus response
+//       const {
+//         state,
+//         progress: currentProgress,
+//         message,
+//         isFinished,
+//         isSuccessful,
+//         error: taskError
+//       } = result.data;
 
-  //       // Check the exact completion flags from the task manager
-  //       if (isFinished) {
-  //         if (isSuccessful || state === "completed") {
-  //           setSendingStatus("completed");
-  //           setIsPolling(false);
-  //           setSendProgress("Email sent successfully!");
-  //           setTimeout(() => {
-  //             onSend({ to, cc, bcc, subject, body });
-  //             setIsSending(false);
-  //             setSendingStatus(null);
-  //             setSendProgress("");
-  //             setTaskId(null);
-  //           }, 1500);
-  //         } else {
-  //           setSendingStatus("failed");
-  //           setIsPolling(false);
-  //           setError(taskError || message || "Failed to send email");
-  //           setIsSending(false);
-  //           setTaskId(null);
-  //         }
-  //       } else {
-  //         // Task is still running, keep polling
-  //         setSendingStatus("sending");
-  //         setTimeout(() => pollTaskStatus(currentTaskId), 1000);
-  //       }
-  //     } else {
-  //       console.error("Failed to get task status:", result.error);
-  //       setIsPolling(false);
-  //       setSendingStatus("failed");
-  //       setError("Failed to track email status");
-  //       setIsSending(false);
-  //     }
-  //   } catch (error) {
-  //     console.error("Task polling error:", error);
-  //     setIsPolling(false);
-  //     setSendingStatus("failed");
-  //     setError("Failed to track email status");
-  //     setIsSending(false);
-  //   }
-  // };
+//       setProgress(currentProgress || 0);
+//       setSendProgress(message || "Processing...");
 
+//       // Check the exact completion flags from the task manager
+//       if (isFinished) {
+//         if (isSuccessful || state === "completed") {
+//           setSendingStatus("completed");
+//           setIsPolling(false);
+//           setSendProgress("Email sent successfully!");
+//           setTimeout(() => {
+//             onSend({ to, cc, bcc, subject, body });
+//             setIsSending(false);
+//             setSendingStatus(null);
+//             setSendProgress("");
+//             setTaskId(null);
+//           }, 1500);
+//         } else {
+//           setSendingStatus("failed");
+//           setIsPolling(false);
+//           setError(taskError || message || "Failed to send email");
+//           setIsSending(false);
+//           setTaskId(null);
+//         }
+//       } else {
+//         // Task is still running, keep polling
+//         setSendingStatus("sending");
+//         setTimeout(() => pollTaskStatus(currentTaskId), 1000);
+//       }
+//     } else {
+//       console.error("Failed to get task status:", result.error);
+//       setIsPolling(false);
+//       setSendingStatus("failed");
+//       setError("Failed to track email status");
+//       setIsSending(false);
+//     }
+//   } catch (error) {
+//     console.error("Task polling error:", error);
+//     setIsPolling(false);
+//     setSendingStatus("failed");
+//     setError("Failed to track email status");
+//     setIsSending(false);
+//   }
+// };
 
 /**
  * Gets the list of available mail folders.
@@ -599,7 +609,7 @@ export const getEmailById = async (emailId) => {
   try {
     if (!emailId || emailId.length !== 32) {
       throw new Error(
-        "Invalid email ID. Must be a 32-character hexadecimal string."
+        "Invalid email ID. Must be a 32-character hexadecimal string.",
       );
     }
 
@@ -608,24 +618,30 @@ export const getEmailById = async (emailId) => {
 
     console.log("Data received from /mail/{id}:", data);
 
-    if (data && data.id) {
+    // Look for EmailID or email_id from the Python backend instead of just 'id'
+    if (data && (data.id || data.EmailID || data.email_id)) {
       return {
         success: true,
         data: {
-          id: data.id,
-          from: data.from,
-          to: data.to || [],
+          id: data.id || data.EmailID || data.email_id || emailId,
+          from: data.sender?.auto_address || data.from || "Unknown",
+          to: data.recipients || data.to || [],
           cc: data.cc || [],
-          subject: data.subject,
-          timestamp: data.timestamp,
+
+          subject: data.Subject || data.subject || "No Subject",
+          body: data.Body || data.body || "",
+          timestamp: data.ReceivedTimestamp || data.timestamp,
           isRead: data.is_read,
           folder: data.folder,
+
+          isDownloaded: data.downloaded !== false,
+
           attachments: (data.attachments || []).map((att) => ({
-            fileType: att.file_type,
-            filename: att.filename,
-            size: att.size,
+            fileType: att.file_extension || att.file_type,
+            filename: att.name || att.filename,
+            size: att.size_bytes || att.size,
+            attachmentId: att.attachment_id || att.Attachment_id,
           })),
-          bodyPreview: data.body_preview,
         },
       };
     } else {
@@ -647,7 +663,7 @@ export const getEmailAttachments = async (emailId) => {
   try {
     if (!emailId || emailId.length !== 32) {
       throw new Error(
-        "Invalid email ID. Must be a 32-character hexadecimal string."
+        "Invalid email ID. Must be a 32-character hexadecimal string.",
       );
     }
 
@@ -689,16 +705,18 @@ export const getContacts = async (query = "") => {
   try {
     // Always call the base endpoint without search params
     const url = `${API_BASE_URL}/contacts`;
-    
+
     console.log("Fetching contacts from:", url);
-    
+
     const response = await fetch(url);
-    
+
     // Check if response is ok before trying to parse JSON
     if (!response.ok) {
-      throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+      throw new Error(
+        `Server responded with ${response.status} ${response.statusText}`,
+      );
     }
-    
+
     const data = await response.json();
     console.log("Data received from /contacts:", data);
 
@@ -715,26 +733,37 @@ export const getContacts = async (query = "") => {
 
     // Transform the contacts
     let transformedContacts = contacts.map((contact) => ({
-      userId: contact.user_id || contact.userId || Math.random().toString(36).substr(2, 9),
+      userId:
+        contact.user_id ||
+        contact.userId ||
+        Math.random().toString(36).substr(2, 9),
       firstName: contact.first_name || contact.firstName || "",
       lastName: contact.last_name || contact.lastName || "",
       middleName: contact.middle_name || contact.middleName || "",
-      autoAddress: contact.auto_address || contact.autoAddress || contact.email || "",
+      autoAddress:
+        contact.auto_address || contact.autoAddress || contact.email || "",
       description: contact.description || "",
       sendingFee: contact.sending_fee || contact.sendingFee || 0,
       beaconId: contact.beacon_id || contact.beaconId || "",
-      fullName: `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() || contact.name || "Unknown Contact",
+      fullName:
+        `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() ||
+        contact.name ||
+        "Unknown Contact",
     }));
 
     // If we have a search query, filter the results client-side
     if (query && query.trim() !== "") {
       const searchTerm = query.trim().toLowerCase();
-      transformedContacts = transformedContacts.filter((contact) =>
-        contact.fullName.toLowerCase().includes(searchTerm) ||
-        contact.autoAddress.toLowerCase().includes(searchTerm) ||
-        (contact.firstName && contact.firstName.toLowerCase().includes(searchTerm)) ||
-        (contact.lastName && contact.lastName.toLowerCase().includes(searchTerm)) ||
-        (contact.description && contact.description.toLowerCase().includes(searchTerm))
+      transformedContacts = transformedContacts.filter(
+        (contact) =>
+          contact.fullName.toLowerCase().includes(searchTerm) ||
+          contact.autoAddress.toLowerCase().includes(searchTerm) ||
+          (contact.firstName &&
+            contact.firstName.toLowerCase().includes(searchTerm)) ||
+          (contact.lastName &&
+            contact.lastName.toLowerCase().includes(searchTerm)) ||
+          (contact.description &&
+            contact.description.toLowerCase().includes(searchTerm)),
       );
     }
 
@@ -771,7 +800,7 @@ export const getServers = async (includeUnavailable = false) => {
         data: {
           servers: data.servers,
           totalServers: data.count || data.servers.length,
-          availableServers: data.servers.filter(s => s.is_available).length
+          availableServers: data.servers.filter((s) => s.is_available).length,
         },
       };
     } else {
@@ -802,12 +831,16 @@ export const getParityServer = async () => {
           parityServer: data.parity_server
             ? {
                 serverId: data.parity_server.server_id,
-                address: data.parity_server.ip_address,  // ← Changed from address to ip_address
+                address: data.parity_server.ip_address, // ← Changed from address to ip_address
                 port: data.parity_server.port,
                 isAvailable: data.parity_server.is_available,
               }
             : null,
-          message: data.message || (data.status === 'configured' ? 'Parity server configured' : 'Not configured'),
+          message:
+            data.message ||
+            (data.status === "configured"
+              ? "Parity server configured"
+              : "Not configured"),
         },
       };
     } else {
@@ -827,7 +860,7 @@ export const getParityServer = async () => {
 export const syncData = async () => {
   try {
     const response = await fetch(`${API_BASE_URL}/admin/sync`, {
-      method: 'POST'
+      method: "POST",
     });
     const data = await handleResponse(response);
 
@@ -837,10 +870,10 @@ export const syncData = async () => {
       return {
         success: true,
         data: {
-          message: data.message || 'Sync completed',
+          message: data.message || "Sync completed",
           usersUpdated: data.users_synced || 0,
           serversUpdated: data.servers_synced || 0,
-          timestamp: data.timestamp
+          timestamp: data.timestamp,
         },
       };
     } else {
@@ -875,19 +908,19 @@ export const getWalletBalance = async () => {
           folders: {
             bank: {
               coins: data.folders.bank_coins,
-              value: data.folders.bank_value
+              value: data.folders.bank_value,
             },
             fracked: {
               coins: data.folders.fracked_coins,
-              value: data.folders.fracked_value
+              value: data.folders.fracked_value,
             },
             limbo: {
               coins: data.folders.limbo_coins,
-              value: data.folders.limbo_value
-            }
+              value: data.folders.limbo_value,
+            },
           },
           denominations: data.denominations,
-          warnings: data.warnings || []
+          warnings: data.warnings || [],
         },
       };
     } else {
@@ -909,11 +942,11 @@ export const getWalletBalance = async () => {
 export const markEmailRead = async (emailId, isRead = true) => {
   try {
     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/read`, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ is_read: isRead })
+      body: JSON.stringify({ is_read: isRead }),
     });
     const data = await handleResponse(response);
 
@@ -925,7 +958,7 @@ export const markEmailRead = async (emailId, isRead = true) => {
         data: {
           message: data.message,
           emailId: emailId,
-          isRead: isRead
+          isRead: isRead,
         },
       };
     } else {
@@ -946,11 +979,11 @@ export const markEmailRead = async (emailId, isRead = true) => {
 export const moveEmail = async (emailId, folder) => {
   try {
     const response = await fetch(`${API_BASE_URL}/mail/${emailId}/move`, {
-      method: 'PUT',
+      method: "PUT",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ folder: folder })
+      body: JSON.stringify({ folder: folder }),
     });
     const data = await handleResponse(response);
 
@@ -962,7 +995,7 @@ export const moveEmail = async (emailId, folder) => {
         data: {
           message: data.message,
           emailId: emailId,
-          folder: folder
+          folder: folder,
         },
       };
     } else {
@@ -982,7 +1015,7 @@ export const moveEmail = async (emailId, folder) => {
 export const deleteEmail = async (emailId) => {
   try {
     const response = await fetch(`${API_BASE_URL}/mail/${emailId}`, {
-      method: 'DELETE'
+      method: "DELETE",
     });
     const data = await handleResponse(response);
 
@@ -993,7 +1026,7 @@ export const deleteEmail = async (emailId) => {
         success: true,
         data: {
           message: data.message,
-          emailId: emailId
+          emailId: emailId,
         },
       };
     } else {
@@ -1009,7 +1042,7 @@ export const deleteEmail = async (emailId) => {
 // export const downloadLockerCoins = async (lockerCode, onProgress) => {
 //   try {
 //     const cleanCode = lockerCode.replace(/-/g, '').trim();
-    
+
 //     // if (cleanCode.length !== 8) {
 //     //   throw new Error('Locker code must be 8 characters');
 //     // }
@@ -1052,7 +1085,7 @@ export const deleteEmail = async (emailId) => {
 // export const createMailbox = async (address, domain, lockerCode, recoveryEmail = null) => {
 //   try {
 //     const cleanCode = lockerCode.replace(/-/g, '').trim();
-    
+
 //     // Convert to hex
 //     const hexCode = Array.from(cleanCode)
 //       .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
@@ -1096,27 +1129,31 @@ export const sendEmail = async (emailData) => {
       subject: emailData.subject || "",
       body: emailData.body || "",
       attachments: emailData.attachments || [],
-      storage_weeks: emailData.storage_weeks !== undefined ? emailData.storage_weeks : 8
+      storage_weeks:
+        emailData.storage_weeks !== undefined ? emailData.storage_weeks : 8,
     };
 
     const response = await fetch(`${API_BASE_URL}/mail/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-    
+
     const data = await handleResponse(response);
     console.log("Send API Response:", data);
-    
+
     // Check for 'accepted', 'success', or the presence of 'task_id'
-    if (data && (data.status === "success" || data.status === "accepted" || data.task_id)) {
+    if (
+      data &&
+      (data.status === "success" || data.status === "accepted" || data.task_id)
+    ) {
       return {
         success: true,
         data: {
           message: data.message || "Email queued successfully",
           taskId: data.task_id, // Safely extract the task ID from Python
-          timestamp: data.timestamp
-        }
+          timestamp: data.timestamp,
+        },
       };
     } else {
       throw new Error(data.error || "Invalid response from send endpoint");
@@ -1131,19 +1168,18 @@ export const sendEmail = async (emailData) => {
 export const checkVersion = async () => {
   try {
     const response = await fetch(`${API_BASE_URL}/admin/version-check`);
-    
+
     if (!response.ok) {
-      throw new Error('Failed to check version');
+      throw new Error("Failed to check version");
     }
 
     const data = await response.json();
     return { success: true, data };
   } catch (error) {
-    console.error('Version check error:', error);
+    console.error("Version check error:", error);
     return { success: false, error: error.message };
   }
 };
-
 
 /**
  * Imports credentials using a locker code.
@@ -1154,11 +1190,11 @@ export const checkVersion = async () => {
 export const importCredentials = async (lockerCode) => {
   try {
     const response = await fetch(`${API_BASE_URL}/setup/import-credentials`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ locker_code: lockerCode })
+      body: JSON.stringify({ locker_code: lockerCode }),
     });
 
     const data = await response.json();
@@ -1167,10 +1203,10 @@ export const importCredentials = async (lockerCode) => {
       return { success: true, data };
     } else {
       // Handles HTTP 400, 404, etc.
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: data.error || "Failed to import credentials",
-        status: response.status
+        status: response.status,
       };
     }
   } catch (error) {
@@ -1184,7 +1220,9 @@ export const importCredentials = async (lockerCode) => {
  */
 export const healWallet = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallet/heal`, { method: 'POST' });
+    const response = await fetch(`${API_BASE_URL}/wallet/heal`, {
+      method: "POST",
+    });
     return await handleResponse(response);
   } catch (error) {
     console.error("Heal API failed:", error);
@@ -1197,7 +1235,9 @@ export const healWallet = async () => {
  */
 export const prepareChange = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallet/prepare-change`, { method: 'POST' });
+    const response = await fetch(`${API_BASE_URL}/wallet/prepare-change`, {
+      method: "POST",
+    });
     return await handleResponse(response);
   } catch (error) {
     console.error("Prepare Change API failed:", error);
@@ -1214,7 +1254,7 @@ export const getIdentity = async () => {
     const response = await fetch(`${API_BASE_URL}/account/identity`);
     if (response.ok) {
       const data = await response.json();
-      return data; 
+      return data;
     }
     return null;
   } catch (error) {
@@ -1267,7 +1307,9 @@ export const getMailAttachmentsList = async (guid) => {
  */
 export const downloadMailAttachment = async (guid, n) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${guid}/attachment/${n}`);
+    const response = await fetch(
+      `${API_BASE_URL}/mail/${guid}/attachment/${n}`,
+    );
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {
