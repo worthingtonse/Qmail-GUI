@@ -136,8 +136,8 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
       const transformedEmails = data.emails.map((email) => ({
         id: email.EmailID,
         subject: email.Subject || "No Subject",
-        sender: "Unknown",
-        senderEmail: "",
+        sender: email.sender || "Unknown Sender",
+        senderEmail: email.sender || "",
         timestamp: email.ReceivedTimestamp || email.SentTimestamp,
         sentTimestamp: email.SentTimestamp,
         receivedTimestamp: email.ReceivedTimestamp,
