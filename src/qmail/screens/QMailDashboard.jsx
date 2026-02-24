@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-import { AlertCircle } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
 import ComposeModal from "./ComposeModal";
 import ContactsPane from "./ContactsPane";
 import AccountPane from "./AccountPane";
@@ -9,7 +8,6 @@ import ReadingPane from "./ReadingPane";
 import {
   pingQMail,
   getMailList,
-  getHealthStatus,
   searchEmails,
   getMailCount,
   getMailFolders,
@@ -21,25 +19,14 @@ import {
   markEmailRead,
   moveEmail,
   deleteEmail,
+  getMailNotifications, 
+  downloadEmailContent, 
+  downloadMailAttachment
 } from "../../api/qmailApiServices";
 
 import "./QMailDashboard.css";
 
-// Download progress statuses
-const downloadStatuses = [
-  { status: "QMail: Resolving QMail Servers' IP addresses...", progress: 0 },
-  { status: "QMail: Pinging servers...", progress: 15 },
-  { status: "QMail: Creating sessions...", progress: 30 },
-  { status: "RAIDA: Getting Kerberos Tickets...", progress: 45 },
-  { status: "QMail: Downloading qmail file...", progress: 60 },
-  { status: "Program: Assembling qmail file stripes...", progress: 75 },
-  { status: "Program: Decrypting qmail stripes...", progress: 90 },
-  { status: "QMail: Finished downloading qmail with no errors", progress: 100 },
-];
-
-// Main Dashboard Component
-const QMailDashboard = () => {
-  // State for different views and data
+const QMailDashboard = ({ initValues }) => {
   const [activeView, setActiveView] = useState("inbox");
   const [currentFolder, setCurrentFolder] = useState("inbox");
   const [loading, setLoading] = useState(false);
@@ -50,12 +37,14 @@ const QMailDashboard = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalEmailCount, setTotalEmailCount] = useState(0);
   const EMAILS_PER_PAGE = 50;
+  
   const [mailCounts, setMailCounts] = useState({
     inbox: { unread: 0, total: 0 },
     sent: { unread: 0, total: 0 },
     drafts: { unread: 0, total: 0 },
     trash: { unread: 0, total: 0 },
   });
+  
   const [previousMailCounts, setPreviousMailCounts] = useState({});
   const [walletBalance, setWalletBalance] = useState(null);
   const [folders, setFolders] = useState([]);
@@ -64,9 +53,18 @@ const QMailDashboard = () => {
   const [replyToEmail, setReplyToEmail] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [notification, setNotification] = useState(null);
-  const [serverHealth, setServerHealth] = useState(null);
+  
+  const [pendingMails, setPendingMails] = useState([]);
+  const [isDownloadingItem, setIsDownloadingItem] = useState(null); 
   const [emailAttachments, setEmailAttachments] = useState([]);
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
+  
+  const [serverHealth, setServerHealth] = useState({
+    status: "healthy",
+    service: "QMail Client Core",
+    version: "1.0.0"
+  });
+  
   const [userAccount, setUserAccount] = useState({
     name: "John Doe",
     email: "john.doe@qmail.cloud",
@@ -74,36 +72,67 @@ const QMailDashboard = () => {
     status: "verified",
   });
 
-  // Load initial data
+  // YAHAN FIX KIYA HAI: Sender, Preview aur Timestamp proper keys ke sath map kiye hain
+  const formattedPendingMails = useMemo(() => {
+    return pendingMails.map(notif => ({
+      id: `pending-${notif.guid}`,
+      guid: notif.guid,
+      sender: notif.sender_address || "Unknown Sender",
+      senderEmail: notif.sender_address || "",
+      from: notif.sender_address || "",
+      subject: "🔒 Encrypted Message (Tap to Download)",
+      preview: "Encrypted payload waiting to be downloaded...", 
+      timestamp: notif.timestamp || new Date().toISOString(),
+      isPending: true,
+      isDownloaded: false 
+    }));
+  }, [pendingMails]);
+
+  const displayEmails = useMemo(() => {
+    return [...formattedPendingMails, ...emails];
+  }, [formattedPendingMails, emails]);
+
+  // Background Watcher
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const result = await getMailNotifications();
+        if (result.success && result.data.count > 0) {
+          setPendingMails(prev => {
+            const newNotifs = result.data.notifications.filter(
+              n => !prev.some(p => p.guid === n.guid)
+            );
+            return [...prev, ...newNotifs];
+          });
+        }
+      } catch (error) {
+        console.error("Watch error:", error);
+      }
+    };
+
+    const interval = setInterval(fetchNotifications, 10000);
+    fetchNotifications();
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     loadInitialData();
 
-    // Periodic mail count polling (60 seconds)
     const mailCountInterval = setInterval(() => {
       loadMailCounts();
     }, 60000);
 
-    // Periodic health check heartbeat (30 seconds)
-    const healthInterval = setInterval(() => {
-      loadServerHealth();
-    }, 30000);
-
-    // Periodic wallet balance check (2 minutes)
     const walletInterval = setInterval(() => {
       loadWalletBalance();
     }, 120000);
 
-    // Check health and balance when window regains focus
     const handleFocus = () => {
-      console.log("Window regained focus - checking health and balance");
-      loadServerHealth();
       loadWalletBalance();
     };
     window.addEventListener("focus", handleFocus);
 
     return () => {
       clearInterval(mailCountInterval);
-      clearInterval(healthInterval);
       clearInterval(walletInterval);
       window.removeEventListener("focus", handleFocus);
       if (searchDebounceTimer) {
@@ -112,7 +141,6 @@ const QMailDashboard = () => {
     };
   }, []);
 
-  // Show notifications temporarily
   useEffect(() => {
     if (notification) {
       const timer = setTimeout(() => setNotification(null), 3000);
@@ -123,20 +151,13 @@ const QMailDashboard = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      // Load health status and wallet balance first
       await Promise.all([
-        loadServerHealth(),
         loadWalletBalance(),
         syncData().catch((err) => console.warn("Background sync failed:", err)),
       ]);
 
-      // Load folders and mail counts
       await Promise.all([loadFolders(), loadMailCounts(), loadDrafts()]);
-
-      // Load emails for current folder
       await loadEmails(currentFolder);
-
-      // Check for new mail
       await checkForNewMail();
     } catch (error) {
       console.error("Error loading initial data:", error);
@@ -146,60 +167,15 @@ const QMailDashboard = () => {
     }
   };
 
-  const loadServerHealth = async () => {
-    try {
-      const result = await getHealthStatus();
-      if (result.success) {
-        setServerHealth(result.data);
-        console.log(
-          "Server health:",
-          result.data.status,
-          "- Version:",
-          result.data.version
-        );
-      } else {
-        console.error("Failed to load server health:", result.error);
-        setServerHealth({
-          status: "disconnected",
-          message: result.error,
-          service: "QMail Client Core",
-          version: "unknown",
-        });
-      }
-    } catch (error) {
-      console.error("Health check error:", error);
-      setServerHealth({
-        status: "disconnected",
-        message: "Backend not responding",
-        service: "QMail Client Core",
-        version: "unknown",
-      });
-    }
-  };
-
   const loadWalletBalance = async () => {
     try {
       const result = await getWalletBalance();
       if (result.success) {
         setWalletBalance(result.data);
-        console.log("Wallet balance loaded:", result.data.totalValue, "CC");
-
-        // Check for warnings (missing wallet folders, etc.)
-        if (result.data.warnings && result.data.warnings.length > 0) {
-          console.warn("Wallet warnings:", result.data.warnings);
-          setNotification("Wallet needs attention - check Account page");
-        }
-
-        // Alert if balance is zero
-        if (result.data.totalCoins === 0) {
-          console.warn("No coins in wallet");
-        }
       } else {
-        console.error("Failed to load wallet balance:", result.error);
         setWalletBalance(null);
       }
     } catch (error) {
-      console.error("Wallet balance error:", error);
       setWalletBalance(null);
     }
   };
@@ -210,19 +186,14 @@ const QMailDashboard = () => {
       if (result.success) {
         const draftsList = result.data.drafts || [];
         setDrafts(draftsList);
-        console.log("Drafts loaded:", draftsList);
-
-        // Update mail counts with drafts count
         setMailCounts((prev) => ({
           ...prev,
           drafts: { total: draftsList.length, unread: 0 },
         }));
       } else {
-        console.error("Failed to load drafts:", result.error);
         setDrafts([]);
       }
     } catch (error) {
-      console.error("Drafts loading error:", error);
       setDrafts([]);
     }
   };
@@ -236,13 +207,9 @@ const QMailDashboard = () => {
           loadEmails(currentFolder);
           setNotification("New mail received!");
         }
-      } else {
-        console.error("Ping failed:", result.error);
-        setNotification("Server connection error");
       }
     } catch (error) {
       console.error("Ping error:", error);
-      setNotification("Server connection error");
     }
   };
 
@@ -250,10 +217,7 @@ const QMailDashboard = () => {
     const result = await getMailFolders();
     if (result.success) {
       setFolders(result.data.folders);
-      console.log("Folders loaded:", result.data.folders);
     } else {
-      console.error("Failed to load folders:", result.error);
-      // Set default folders as fallback
       setFolders([
         { name: "inbox", displayName: "Inbox" },
         { name: "sent", displayName: "Sent" },
@@ -269,48 +233,25 @@ const QMailDashboard = () => {
       const newCounts = result.data.counts;
       const summary = result.data.summary;
 
-      // Check if inbox count increased (new mail arrived)
-      if (
-        previousMailCounts.inbox &&
-        newCounts.inbox.total > previousMailCounts.inbox.total
-      ) {
-        const newMailCount =
-          newCounts.inbox.total - previousMailCounts.inbox.total;
-        setNotification(
-          `${newMailCount} new email${newMailCount > 1 ? "s" : ""} arrived!`
-        );
+      if (previousMailCounts.inbox && newCounts.inbox.total > previousMailCounts.inbox.total) {
+        const newMailCount = newCounts.inbox.total - previousMailCounts.inbox.total;
+        setNotification(`${newMailCount} new email${newMailCount > 1 ? "s" : ""} arrived!`);
 
-        // Auto-refresh inbox if user is viewing it
         if (currentFolder === "inbox") {
-          console.log("New mail detected - auto-refreshing inbox");
           loadEmails("inbox");
         }
       }
 
-      // FIX: Force drafts unread count to 0 (drafts don't have unread state)
-      if (newCounts.drafts) {
-        newCounts.drafts.unread = 0;
-      }
+      if (newCounts.drafts) newCounts.drafts.unread = 0;
 
-      // Update browser tab title with unread count
       if (summary.total_unread > 0) {
         document.title = `(${summary.total_unread}) QMail - ${currentFolder}`;
       } else {
         document.title = `QMail - ${currentFolder}`;
       }
 
-      // Save current counts for next comparison
       setPreviousMailCounts(newCounts);
       setMailCounts(newCounts);
-
-      console.log(
-        "Mail counts loaded:",
-        newCounts,
-        "| Unread:",
-        summary.total_unread
-      );
-    } else {
-      console.error("Failed to load mail counts:", result.error);
     }
   };
 
@@ -318,65 +259,50 @@ const QMailDashboard = () => {
     setLoading(true);
 
     try {
-      // Handle drafts separately
       if (folder === "drafts") {
         await loadDrafts();
-        // Transform drafts to match email structure
         const transformedDrafts = drafts.map((draft) => ({
           id: draft.id || `draft_${Date.now()}_${Math.random()}`,
           sender: "You (Draft)",
           senderEmail: userAccount.email,
           subject: draft.subject || "No Subject",
           body: draft.body || draft.content || "",
-          preview:
-            draft.preview || (draft.body ? draft.body.substring(0, 100) : ""),
-          timestamp:
-            draft.timestamp ||
-            draft.created_at ||
-            new Date().toLocaleTimeString(),
+          preview: draft.preview || (draft.body ? draft.body.substring(0, 100) : ""),
+          timestamp: draft.timestamp || draft.created_at || new Date().toLocaleTimeString(),
           isRead: true,
           isDownloaded: true,
           tags: draft.tags || [],
           starred: false,
-          annoyanceReported: false,
           senderStatus: "none",
           isDraft: true,
         }));
         setEmails(transformedDrafts);
-        if (transformedDrafts.length > 0 && !selectedEmail) {
-          setSelectedEmail(transformedDrafts[0]);
-        }
         setLoading(false);
         return;
       }
 
-      // Handle regular email folders
       const offset = currentPage * EMAILS_PER_PAGE;
       const result = await getMailList(folder, EMAILS_PER_PAGE, offset);
       if (result.success) {
         setTotalEmailCount(result.data.totalCount);
-        // Transform API data to match UI structure
+        
         const transformedEmails = result.data.emails.map((email) => ({
-          id: email.id,
-          sender: email.sender || "Unknown",
-          senderEmail: email.senderEmail || "",
-          subject: email.subject || "No Subject",
+          id: email.EmailID || email.id,
+          sender: email.sender || email.sender_address || email.from || "Unknown",
+          senderEmail: email.senderEmail || email.sender_address || "",
+          subject: email.Subject || email.subject || "No Subject",
           body: email.body || "",
-          preview: email.preview || email.subject || "",
-          timestamp: email.receivedTimestamp || email.timestamp,
-          isRead: email.isRead || false,
-          isDownloaded: false, // Will be set when user clicks download
+          preview: email.preview || email.Subject || email.subject || "",
+          timestamp: email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp,
+          isRead: email.is_read || email.isRead || false,
+          isDownloaded: email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true, 
           tags: email.tags || [],
           starred: email.isStarred || false,
-          annoyanceReported: false,
-          senderStatus: "none", // Will be determined later from contacts
+          senderStatus: "none", 
         }));
+        
         setEmails(transformedEmails);
-        if (transformedEmails.length > 0 && !selectedEmail) {
-          setSelectedEmail(transformedEmails[0]);
-        }
       } else {
-        console.error("Failed to load emails:", result.error);
         setEmails([]);
         setNotification("Failed to load emails");
       }
@@ -394,7 +320,6 @@ const QMailDashboard = () => {
     setActiveView(folder);
     setSelectedEmail(null);
 
-    // Update browser tab title
     const unreadCount = mailCounts[folder]?.unread || 0;
     if (unreadCount > 0) {
       document.title = `(${unreadCount}) QMail - ${folder}`;
@@ -406,48 +331,32 @@ const QMailDashboard = () => {
   };
 
   const handleSearch = async (query) => {
-    // Clear existing timer
-    if (searchDebounceTimer) {
-      clearTimeout(searchDebounceTimer);
-    }
-
-    // If query is empty, reload current folder
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
     if (query.trim() === "") {
       loadEmails(currentFolder);
       return;
     }
 
-    // Debounce search by 500ms
     const timer = setTimeout(async () => {
       setLoading(true);
       const result = await searchEmails(query, 50, 0);
       if (result.success) {
         const transformedEmails = result.data.results.map((email) => ({
           id: email.id || Date.now() + Math.random(),
-          sender: email.sender || "Unknown",
-          senderEmail: email.senderEmail || email.from || "",
+          sender: email.sender || email.sender_address || email.from || "Unknown",
+          senderEmail: email.senderEmail || email.sender_address || "",
           subject: email.subject || "No Subject",
           body: email.body || email.content || "",
-          preview:
-            email.preview ||
-            email.snippet ||
-            (email.body ? email.body.substring(0, 100) : ""),
-          timestamp:
-            email.timestamp || email.date || new Date().toLocaleTimeString(),
+          preview: email.preview || email.snippet || (email.body ? email.body.substring(0, 100) : ""),
+          timestamp: email.timestamp || email.date || new Date().toLocaleTimeString(),
           isRead: email.isRead || email.read || false,
-          isDownloaded: email.isDownloaded || false,
+          isDownloaded: email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true,
           tags: email.tags || [],
           starred: email.starred || false,
-          annoyanceReported: email.annoyanceReported || false,
           senderStatus: email.senderStatus || "none",
         }));
         setEmails(transformedEmails);
-        setSelectedEmail(
-          transformedEmails.length > 0 ? transformedEmails[0] : null
-        );
-      } else {
-        console.error("Search failed:", result.error);
-        setNotification("Search failed");
+        setSelectedEmail(transformedEmails.length > 0 ? transformedEmails[0] : null);
       }
       setLoading(false);
     }, 500);
@@ -459,30 +368,20 @@ const QMailDashboard = () => {
     setIsRefreshing(true);
     await checkForNewMail();
     await loadEmails(currentFolder);
-    await loadDrafts(); // Refresh drafts count
+    await loadDrafts();
     setIsRefreshing(false);
     setNotification("Refreshed successfully");
   };
 
-  // ENHANCED EMAIL ATTACHMENTS LOADING
-  const loadEmailAttachments = async (emailId) => {
-    try {
-      const result = await getEmailAttachments(emailId);
-      if (result.success) {
-        setEmailAttachments(result.data.attachments);
-        console.log("Email attachments loaded:", result.data.attachments);
-      } else {
-        console.error("Failed to load attachments:", result.error);
-        setEmailAttachments([]);
-      }
-    } catch (error) {
-      console.error("Attachments loading error:", error);
-      setEmailAttachments([]);
-    }
-  };
-
   const handleSelectEmail = async (email) => {
-    // If it's a draft, open compose modal instead
+    if (!email) return;
+
+    if (email.isPending || email.isDownloaded === false) {
+      setSelectedEmail(email);
+      setEmailAttachments([]); 
+      return;
+    }
+
     if (email.isDraft) {
       setEditDraft(email);
       setIsComposeOpen(true);
@@ -491,53 +390,51 @@ const QMailDashboard = () => {
 
     setSelectedEmail(email);
 
-    // Auto-mark as read when opening an unread email
     if (!email.isRead && !email.isDraft) {
-      // Optimistically update UI
       setEmails((currentEmails) =>
         currentEmails.map((e) =>
           e.id === email.id ? { ...e, isRead: true } : e
         )
       );
-
-      // Call API to mark as read
-      await handleMarkAsRead(email.id, true);
+      handleMarkAsRead(email.id, true); 
     }
 
-    // Fetch full email details and attachments if email has an ID
-    if (email.id && !email.isDraft) {
+    if (email.id && !email.isDraft && email.isDownloaded) {
       setLoading(true);
+      try {
+        const [attRes, bodyRes] = await Promise.allSettled([
+          getEmailAttachments(email.id),
+          getEmailById(email.id)
+        ]);
 
-      // Load attachments and email details in parallel
-      await loadEmailAttachments(email.id);
-      const result = await getEmailById(email.id);
+        if (attRes.status === 'fulfilled' && attRes.value.success) {
+          setEmailAttachments(attRes.value.data.attachments || []);
+        } else {
+          setEmailAttachments([]);
+        }
 
-      if (result.success) {
-        // Update selected email with full details
-        setSelectedEmail({
-          ...email,
-          ...result.data,
-          isRead: true,
-        });
-      } else {
-        console.error("Failed to load email details:", result.error);
+        if (bodyRes.status === 'fulfilled' && bodyRes.value.success) {
+          const fetchedData = bodyRes.value.data;
+          setSelectedEmail((prev) => ({
+            ...prev,
+            ...fetchedData,
+            isRead: true,
+            isDownloaded: true
+          }));
+
+          setEmails((prevEmails) => 
+            prevEmails.map((e) => 
+              e.id === email.id ? { ...e, preview: fetchedData.body?.substring(0, 100), body: fetchedData.body } : e
+            )
+          );
+        }
+      } catch (e) {
+        console.error("Failed to load full email payload", e);
+        setEmailAttachments([]);
       }
-
       setLoading(false);
     } else {
-      // For emails without IDs, clear attachments
       setEmailAttachments([]);
-    }
-  };
-
-  const handleMarkAsDownloaded = (emailId) => {
-    setEmails((currentEmails) =>
-      currentEmails.map((e) =>
-        e.id === emailId ? { ...e, isDownloaded: true } : e
-      )
-    );
-    if (selectedEmail && selectedEmail.id === emailId) {
-      setSelectedEmail((prev) => ({ ...prev, isDownloaded: true }));
     }
   };
 
@@ -552,24 +449,16 @@ const QMailDashboard = () => {
     setIsComposeOpen(true);
   };
 
-  const handleSendEmail = async (sentEmail) => {
+  const handleSendEmail = async () => {
     setIsComposeOpen(false);
     setReplyToEmail(null);
     setEditDraft(null);
     setNotification("Email Sent!");
-
-    // Refresh wallet balance after sending (coins were spent)
     await loadWalletBalance();
-
-    // Refresh drafts in case a draft was sent
     await loadDrafts();
-
-    // Reload current folder if we're in drafts (draft was deleted after sending)
     if (currentFolder === "drafts") {
       await loadEmails("drafts");
     }
-
-    // Update counts
     await loadMailCounts();
   };
 
@@ -587,28 +476,18 @@ const QMailDashboard = () => {
     try {
       const result = await markEmailRead(emailId, isRead);
       if (result.success) {
-        // Update local state
         setEmails((prevEmails) =>
           prevEmails.map((email) =>
             email.id === emailId ? { ...email, isRead: isRead } : email
           )
         );
-
-        // Update selected email if it's the current one
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail((prev) => ({ ...prev, isRead: isRead }));
         }
-
-        // Refresh mail counts to update sidebar badges
         await loadMailCounts();
-
-        setNotification(isRead ? "Marked as read" : "Marked as unread");
-      } else {
-        setNotification(`Failed to update read status: ${result.error}`);
       }
     } catch (error) {
       console.error("Mark as read error:", error);
-      setNotification("Failed to update read status");
     }
   };
 
@@ -616,26 +495,16 @@ const QMailDashboard = () => {
     try {
       const result = await moveEmail(emailId, targetFolder);
       if (result.success) {
-        // Remove from current list
         setEmails((prevEmails) =>
           prevEmails.filter((email) => email.id !== emailId)
         );
-
-        // Clear selection if it was the selected email
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail(null);
         }
-
-        // Refresh counts
         await loadMailCounts();
-
-        setNotification(`Moved to ${targetFolder}`);
-      } else {
-        setNotification(`Failed to move email: ${result.error}`);
       }
     } catch (error) {
       console.error("Move email error:", error);
-      setNotification("Failed to move email");
     }
   };
 
@@ -643,26 +512,72 @@ const QMailDashboard = () => {
     try {
       const result = await deleteEmail(emailId);
       if (result.success) {
-        // Remove from current list
         setEmails((prevEmails) =>
           prevEmails.filter((email) => email.id !== emailId)
         );
-
-        // Clear selection if it was the selected email
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail(null);
         }
-
-        // Refresh counts
         await loadMailCounts();
-
-        setNotification("Moved to trash");
-      } else {
-        setNotification(`Failed to delete email: ${result.error}`);
       }
     } catch (error) {
       console.error("Delete email error:", error);
-      setNotification("Failed to delete email");
+    }
+  };
+
+  const handleDownloadMail = async (identifier) => {
+    setIsDownloadingItem(identifier);
+    try {
+      const contentRes = await downloadEmailContent(identifier);
+      
+      const responseData = contentRes.data || contentRes;
+
+      if (contentRes.success || responseData.status === "success" || responseData.body) {
+        const decryptedBody = responseData.body || "";
+        const decryptedSubject = responseData.subject || "";
+        const incomingAttachments = responseData.attachments || [];
+
+        setPendingMails(prev => prev.filter(m => m.guid !== identifier));
+        
+        setSelectedEmail(prev => ({
+          ...prev,
+          body: decryptedBody,
+          subject: decryptedSubject || prev?.subject,
+          isDownloaded: true,   
+          isPending: false,     
+          isRead: true
+        }));
+
+        setEmailAttachments(incomingAttachments);
+
+        setEmails(prev => prev.map(e => 
+          (e.id === identifier || e.guid === identifier) 
+            ? { ...e, isDownloaded: true, body: decryptedBody, preview: decryptedBody.substring(0, 100) } 
+            : e
+        ));
+
+        loadEmails(currentFolder);
+        
+        setNotification("Message decrypted successfully!");
+      } else {
+        setNotification("Failed to decrypt message.");
+      }
+    } catch (error) {
+      console.error("Download failed:", error);
+      setNotification("Download failed");
+    } finally {
+      setIsDownloadingItem(null);
+    }
+  };
+
+  const handleDownloadAttachment = async (emailId, attachmentIndex, attachmentName) => {
+    try {
+      setNotification(`Downloading ${attachmentName || 'attachment'}...`);
+      await downloadMailAttachment(emailId, attachmentIndex);
+      setNotification(`Download started for ${attachmentName || 'attachment'}!`);
+    } catch (error) {
+      console.error("Attachment download failed:", error);
+      setNotification("Failed to download attachment");
     }
   };
 
@@ -670,20 +585,11 @@ const QMailDashboard = () => {
     <div className="qmail-dashboard">
       {notification && <div className="notification-popup">{notification}</div>}
 
-      {serverHealth && serverHealth.status !== "healthy" && (
-        <div className="health-warning">
-          <AlertCircle size={16} />
-          <span>Server Status: {serverHealth.status}</span>
-        </div>
-      )}
-
       <ComposeModal
         isOpen={isComposeOpen}
         onClose={() => {
           setIsComposeOpen(false);
           setEditDraft(null);
-
-          // Reload drafts when closing if in drafts folder
           if (currentFolder === "drafts") {
             loadEmails("drafts");
           }
@@ -693,15 +599,9 @@ const QMailDashboard = () => {
         editDraft={editDraft}
         walletBalance={walletBalance}
         onDraftSaved={async () => {
-          // This will be called immediately after save/update
-          console.log("Draft saved callback triggered");
-
-          // Reload drafts list in main view
           if (currentFolder === "drafts") {
             await loadEmails("drafts");
           }
-
-          // Update mail counts
           await loadMailCounts();
         }}
       />
@@ -725,7 +625,7 @@ const QMailDashboard = () => {
         activeView === "trash") && (
         <>
           <EmailListPane
-            emails={emails}
+            emails={displayEmails} 
             onSelectEmail={handleSelectEmail}
             selectedEmail={selectedEmail}
             onSearch={handleSearch}
@@ -737,15 +637,17 @@ const QMailDashboard = () => {
             onMarkAsRead={handleMarkAsRead}
             onDeleteEmail={handleDeleteEmail}
           />
-          {!isComposeOpen && ( // ADD THIS CONDITION
+          {!isComposeOpen && (
             <ReadingPane
-              email={selectedEmail}
+              email={selectedEmail} 
+              onDownload={handleDownloadMail} 
+              isDownloading={isDownloadingItem === (selectedEmail?.guid || selectedEmail?.id)}
               onReply={handleReply}
-              onMarkAsDownloaded={handleMarkAsDownloaded}
               onMarkAsRead={handleMarkAsRead}
               onDeleteEmail={handleDeleteEmail}
               onMoveEmail={handleMoveEmail}
               attachments={emailAttachments}
+              onDownloadAttachment={handleDownloadAttachment} 
             />
           )}
         </>
@@ -764,4 +666,3 @@ const QMailDashboard = () => {
 };
 
 export default QMailDashboard;
-

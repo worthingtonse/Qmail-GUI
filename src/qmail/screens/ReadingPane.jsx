@@ -1,9 +1,9 @@
 import React from "react";
-import { Mail, Trash2, Reply, RefreshCw, Paperclip, FileText, File, Sheet, Image, Archive, FileEdit } from "lucide-react";
+import { Mail, Trash2, Reply, RefreshCw, Paperclip, FileText, File, Sheet, Image, Archive, FileEdit, ShieldCheck, Loader2, Download } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 import "./ReadingPane.css";
 
-const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDeleteEmail, onMoveEmail, attachments = [] }) => {
+const ReadingPane = ({ email, onDownload, isDownloading, onReply, onMarkAsRead, onDeleteEmail, onMoveEmail, attachments = [], onDownloadAttachment }) => {
   if (!email) {
     return (
       <section className="reading-pane">
@@ -16,16 +16,34 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDelet
     );
   }
 
-  const handleDownload = () => {
-    console.log("Downloading email:", email.id);
-    onMarkAsDownloaded(email.id);
-  };
-
-  const handleAttachmentDownload = (attachment) => {
-    console.log("Downloading attachment:", attachment.attachmentId || attachment.name);
-    // Here you would implement actual attachment download
-    // You could use the attachment ID to fetch the actual file content
-  };
+  // AGAR EMAIL DOWNLOAD NAHI HUA HAI 
+  if (email.isPending || email.isDownloaded === false || email.isDownloaded === "false" || email.isDownloaded === 0) {
+    return (
+      <div className="reading-pane pending-download-view">
+        <div className="reading-header">
+          <h2>Message from: {email.from || email.senderEmail || email.sender || "Unknown Sender"}</h2>
+        </div>
+        
+        <div className="secure-download-box">
+          <ShieldCheck size={48} className="shield-icon" />
+          <h3>Secure Encrypted Payload</h3>
+          <p>This message is waiting on the server. Download it to decrypt and view the contents.</p>
+          
+          <button 
+            className="download-payload-btn" 
+            onClick={() => onDownload(email.guid || email.id)}
+            disabled={isDownloading}
+          >
+            {isDownloading ? (
+              <><Loader2 className="spinner" size={18} /> Decrypting Message...</>
+            ) : (
+              <><Download size={18} /> Download Message</>
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const formatFileSize = (bytes) => {
     if (!bytes) return 'Unknown size';
@@ -68,17 +86,13 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDelet
           <div className="sender-info">
             <SenderAvatar sender={email.sender} status={email.senderStatus} />
             <div className="sender-details">
-              <span className="sender-name">{email.sender}</span>
-              <span className="sender-email">{email.senderEmail}</span>
-              <span className="email-time">{email.timestamp}</span>
+              <span className="sender-name">{email.from || email.senderEmail || email.sender}</span>
             </div>
           </div>
         </div>
         
-        {/* Action buttons - different for drafts vs regular emails */}
         <div className="email-actions">
           {email.isDraft ? (
-            // Draft ke liye hint message
             <div style={{
               padding: 'var(--space-md)',
               backgroundColor: 'var(--tertiary-bg)',
@@ -94,38 +108,27 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDelet
               <span>Click on the draft message to edit</span>
             </div>
           ) : (
-            // Regular emails ke liye saare buttons
             <>
-              {/* Mark as Read/Unread Button */}
               <button 
                 className="action-button secondary" 
                 onClick={() => onMarkAsRead && onMarkAsRead(email.id, !email.isRead)}
                 title={email.isRead ? "Mark as unread" : "Mark as read"}
               >
                 {email.isRead ? (
-                  <>
-                    <Mail size={16} />
-                    Mark Unread
-                  </>
+                  <><Mail size={16} /> Mark Unread</>
                 ) : (
-                  <>
-                    <Mail size={16} />
-                    Mark Read
-                  </>
+                  <><Mail size={16} /> Mark Read</>
                 )}
               </button>
 
-              {/* Delete Button */}
               <button 
                 className="action-button danger" 
                 onClick={() => onDeleteEmail && onDeleteEmail(email.id)}
                 title="Move to trash"
               >
-                <Trash2 size={16} />
-                Delete
+                <Trash2 size={16} /> Delete
               </button>
 
-              {/* Move to Folder Dropdown */}
               <select
                 className="action-button secondary folder-dropdown"
                 onChange={(e) => {
@@ -142,27 +145,13 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDelet
                 <option value="trash">Trash</option>
               </select>
 
-              {/* Reply Button */}
               {onReply && (
                 <button 
                   className="action-button secondary" 
                   onClick={() => onReply(email)}
                   title="Reply to email"
                 >
-                  <Reply size={16} />
-                  Reply
-                </button>
-              )}
-
-              {/* Download Button */}
-              {!email.isDownloaded && onMarkAsDownloaded && (
-                <button 
-                  className="action-button primary" 
-                  onClick={handleDownload}
-                  title="Download email"
-                >
-                  <Mail size={16} />
-                  Download
+                  <Reply size={16} /> Reply
                 </button>
               )}
             </>
@@ -171,77 +160,68 @@ const ReadingPane = ({ email, onReply, onMarkAsDownloaded, onMarkAsRead, onDelet
       </div>
 
       <div className="reading-pane-body">
-        {email.isDownloaded || email.isDraft ? (
-          <>
-            <div className="email-content">
-              <p>{email.body || email.preview || "This email content is not available."}</p>
-            </div>
-            
-            {/* FULL ATTACHMENTS IMPLEMENTATION */}
-            {attachments && attachments.length > 0 && (
-              <div className="attachments-section">
-                <h4 className="attachments-title">
-                  <Paperclip size={16} />
-                  Attachments ({attachments.length})
-                </h4>
-                <div className="attachments-list">
-                  {attachments.map((attachment, index) => (
-                    <div 
-                      key={attachment.attachmentId || index} 
-                      className="attachment-item"
-                      onClick={() => handleAttachmentDownload(attachment)}
-                    >
-                      <div className="attachment-icon">
-                        {getFileTypeIcon(attachment.fileExtension)}
+        <div className="email-content">
+           <p>{email.body || email.preview || "No content available."}</p>
+        </div>
+        
+        {attachments && Array.isArray(attachments) && attachments.length > 0 && (
+          <div className="attachments-section">
+            <h4 className="attachments-title">
+              <Paperclip size={16} />
+              Attachments ({attachments.length})
+            </h4>
+            <div className="attachments-list">
+              {attachments.map((attachment, index) => {
+                const attIndex = attachment.index !== undefined ? attachment.index : index;
+                return (
+                  <div 
+                    key={attachment.attachmentId || index} 
+                    className="attachment-item"
+                    onClick={() => onDownloadAttachment && onDownloadAttachment(email.id || email.guid, attIndex, attachment.name)}
+                  >
+                    <div className="attachment-icon">
+                      {getFileTypeIcon(attachment.fileExtension)}
+                    </div>
+                    <div className="attachment-info">
+                      <div className="attachment-name">
+                        {attachment.name || `Attachment ${index + 1}`}
                       </div>
-                      <div className="attachment-info">
-                        <div className="attachment-name">
-                          {attachment.name || `Attachment ${index + 1}`}
-                        </div>
-                        <div className="attachment-details">
-                          <span className="attachment-size">
-                            {formatFileSize(attachment.size)}
+                      <div className="attachment-details">
+                        <span className="attachment-size">
+                          {formatFileSize(attachment.size)}
+                        </span>
+                        {attachment.fileExtension && (
+                          <span className="attachment-type">
+                            {attachment.fileExtension.toUpperCase()}
                           </span>
-                          {attachment.fileExtension && (
-                            <span className="attachment-type">
-                              {attachment.fileExtension.toUpperCase()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="attachment-download">
-                        <button 
-                          className="download-btn ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAttachmentDownload(attachment);
-                          }}
-                          title="Download attachment"
-                        >
-                          <Paperclip size={14} />
-                        </button>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-                
-                {/* Attachment Summary */}
-                <div className="attachments-summary">
-                  <span className="text-sm text-tertiary">
-                    Total size: {formatFileSize(
-                      attachments.reduce((total, att) => total + (att.size || 0), 0)
-                    )}
-                  </span>
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="email-not-downloaded">
-            <div className="download-status">
-              <Mail size={48} />
-              <h3>Email Not Downloaded</h3>
-              <p>Click the download button above to retrieve this email's content.</p>
+                    <div className="attachment-download">
+                      <button 
+                        className="download-btn ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onDownloadAttachment) {
+                            onDownloadAttachment(email.id || email.guid, attIndex, attachment.name);
+                          }
+                        }}
+                        title="Download attachment"
+                      >
+                        <Download size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <div className="attachments-summary">
+              <span className="text-sm text-tertiary">
+                Total size: {formatFileSize(
+                  attachments.reduce((total, att) => total + (att.size || 0), 0)
+                )}
+              </span>
             </div>
           </div>
         )}

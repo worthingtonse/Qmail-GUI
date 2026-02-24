@@ -594,3 +594,211 @@ input:focus {
     outline-offset: 2px;
   }
 }
+
+/* Update Modal Styles */
+/* Update Modal Styles */
+.update-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  animation: fadeIn 0.3s ease;
+  padding: var(--space-lg);
+}
+
+.update-modal {
+  background-color: #1a1f2e;
+  border-radius: var(--radius-xl);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideIn 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  z-index: 100000;
+}
+
+.update-modal-header {
+  padding: var(--space-2xl) var(--space-2xl) var(--space-lg);
+  text-align: center;
+  position: relative;
+}
+
+.update-icon {
+  color: #f59e0b;
+  margin-bottom: var(--space-md);
+  filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.4));
+}
+
+.update-modal-header h2 {
+  font-size: 1.75rem;
+  color: var(--text-primary);
+  margin: 0;
+  font-weight: 600;
+}
+
+.update-modal-close {
+  position: absolute;
+  top: var(--space-lg);
+  right: var(--space-lg);
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-base);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.update-modal-close:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.update-modal-content {
+  padding: 0 var(--space-2xl) var(--space-xl);
+}
+
+.update-message {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: #f59e0b;
+  margin-bottom: var(--space-xl);
+  text-align: center;
+}
+
+.update-version-info {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.version-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) 0;
+}
+
+.version-row:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.version-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.version-value {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'Courier New', monospace;
+}
+
+.version-value.highlight {
+  color: #10b981;
+}
+
+.update-description {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  text-align: center;
+  margin: 0;
+}
+
+.update-modal-actions {
+  padding: var(--space-xl) var(--space-2xl) var(--space-2xl);
+  display: flex;
+  gap: var(--space-md);
+}
+
+.update-download-btn {
+  flex: 1;
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  border-radius: var(--radius-lg);
+  color: white;
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.update-download-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+}
+
+.update-later-btn {
+  flex: 1;
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--font-size-base);
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-base);
+}
+
+.update-later-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .update-modal {
+    max-width: 100%;
+    margin: var(--space-lg);
+  }
+  
+  .update-modal-actions {
+    flex-direction: column;
+  }
+
+  .update-modal-header h2 {
+    font-size: 1.5rem;
+  }
+}

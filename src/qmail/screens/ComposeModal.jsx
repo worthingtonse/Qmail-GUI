@@ -436,47 +436,95 @@ const handleSaveDraft = async () => {
   //   }
   // };
 
-  const handleSend = async () => {
-  // Validation
-  if (!to.trim()) {
-    setError("Please enter a recipient address");
-    return;
-  }
-  if (!subject.trim()) {
-    setError("Please enter a subject");
-    return;
-  }
-  if (!body.trim()) {
-    setError("Please enter a message");
-    return;
-  }
+ const handleSend = async () => {
+    // Validation
+    if (!to.trim()) {
+      setError("Please enter a recipient address");
+      return;
+    }
+    if (!subject.trim()) {
+      setError("Please enter a subject");
+      return;
+    }
+    if (!body.trim()) {
+      setError("Please enter a message");
+      return;
+    }
 
-  setIsSending(true);
-  setSendingStatus("sending");
-  setSendProgress("Preparing email...");
-  setError(null);
+    setIsSending(true);
+    setSendingStatus("sending");
+    setSendProgress("Preparing email...");
+    setError(null);
 
-  try {
-    const emailData = {
-      to: to.trim(),
-      subject: subject.trim(),
-      body: body.trim(),
-      cc: cc.trim(),
-      bcc: bcc.trim(),
-      subsubject: subsubject.trim(),
-      attachments: []
-    };
+    try {
+      const toList = parseEmailList(to);
+      const ccList = parseEmailList(cc);
+      const bccList = parseEmailList(bcc);
 
-    const result = await sendEmail(emailData);
+      if (toList.length === 0) {
+        throw new Error("Please provide at least one valid recipient address.");
+      }
 
-    if (result.success) {
-      // Start polling if we have a task ID
-      if (result.data.taskId) {
-        setTaskId(result.data.taskId);
-        setIsPolling(true);
-        pollTaskStatus(result.data.taskId);
-      } else {
-        // If no task ID, assume immediate success
+      const emailData = {
+        to: toList,
+        cc: ccList,
+        bcc: bccList,
+        subject: subject.trim(),
+        body: body.trim(),
+        subsubject: subsubject.trim(),
+        attachments: [],
+        storage_weeks: storageWeeks || 0
+      };
+
+      const result = await sendEmail(emailData);
+
+      if (result.success && result.data.taskId) {
+        const currentTaskId = result.data.taskId;
+        setTaskId(currentTaskId);
+        
+        // Inline polling loop: Solves React state closure bugs completely
+        let taskFinished = false;
+        while (!taskFinished) {
+          // Wait 1 second before checking status
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const taskResult = await getTaskStatus(currentTaskId);
+          if (taskResult.success) {
+            const { state, progress: currentProgress, message, isFinished, isSuccessful, error: taskError } = taskResult.data;
+            
+            setProgress(currentProgress || 0);
+            setSendProgress(message || "Processing...");
+            
+            if (isFinished) {
+              taskFinished = true; // Break the loop
+              
+              if (isSuccessful || state === "completed") {
+                setSendingStatus("completed");
+                setSendProgress("Email sent successfully!");
+                setTimeout(() => {
+                  onSend(emailData);
+                  setIsSending(false);
+                  setSendingStatus(null);
+                  setSendProgress("");
+                  setTaskId(null);
+                }, 1500);
+              } else {
+                setSendingStatus("failed");
+                setError(taskError || message || "Failed to send email");
+                setIsSending(false);
+                setTaskId(null);
+              }
+            }
+          } else {
+            taskFinished = true; // Break loop on API failure
+            setSendingStatus("failed");
+            setError("Failed to track email status");
+            setIsSending(false);
+            setTaskId(null);
+          }
+        }
+      } else if (result.success) {
+        // Fallback if no taskId is provided but success is true
         setSendingStatus("completed");
         setSendProgress("Email sent successfully!");
         setTimeout(() => {
@@ -485,19 +533,18 @@ const handleSaveDraft = async () => {
           setSendingStatus(null);
           setSendProgress("");
         }, 1500);
+      } else {
+        throw new Error(result.error || "Failed to send email");
       }
-    } else {
-      throw new Error(result.error || "Failed to send email");
+    } catch (error) {
+      console.error("Send error:", error);
+      setError(error.message || "Failed to send email");
+      setIsSending(false);
+      setSendingStatus("failed");
+      setSendProgress("");
     }
-  } catch (error) {
-    console.error("Send error:", error);
-    setError(error.message || "Failed to send email");
-    setIsSending(false);
-    setSendingStatus("failed");
-    setSendProgress("");
-  }
-};
-
+  };
+  
   // Enhanced progress indicator
   const renderProgressIndicator = () => {
     if (!isSending && !sendProgress) return null;

@@ -5,19 +5,31 @@
 const API_BASE_URL = "http://localhost:8080/api"
 /**
  * A helper function to handle fetch responses.
- * It checks for network errors and non-ok responses.
+ * It reads the exact backend error payload even on non-ok responses.
  * @param {Response} response - The fetch Response object
  */
 const handleResponse = async (response) => {
-  if (!response.ok) {
-    // Handle HTTP errors (e.g., 404, 500)
-    throw new Error(
-      `Server responded with ${response.status} ${response.statusText}`
-    );
+  let data;
+  
+  try {
+    // 1. Always attempt to parse the JSON first, even if it's an error status
+    data = await response.json();
+  } catch (e) {
+    // 2. If it's not JSON (like a raw server crash or HTML page) and not OK, throw standard error
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+    }
+    return null;
   }
 
-  // Get the JSON response from the server
-  const data = await response.json();
+  // 3. If the status is a 4xx or 5xx error, extract the backend message
+  if (!response.ok) {
+    // Extract the exact error message from your Python backend
+    // It checks 'error', then 'details', then 'message'
+    const backendError = data.error || data.details || data.message || `Server responded with ${response.status}`;
+    throw new Error(backendError);
+  }
+
   return data;
 };
 
@@ -25,32 +37,32 @@ const handleResponse = async (response) => {
  * Gets the health status of the QMail Client Core service.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const getHealthStatus = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    const data = await handleResponse(response);
+// export const getHealthStatus = async () => {
+//   try {
+//     const response = await fetch(`${API_BASE_URL}/health`);
+//     const data = await handleResponse(response);
 
-    console.log("Data received from /health:", data);
+//     console.log("Data received from /health:", data);
 
-    if (data && data.status) {
-      return {
-        success: true,
-        data: {
-          status: data.status,
-          service: data.service || "QMail Client Core",
-          version: data.version || "unknown",
-          timestamp: data.timestamp || Date.now(),
-        },
-      };
-    } else {
-      throw new Error("Invalid response from health endpoint");
-    }
-  } catch (error) {
-    console.error("Health check failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nIs the QMail server running?`;
-    return { success: false, error: errorMessage };
-  }
-};
+//     if (data && data.status) {
+//       return {
+//         success: true,
+//         data: {
+//           status: data.status,
+//           service: data.service || "QMail Client Core",
+//           version: data.version || "unknown",
+//           timestamp: data.timestamp || Date.now(),
+//         },
+//       };
+//     } else {
+//       throw new Error("Invalid response from health endpoint");
+//     }
+//   } catch (error) {
+//     console.error("Health check failed:", error);
+//     const errorMessage = `Error: ${error.message}\n\nIs the QMail server running?`;
+//     return { success: false, error: errorMessage };
+//   }
+// };
 
 /**
  * Gets the list of popular contacts from the DRD (Distributed Resource Directory).
@@ -314,13 +326,17 @@ export const updateDraft = async (draftId, draftData) => {
  * 
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
+/**
+ * Pings the QMail server to check for new messages and beacon status.
+ * UPDATED: Handles missing beacon_status and maps notification_count.
+ */
 export const pingQMail = async () => {
   try {
     const response = await fetch(`${API_BASE_URL}/qmail/ping`);
     const data = await handleResponse(response);
 
     console.log("Data received from /qmail/ping:", data);
-// Handle different status responses
+
     if (data && data.status) {
       // Handle error status (offline, etc.)
       if (data.status === "error") {
@@ -337,11 +353,15 @@ export const pingQMail = async () => {
           data: {
             status: data.status,
             timestamp: data.timestamp,
-            beaconStatus: data.beacon_status,
-            hasMail: data.has_mail || false,
-            messageCount: data.message_count || 0,
+            // FIX 1: Default to 'good' if status is 'ok' but beacon_status is missing
+            beaconStatus: data.beacon_status || (data.status === 'ok' ? 'good' : 'unknown'),
+            // FIX 2: Check notification_count for mail presence
+            hasMail: data.has_mail || (data.notification_count > 0) || false,
+            // FIX 3: Map notification_count to messageCount (which frontend expects)
+            messageCount: data.message_count || data.notification_count || 0,
             messages: data.messages || [],
-            // Healing indicates Identity Coin is being repaired
+            
+            // Healing logic
             isHealing: data.status === "healing",
             healingMessage: data.status === "healing" 
               ? "Repairing mailbox identity... please wait." 
@@ -443,143 +463,69 @@ export const searchEmails = async (query, limit = 50, offset = 0) => {
   }
 };
 
-/**
- * Polls a task status repeatedly until it completes or fails.
- * Useful for long-running operations like sending emails.
- * @param {string} taskId - The task ID to monitor
- * @param {number} pollInterval - How often to check status in milliseconds (default: 1000ms)
- * @param {number} maxAttempts - Maximum number of polling attempts (default: 60)
- * @param {function} onProgress - Optional callback for progress updates
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- */
-export const pollTaskStatus = async (
-  taskId,
-  pollInterval = 1000,
-  maxAttempts = 60,
-  onProgress = null
-) => {
-  try {
-    let attempts = 0;
+// Enhanced task status polling
+  // const pollTaskStatus = async (currentTaskId) => {
+  //   // Removed the !isPolling check here to prevent stale closure aborts on the first call
+  //   if (!currentTaskId) return;
 
-    while (attempts < maxAttempts) {
-      const result = await getTaskStatus(taskId);
+  //   try {
+  //     const result = await getTaskStatus(currentTaskId);
+      
+  //     if (result.success) {
+  //       // Correctly extract the mapped fields from your qmailApiServices.js getTaskStatus response
+  //       const { 
+  //         state, 
+  //         progress: currentProgress, 
+  //         message, 
+  //         isFinished, 
+  //         isSuccessful, 
+  //         error: taskError 
+  //       } = result.data;
 
-      if (!result.success) {
-        return result;
-      }
+  //       setProgress(currentProgress || 0);
+  //       setSendProgress(message || "Processing...");
 
-      // Call progress callback if provided
-      if (onProgress && typeof onProgress === "function") {
-        onProgress(result.data);
-      }
+  //       // Check the exact completion flags from the task manager
+  //       if (isFinished) {
+  //         if (isSuccessful || state === "completed") {
+  //           setSendingStatus("completed");
+  //           setIsPolling(false);
+  //           setSendProgress("Email sent successfully!");
+  //           setTimeout(() => {
+  //             onSend({ to, cc, bcc, subject, body });
+  //             setIsSending(false);
+  //             setSendingStatus(null);
+  //             setSendProgress("");
+  //             setTaskId(null);
+  //           }, 1500);
+  //         } else {
+  //           setSendingStatus("failed");
+  //           setIsPolling(false);
+  //           setError(taskError || message || "Failed to send email");
+  //           setIsSending(false);
+  //           setTaskId(null);
+  //         }
+  //       } else {
+  //         // Task is still running, keep polling
+  //         setSendingStatus("sending");
+  //         setTimeout(() => pollTaskStatus(currentTaskId), 1000);
+  //       }
+  //     } else {
+  //       console.error("Failed to get task status:", result.error);
+  //       setIsPolling(false);
+  //       setSendingStatus("failed");
+  //       setError("Failed to track email status");
+  //       setIsSending(false);
+  //     }
+  //   } catch (error) {
+  //     console.error("Task polling error:", error);
+  //     setIsPolling(false);
+  //     setSendingStatus("failed");
+  //     setError("Failed to track email status");
+  //     setIsSending(false);
+  //   }
+  // };
 
-      // Check if task is finished
-      if (result.data.isFinished) {
-        return {
-          success: result.data.isSuccessful,
-          data: result.data,
-          error:
-            result.data.error ||
-            (result.data.isSuccessful ? null : "Task failed"),
-        };
-      }
-
-      // Wait before next poll
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
-      attempts++;
-    }
-
-    // Max attempts reached
-    return {
-      success: false,
-      error: `Task ${taskId} did not complete within ${
-        (maxAttempts * pollInterval) / 1000
-      } seconds`,
-    };
-  } catch (error) {
-    console.error("Poll task status failed:", error);
-    return {
-      success: false,
-      error: `Error polling task status: ${error.message}`,
-    };
-  }
-};
-
-// /**
-//  * Sends an email via QMail.
-//  * @param {Object} emailData - Email data object
-//  * @param {Array<string>} emailData.to - Array of recipient addresses (required)
-//  * @param {Array<string>} emailData.cc - Array of CC addresses (optional)
-//  * @param {Array<string>} emailData.bcc - Array of BCC addresses (optional)
-//  * @param {string} emailData.subject - Email subject (required)
-//  * @param {string} emailData.subsubject - Secondary subject header (optional)
-//  * @param {string} emailData.body - Email body content (required)
-//  * @param {Array} emailData.attachments - Array of attachments (optional)
-//  * @param {number} emailData.storage_weeks - Storage duration in weeks (default: 8)
-//  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
-//  */
-// export const sendEmail = async (emailData) => {
-//   try {
-//     // Validate required fields
-//     if (
-//       !emailData.to ||
-//       !Array.isArray(emailData.to) ||
-//       emailData.to.length === 0
-//     ) {
-//       throw new Error("At least one recipient is required");
-//     }
-//     if (!emailData.subject) {
-//       throw new Error("Subject is required");
-//     }
-//     if (!emailData.body) {
-//       throw new Error("Email body is required");
-//     }
-
-//     // Build request payload
-//     const payload = {
-//       to: emailData.to,
-//       cc: emailData.cc || [],
-//       bcc: emailData.bcc || [],
-//       subject: emailData.subject,
-//       subsubject: emailData.subsubject || "",
-//       body: emailData.body,
-//       attachments: emailData.attachments || [],
-//       storage_weeks: emailData.storage_weeks || 8,
-//     };
-
-//     const response = await fetch(`${API_BASE_URL}/mail/send`, {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//       },
-//       body: JSON.stringify(payload),
-//     });
-
-//     const data = await handleResponse(response);
-
-//     console.log("Data received from /mail/send:", data);
-
-//     if (data && data.status === "accepted") {
-//       return {
-//         success: true,
-//         data: {
-//           status: data.status,
-//           taskId: data.task_id,
-//           message: data.message,
-//           fileGroupGuid: data.file_group_guid,
-//           fileCount: data.file_count,
-//           estimatedCost: data.estimated_cost,
-//         },
-//       };
-//     } else {
-//       throw new Error(data.message || "Failed to send email");
-//     }
-//   } catch (error) {
-//     console.error("Send email failed:", error);
-//     const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
-//     return { success: false, error: errorMessage };
-//   }
-// };
 
 /**
  * Gets the list of available mail folders.
@@ -1060,127 +1006,115 @@ export const deleteEmail = async (emailId) => {
 };
 
 // Locker download with polling
-export const downloadLockerCoins = async (lockerCode, onProgress) => {
-  try {
-    const cleanCode = lockerCode.replace(/-/g, '').trim();
+// export const downloadLockerCoins = async (lockerCode, onProgress) => {
+//   try {
+//     const cleanCode = lockerCode.replace(/-/g, '').trim();
     
-    // if (cleanCode.length !== 8) {
-    //   throw new Error('Locker code must be 8 characters');
-    // }
+//     // if (cleanCode.length !== 8) {
+//     //   throw new Error('Locker code must be 8 characters');
+//     // }
 
-    // Format with hyphen XXX-XXXXX
-    const formattedCode = cleanCode.slice(0, 3) + '-' + cleanCode.slice(3);
+//     // Format with hyphen XXX-XXXXX
+//     const formattedCode = cleanCode.slice(0, 3) + '-' + cleanCode.slice(3);
 
-    const response = await fetch(`${API_BASE_URL}/locker/download`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locker_code: formattedCode })
-    });
+//     const response = await fetch(`${API_BASE_URL}/locker/download`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({ locker_code: formattedCode })
+//     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || errorData.details || 'Failed to download coins');
-    }
+//     if (!response.ok) {
+//       const errorData = await response.json();
+//       throw new Error(errorData.error || errorData.details || 'Failed to download coins');
+//     }
 
-    const data = await response.json();
+//     const data = await response.json();
 
-    // Check for immediate error
-    if (data.status === 'error') {
-      throw new Error(data.error || data.details || 'Invalid locker code');
-    }
+//     // Check for immediate error
+//     if (data.status === 'error') {
+//       throw new Error(data.error || data.details || 'Invalid locker code');
+//     }
 
-    // If task_id exists, poll for status
-    if (data.id || data.task_id) {
-      const taskId = data.id || data.task_id;
-      return await pollTaskStatus(taskId, onProgress);
-    }
+//     // If task_id exists, poll for status
+//     if (data.id || data.task_id) {
+//       const taskId = data.id || data.task_id;
+//       return await pollTaskStatus(taskId, onProgress);
+//     }
 
-    return data;
-  } catch (error) {
-    console.error('Locker download error:', error);
-    throw error;
-  }
-};
+//     return data;
+//   } catch (error) {
+//     console.error('Locker download error:', error);
+//     throw error;
+//   }
+// };
 
 // Create mailbox after locker download
-export const createMailbox = async (address, domain, lockerCode, recoveryEmail = null) => {
-  try {
-    const cleanCode = lockerCode.replace(/-/g, '').trim();
+// export const createMailbox = async (address, domain, lockerCode, recoveryEmail = null) => {
+//   try {
+//     const cleanCode = lockerCode.replace(/-/g, '').trim();
     
-    // Convert to hex
-    const hexCode = Array.from(cleanCode)
-      .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
-      .join('');
+//     // Convert to hex
+//     const hexCode = Array.from(cleanCode)
+//       .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
+//       .join('');
 
-    const response = await fetch(`${API_BASE_URL}/mail/create-mailbox`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        address,
-        domain,
-        locker_code: hexCode,
-        recovery_email: recoveryEmail
-      })
-    });
+//     const response = await fetch(`${API_BASE_URL}/mail/create-mailbox`, {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({
+//         address,
+//         domain,
+//         locker_code: hexCode,
+//         recovery_email: recoveryEmail
+//       })
+//     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || errorData.details || 'Failed to create mailbox');
-    }
+//     if (!response.ok) {
+//       const errorData = await response.json();
+//       throw new Error(errorData.error || errorData.details || 'Failed to create mailbox');
+//     }
 
-    const data = await response.json();
+//     const data = await response.json();
 
-    if (data.status === 'error') {
-      throw new Error(data.error || data.details || 'Failed to create mailbox');
-    }
+//     if (data.status === 'error') {
+//       throw new Error(data.error || data.details || 'Failed to create mailbox');
+//     }
 
-    return data;
-  } catch (error) {
-    console.error('Create mailbox error:', error);
-    throw error;
-  }
-};
+//     return data;
+//   } catch (error) {
+//     console.error('Create mailbox error:', error);
+//     throw error;
+//   }
+// };
 
-/**
- * Sends an email
- * @param {Object} emailData
- * @param {string} emailData.to - Recipient address
- * @param {string} emailData.subject - Email subject
- * @param {string} emailData.body - Email body
- * @param {string} [emailData.cc] - CC recipients
- * @param {string} [emailData.bcc] - BCC recipients
- * @param {string} [emailData.subsubject] - Sub-subject
- * @param {Array} [emailData.attachments] - File attachments
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- */
 export const sendEmail = async (emailData) => {
   try {
+    const payload = {
+      to: Array.isArray(emailData.to) ? emailData.to : [],
+      cc: Array.isArray(emailData.cc) ? emailData.cc : [],
+      bcc: Array.isArray(emailData.bcc) ? emailData.bcc : [],
+      subject: emailData.subject || "",
+      body: emailData.body || "",
+      attachments: emailData.attachments || [],
+      storage_weeks: emailData.storage_weeks !== undefined ? emailData.storage_weeks : 8
+    };
+
     const response = await fetch(`${API_BASE_URL}/mail/send`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        to: emailData.to,
-        subject: emailData.subject || "",
-        body: emailData.body || "",
-        cc: emailData.cc || "",
-        bcc: emailData.bcc || "",
-        subsubject: emailData.subsubject || "",
-        attachments: emailData.attachments || []
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
     
     const data = await handleResponse(response);
+    console.log("Send API Response:", data);
     
-    console.log("Data received from /mail/send:", data);
-    
-    if (data && data.status === "success") {
+    // Check for 'accepted', 'success', or the presence of 'task_id'
+    if (data && (data.status === "success" || data.status === "accepted" || data.task_id)) {
       return {
         success: true,
         data: {
-          message: data.message || "Email sent successfully",
-          taskId: data.task_id,
+          message: data.message || "Email queued successfully",
+          taskId: data.task_id, // Safely extract the task ID from Python
           timestamp: data.timestamp
         }
       };
@@ -1189,7 +1123,154 @@ export const sendEmail = async (emailData) => {
     }
   } catch (error) {
     console.error("Send email failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to send email.`;
-    return { success: false, error: errorMessage };
+    return { success: false, error: error.message };
+  }
+};
+
+// Version check
+export const checkVersion = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/admin/version-check`);
+    
+    if (!response.ok) {
+      throw new Error('Failed to check version');
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (error) {
+    console.error('Version check error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+
+/**
+ * Imports credentials using a locker code.
+ * Scenario 1 & 2: Success (Healthy or Healed)
+ * Scenario 3: Invalid Format (400)
+ * Scenario 5: Empty/Invalid Locker (404)
+ */
+export const importCredentials = async (lockerCode) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/setup/import-credentials`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ locker_code: lockerCode })
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      return { success: true, data };
+    } else {
+      // Handles HTTP 400, 404, etc.
+      return { 
+        success: false, 
+        error: data.error || "Failed to import credentials",
+        status: response.status
+      };
+    }
+  } catch (error) {
+    console.error("Import API Error:", error);
+    return { success: false, error: "Network error: Server is unreachable" };
+  }
+};
+
+/**
+ * Manually triggers the healing process for a fracked coin.
+ */
+export const healWallet = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/wallet/heal`, { method: 'POST' });
+    return await handleResponse(response);
+  } catch (error) {
+    console.error("Heal API failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Prepares the coin for change/denominations.
+ */
+export const prepareChange = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/wallet/prepare-change`, { method: 'POST' });
+    return await handleResponse(response);
+  } catch (error) {
+    console.error("Prepare Change API failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Checks if the user has an established identity.
+ * @returns {Promise<{configured: boolean, ...} | null>}
+ */
+export const getIdentity = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/account/identity`);
+    if (response.ok) {
+      const data = await response.json();
+      return data; 
+    }
+    return null;
+  } catch (error) {
+    console.error("Identity check failed:", error);
+    return null;
+  }
+};
+
+/**
+ * Polls for new email notifications (returns guids and sender info)
+ */
+export const getMailNotifications = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/notifications`);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Downloads the actual email text/content using the GUID
+ */
+export const downloadEmailContent = async (guid) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/download/${guid}`);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Gets the list of attachments for a specific email
+ */
+export const getMailAttachmentsList = async (guid) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${guid}/attachments`);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Downloads a specific attachment by its index 'n'
+ */
+export const downloadMailAttachment = async (guid, n) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${guid}/attachment/${n}`);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 };
