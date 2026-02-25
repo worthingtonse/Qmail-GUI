@@ -145,9 +145,11 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
         isStarred: email.is_starred || false,
         isTrashed: email.is_trashed || false,
         isDownloaded: email.downloaded,
-
         folder: email.folder || folder,
-        preview: "",
+
+        // Actually accept the preview snippet sent from the backend
+        preview: email.preview || "",
+
         body: "",
       }));
 
@@ -1303,16 +1305,55 @@ export const getMailAttachmentsList = async (guid) => {
 };
 
 /**
- * Downloads a specific attachment by its index 'n'
+ * Downloads a specific attachment and triggers the browser save dialog
  */
-export const downloadMailAttachment = async (guid, n) => {
+export const downloadMailAttachment = async (
+  guid,
+  n,
+  defaultFilename = "downloaded_file",
+) => {
   try {
     const response = await fetch(
       `${API_BASE_URL}/mail/${guid}/attachment/${n}`,
     );
-    const data = await handleResponse(response);
-    return { success: true, data };
+
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status}`);
+    }
+
+    // 1. Try to read the filename from the CORS-exposed header we just fixed!
+    let filename = defaultFilename;
+    const disposition = response.headers.get("Content-Disposition");
+    if (disposition && disposition.indexOf("filename=") !== -1) {
+      const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(
+        disposition,
+      );
+      if (matches != null && matches[1]) {
+        filename = matches[1].replace(/['"]/g, "");
+      }
+    }
+
+    // 2. Convert the raw binary data into a Blob
+    const blob = await response.blob();
+
+    // 3. Create a temporary URL pointing to the Blob
+    const url = window.URL.createObjectURL(blob);
+
+    // 4. Create an invisible anchor tag, attach the URL, and click it!
+    const a = document.createElement("a");
+    a.style.display = "none";
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+
+    // 5. Clean up the DOM and memory
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    return { success: true };
   } catch (error) {
+    console.error("Attachment download failed:", error);
     return { success: false, error: error.message };
   }
 };
