@@ -10,11 +10,11 @@ const EmailListPane = ({
   onSearch,
   isLoading,
   currentFolder,
-  currentPage,        
-  totalCount,         
+  currentPage,
+  totalCount,
   onPageChange,
-  onMarkAsRead,       
-  onDeleteEmail 
+  onMarkAsRead,
+  onDeleteEmail,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -26,11 +26,16 @@ const EmailListPane = ({
 
   const getFolderTitle = (folder) => {
     switch (folder) {
-      case 'inbox': return 'Inbox';
-      case 'sent': return 'Sent Messages';
-      case 'drafts': return 'Draft Messages';
-      case 'trash': return 'Trash';
-      default: return folder.charAt(0).toUpperCase() + folder.slice(1);
+      case "inbox":
+        return "Inbox";
+      case "sent":
+        return "Sent Messages";
+      case "drafts":
+        return "Draft Messages";
+      case "trash":
+        return "Trash";
+      default:
+        return folder.charAt(0).toUpperCase() + folder.slice(1);
     }
   };
 
@@ -52,7 +57,7 @@ const EmailListPane = ({
       <div className="email-list-header">
         <h3 className="email-list-title">{getFolderTitle(currentFolder)}</h3>
         <span className="email-count-total">
-          {emails.length} {emails.length === 1 ? 'message' : 'messages'}
+          {emails.length} {emails.length === 1 ? "message" : "messages"}
         </span>
       </div>
 
@@ -67,10 +72,9 @@ const EmailListPane = ({
             <Mail size={48} />
             <h3>No emails found</h3>
             <p>
-              {searchQuery 
+              {searchQuery
                 ? `No emails matching "${searchQuery}" in ${getFolderTitle(currentFolder).toLowerCase()}`
-                : `Your ${getFolderTitle(currentFolder).toLowerCase()} is empty`
-              }
+                : `Your ${getFolderTitle(currentFolder).toLowerCase()} is empty`}
             </p>
           </div>
         ) : (
@@ -79,9 +83,13 @@ const EmailListPane = ({
               key={email.id}
               email={email}
               onSelect={onSelectEmail}
-              isSelected={selectedEmail && selectedEmail.id === email.id}
-              onMarkAsRead={onMarkAsRead}      
-              onDeleteEmail={onDeleteEmail} 
+              isSelected={
+                selectedEmail &&
+                String(selectedEmail.id).toLowerCase() ===
+                  String(email.id).toLowerCase()
+              }
+              onMarkAsRead={onMarkAsRead}
+              onDeleteEmail={onDeleteEmail}
             />
           ))
         )}

@@ -14,7 +14,7 @@
   padding: var(--space-md);
   background-color: #1a1d24 !important;
   border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: 0 
+  margin-bottom: 0;
 }
 
 .search-bar-el {
@@ -109,11 +109,11 @@
   background-color: var(--card-hover);
 }
 
+/* Styling for the currently selected email */
 .email-list-item.selected {
-  background-color: var(--card-hover);
-  border-left: 3px solid var(--accent-primary);
+  border-left: 4px solid #6b21a8; /* Only the purple line */
+  background-color: transparent; /* Ensures no background color changes */
 }
-
 .email-list-item.unread {
   background-color: rgba(59, 130, 246, 0.05);
 }
@@ -166,7 +166,11 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  background: linear-gradient(
+    135deg,
+    var(--accent-primary),
+    var(--accent-secondary)
+  );
   display: flex;
   align-items: center;
   justify-content: center;
@@ -389,18 +393,18 @@
     padding: var(--space-sm);
     min-height: 64px;
   }
-  
+
   .sender-avatar-circle {
     width: 32px;
     height: 32px;
     font-size: 11px;
   }
-  
+
   .email-subject,
   .email-sender {
     font-size: 12px;
   }
-  
+
   .email-preview {
     font-size: 10px;
   }

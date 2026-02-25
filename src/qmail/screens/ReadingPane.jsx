@@ -229,17 +229,19 @@ const ReadingPane = ({
               </h4>
               <div className="attachments-list">
                 {attachments.map((attachment, index) => {
-                  const attIndex =
-                    attachment.index !== undefined ? attachment.index : index;
+                  // FIX: Grab the actual database ID from the attachment object
+                  const correctAttachmentId =
+                    attachment.attachmentId || attachment.id;
+
                   return (
                     <div
-                      key={attachment.attachmentId || index}
+                      key={correctAttachmentId || index}
                       className="attachment-item"
                       onClick={() =>
                         onDownloadAttachment &&
                         onDownloadAttachment(
                           email.id || email.guid,
-                          attIndex,
+                          correctAttachmentId,
                           attachment.name,
                         )
                       }
@@ -270,7 +272,7 @@ const ReadingPane = ({
                             if (onDownloadAttachment) {
                               onDownloadAttachment(
                                 email.id || email.guid,
-                                attIndex,
+                                correctAttachmentId,
                                 attachment.name,
                               );
                             }
