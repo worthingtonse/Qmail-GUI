@@ -19,9 +19,9 @@ import {
   markEmailRead,
   moveEmail,
   deleteEmail,
-  getMailNotifications, 
-  downloadEmailContent, 
-  downloadMailAttachment
+  getMailNotifications,
+  downloadEmailContent,
+  downloadMailAttachment,
 } from "../../api/qmailApiServices";
 
 import "./QMailDashboard.css";
@@ -37,14 +37,14 @@ const QMailDashboard = ({ initValues }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalEmailCount, setTotalEmailCount] = useState(0);
   const EMAILS_PER_PAGE = 50;
-  
+
   const [mailCounts, setMailCounts] = useState({
     inbox: { unread: 0, total: 0 },
     sent: { unread: 0, total: 0 },
     drafts: { unread: 0, total: 0 },
     trash: { unread: 0, total: 0 },
   });
-  
+
   const [previousMailCounts, setPreviousMailCounts] = useState({});
   const [walletBalance, setWalletBalance] = useState(null);
   const [folders, setFolders] = useState([]);
@@ -53,18 +53,18 @@ const QMailDashboard = ({ initValues }) => {
   const [replyToEmail, setReplyToEmail] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [notification, setNotification] = useState(null);
-  
+
   const [pendingMails, setPendingMails] = useState([]);
-  const [isDownloadingItem, setIsDownloadingItem] = useState(null); 
+  const [isDownloadingItem, setIsDownloadingItem] = useState(null);
   const [emailAttachments, setEmailAttachments] = useState([]);
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
-  
+
   const [serverHealth, setServerHealth] = useState({
     status: "healthy",
     service: "QMail Client Core",
-    version: "1.0.0"
+    version: "1.0.0",
   });
-  
+
   const [userAccount, setUserAccount] = useState({
     name: "John Doe",
     email: "john.doe@qmail.cloud",
@@ -74,17 +74,17 @@ const QMailDashboard = ({ initValues }) => {
 
   // YAHAN FIX KIYA HAI: Sender, Preview aur Timestamp proper keys ke sath map kiye hain
   const formattedPendingMails = useMemo(() => {
-    return pendingMails.map(notif => ({
+    return pendingMails.map((notif) => ({
       id: `pending-${notif.guid}`,
       guid: notif.guid,
       sender: notif.sender_address || "Unknown Sender",
       senderEmail: notif.sender_address || "",
       from: notif.sender_address || "",
       subject: "🔒 Encrypted Message (Tap to Download)",
-      preview: "Encrypted payload waiting to be downloaded...", 
+      preview: "Encrypted payload waiting to be downloaded...",
       timestamp: notif.timestamp || new Date().toISOString(),
       isPending: true,
-      isDownloaded: false 
+      isDownloaded: false,
     }));
   }, [pendingMails]);
 
@@ -98,9 +98,9 @@ const QMailDashboard = ({ initValues }) => {
       try {
         const result = await getMailNotifications();
         if (result.success && result.data.count > 0) {
-          setPendingMails(prev => {
+          setPendingMails((prev) => {
             const newNotifs = result.data.notifications.filter(
-              n => !prev.some(p => p.guid === n.guid)
+              (n) => !prev.some((p) => p.guid === n.guid),
             );
             return [...prev, ...newNotifs];
           });
@@ -233,9 +233,15 @@ const QMailDashboard = ({ initValues }) => {
       const newCounts = result.data.counts;
       const summary = result.data.summary;
 
-      if (previousMailCounts.inbox && newCounts.inbox.total > previousMailCounts.inbox.total) {
-        const newMailCount = newCounts.inbox.total - previousMailCounts.inbox.total;
-        setNotification(`${newMailCount} new email${newMailCount > 1 ? "s" : ""} arrived!`);
+      if (
+        previousMailCounts.inbox &&
+        newCounts.inbox.total > previousMailCounts.inbox.total
+      ) {
+        const newMailCount =
+          newCounts.inbox.total - previousMailCounts.inbox.total;
+        setNotification(
+          `${newMailCount} new email${newMailCount > 1 ? "s" : ""} arrived!`,
+        );
 
         if (currentFolder === "inbox") {
           loadEmails("inbox");
@@ -267,8 +273,12 @@ const QMailDashboard = ({ initValues }) => {
           senderEmail: userAccount.email,
           subject: draft.subject || "No Subject",
           body: draft.body || draft.content || "",
-          preview: draft.preview || (draft.body ? draft.body.substring(0, 100) : ""),
-          timestamp: draft.timestamp || draft.created_at || new Date().toLocaleTimeString(),
+          preview:
+            draft.preview || (draft.body ? draft.body.substring(0, 100) : ""),
+          timestamp:
+            draft.timestamp ||
+            draft.created_at ||
+            new Date().toLocaleTimeString(),
           isRead: true,
           isDownloaded: true,
           tags: draft.tags || [],
@@ -285,22 +295,34 @@ const QMailDashboard = ({ initValues }) => {
       const result = await getMailList(folder, EMAILS_PER_PAGE, offset);
       if (result.success) {
         setTotalEmailCount(result.data.totalCount);
-        
+
         const transformedEmails = result.data.emails.map((email) => ({
           id: email.EmailID || email.id,
-          sender: email.sender || email.sender_address || email.from || "Unknown",
+          sender:
+            email.sender || email.sender_address || email.from || "Unknown",
           senderEmail: email.senderEmail || email.sender_address || "",
           subject: email.Subject || email.subject || "No Subject",
           body: email.body || "",
-          preview: email.preview || email.Subject || email.subject || "",
-          timestamp: email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp,
+          preview:
+            email.preview ||
+            (email.body
+              ? email.body.substring(0, 100)
+              : "No preview available..."),
+          timestamp:
+            email.ReceivedTimestamp ||
+            email.receivedTimestamp ||
+            email.timestamp,
           isRead: email.is_read || email.isRead || false,
-          isDownloaded: email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true, 
+          isDownloaded:
+            email.downloaded === true ||
+            email.downloaded === "true" ||
+            email.downloaded === 1 ||
+            email.isDownloaded === true,
           tags: email.tags || [],
           starred: email.isStarred || false,
-          senderStatus: "none", 
+          senderStatus: "none",
         }));
-        
+
         setEmails(transformedEmails);
       } else {
         setEmails([]);
@@ -343,20 +365,31 @@ const QMailDashboard = ({ initValues }) => {
       if (result.success) {
         const transformedEmails = result.data.results.map((email) => ({
           id: email.id || Date.now() + Math.random(),
-          sender: email.sender || email.sender_address || email.from || "Unknown",
+          sender:
+            email.sender || email.sender_address || email.from || "Unknown",
           senderEmail: email.senderEmail || email.sender_address || "",
           subject: email.subject || "No Subject",
           body: email.body || email.content || "",
-          preview: email.preview || email.snippet || (email.body ? email.body.substring(0, 100) : ""),
-          timestamp: email.timestamp || email.date || new Date().toLocaleTimeString(),
+          preview:
+            email.preview ||
+            email.snippet ||
+            (email.body ? email.body.substring(0, 100) : ""),
+          timestamp:
+            email.timestamp || email.date || new Date().toLocaleTimeString(),
           isRead: email.isRead || email.read || false,
-          isDownloaded: email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true,
+          isDownloaded:
+            email.downloaded === true ||
+            email.downloaded === "true" ||
+            email.downloaded === 1 ||
+            email.isDownloaded === true,
           tags: email.tags || [],
           starred: email.starred || false,
           senderStatus: email.senderStatus || "none",
         }));
         setEmails(transformedEmails);
-        setSelectedEmail(transformedEmails.length > 0 ? transformedEmails[0] : null);
+        setSelectedEmail(
+          transformedEmails.length > 0 ? transformedEmails[0] : null,
+        );
       }
       setLoading(false);
     }, 500);
@@ -378,7 +411,7 @@ const QMailDashboard = ({ initValues }) => {
 
     if (email.isPending || email.isDownloaded === false) {
       setSelectedEmail(email);
-      setEmailAttachments([]); 
+      setEmailAttachments([]);
       return;
     }
 
@@ -393,46 +426,54 @@ const QMailDashboard = ({ initValues }) => {
     if (!email.isRead && !email.isDraft) {
       setEmails((currentEmails) =>
         currentEmails.map((e) =>
-          e.id === email.id ? { ...e, isRead: true } : e
-        )
+          String(e.id).toLowerCase() === String(email.id).toLowerCase()
+            ? { ...e, isRead: true }
+            : e,
+        ),
       );
-      handleMarkAsRead(email.id, true); 
+      handleMarkAsRead(email.id, true);
     }
 
     if (email.id && !email.isDraft && email.isDownloaded) {
-      setLoading(true);
+      // FIX: Removed setLoading(true) so the list doesn't disappear and jump!
       try {
         const [attRes, bodyRes] = await Promise.allSettled([
           getEmailAttachments(email.id),
-          getEmailById(email.id)
+          getEmailById(email.id),
         ]);
 
-        if (attRes.status === 'fulfilled' && attRes.value.success) {
+        if (attRes.status === "fulfilled" && attRes.value.success) {
           setEmailAttachments(attRes.value.data.attachments || []);
         } else {
           setEmailAttachments([]);
         }
 
-        if (bodyRes.status === 'fulfilled' && bodyRes.value.success) {
+        if (bodyRes.status === "fulfilled" && bodyRes.value.success) {
           const fetchedData = bodyRes.value.data;
           setSelectedEmail((prev) => ({
             ...prev,
             ...fetchedData,
             isRead: true,
-            isDownloaded: true
+            isDownloaded: true,
           }));
 
-          setEmails((prevEmails) => 
-            prevEmails.map((e) => 
-              e.id === email.id ? { ...e, preview: fetchedData.body?.substring(0, 100), body: fetchedData.body } : e
-            )
+          setEmails((prevEmails) =>
+            prevEmails.map((e) =>
+              String(e.id).toLowerCase() === String(email.id).toLowerCase()
+                ? {
+                    ...e,
+                    preview: fetchedData.body?.substring(0, 100),
+                    body: fetchedData.body,
+                  }
+                : e,
+            ),
           );
         }
       } catch (e) {
         console.error("Failed to load full email payload", e);
         setEmailAttachments([]);
       }
-      setLoading(false);
+      // FIX: Removed setLoading(false)
     } else {
       setEmailAttachments([]);
     }
@@ -478,8 +519,8 @@ const QMailDashboard = ({ initValues }) => {
       if (result.success) {
         setEmails((prevEmails) =>
           prevEmails.map((email) =>
-            email.id === emailId ? { ...email, isRead: isRead } : email
-          )
+            email.id === emailId ? { ...email, isRead: isRead } : email,
+          ),
         );
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail((prev) => ({ ...prev, isRead: isRead }));
@@ -496,7 +537,7 @@ const QMailDashboard = ({ initValues }) => {
       const result = await moveEmail(emailId, targetFolder);
       if (result.success) {
         setEmails((prevEmails) =>
-          prevEmails.filter((email) => email.id !== emailId)
+          prevEmails.filter((email) => email.id !== emailId),
         );
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail(null);
@@ -513,7 +554,7 @@ const QMailDashboard = ({ initValues }) => {
       const result = await deleteEmail(emailId);
       if (result.success) {
         setEmails((prevEmails) =>
-          prevEmails.filter((email) => email.id !== emailId)
+          prevEmails.filter((email) => email.id !== emailId),
         );
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail(null);
@@ -525,39 +566,52 @@ const QMailDashboard = ({ initValues }) => {
     }
   };
 
+  // the code works
+
   const handleDownloadMail = async (identifier) => {
     setIsDownloadingItem(identifier);
     try {
       const contentRes = await downloadEmailContent(identifier);
-      
+
       const responseData = contentRes.data || contentRes;
 
-      if (contentRes.success || responseData.status === "success" || responseData.body) {
+      if (
+        contentRes.success ||
+        responseData.status === "success" ||
+        responseData.body
+      ) {
         const decryptedBody = responseData.body || "";
         const decryptedSubject = responseData.subject || "";
         const incomingAttachments = responseData.attachments || [];
 
-        setPendingMails(prev => prev.filter(m => m.guid !== identifier));
-        
-        setSelectedEmail(prev => ({
+        setPendingMails((prev) => prev.filter((m) => m.guid !== identifier));
+
+        setSelectedEmail((prev) => ({
           ...prev,
           body: decryptedBody,
           subject: decryptedSubject || prev?.subject,
-          isDownloaded: true,   
-          isPending: false,     
-          isRead: true
+          isDownloaded: true,
+          isPending: false,
+          isRead: true,
         }));
 
         setEmailAttachments(incomingAttachments);
 
-        setEmails(prev => prev.map(e => 
-          (e.id === identifier || e.guid === identifier) 
-            ? { ...e, isDownloaded: true, body: decryptedBody, preview: decryptedBody.substring(0, 100) } 
-            : e
-        ));
+        setEmails((prev) =>
+          prev.map((e) =>
+            e.id === identifier || e.guid === identifier
+              ? {
+                  ...e,
+                  isDownloaded: true,
+                  body: decryptedBody,
+                  preview: decryptedBody.substring(0, 100),
+                }
+              : e,
+          ),
+        );
 
         loadEmails(currentFolder);
-        
+
         setNotification("Message decrypted successfully!");
       } else {
         setNotification("Failed to decrypt message.");
@@ -570,11 +624,17 @@ const QMailDashboard = ({ initValues }) => {
     }
   };
 
-  const handleDownloadAttachment = async (emailId, attachmentIndex, attachmentName) => {
+  const handleDownloadAttachment = async (
+    emailId,
+    attachmentIndex,
+    attachmentName,
+  ) => {
     try {
-      setNotification(`Downloading ${attachmentName || 'attachment'}...`);
+      setNotification(`Downloading ${attachmentName || "attachment"}...`);
       await downloadMailAttachment(emailId, attachmentIndex);
-      setNotification(`Download started for ${attachmentName || 'attachment'}!`);
+      setNotification(
+        `Download started for ${attachmentName || "attachment"}!`,
+      );
     } catch (error) {
       console.error("Attachment download failed:", error);
       setNotification("Failed to download attachment");
@@ -625,7 +685,7 @@ const QMailDashboard = ({ initValues }) => {
         activeView === "trash") && (
         <>
           <EmailListPane
-            emails={displayEmails} 
+            emails={displayEmails}
             onSelectEmail={handleSelectEmail}
             selectedEmail={selectedEmail}
             onSearch={handleSearch}
@@ -639,15 +699,17 @@ const QMailDashboard = ({ initValues }) => {
           />
           {!isComposeOpen && (
             <ReadingPane
-              email={selectedEmail} 
-              onDownload={handleDownloadMail} 
-              isDownloading={isDownloadingItem === (selectedEmail?.guid || selectedEmail?.id)}
+              email={selectedEmail}
+              onDownload={handleDownloadMail}
+              isDownloading={
+                isDownloadingItem === (selectedEmail?.guid || selectedEmail?.id)
+              }
               onReply={handleReply}
               onMarkAsRead={handleMarkAsRead}
               onDeleteEmail={handleDeleteEmail}
               onMoveEmail={handleMoveEmail}
               attachments={emailAttachments}
-              onDownloadAttachment={handleDownloadAttachment} 
+              onDownloadAttachment={handleDownloadAttachment}
             />
           )}
         </>
