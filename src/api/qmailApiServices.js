@@ -1357,3 +1357,34 @@ export const downloadMailAttachment = async (
     return { success: false, error: error.message };
   }
 };
+
+/**
+ * Permanently deletes an email from the trash
+ * @param {string} emailId - The email ID
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const deleteEmailPermanent = async (emailId) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/permanent`, {
+      method: "DELETE",
+    });
+    const data = await handleResponse(response);
+
+    console.log("Data received from DELETE /mail/{id}/permanent:", data);
+
+    if (data && data.status === "success") {
+      return {
+        success: true,
+        data: {
+          message: data.message,
+          emailId: emailId,
+        },
+      };
+    } else {
+      throw new Error("Invalid response from permanent delete email endpoint");
+    }
+  } catch (error) {
+    console.error("Permanent delete email failed:", error);
+    return { success: false, error: error.message };
+  }
+};

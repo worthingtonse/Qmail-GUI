@@ -136,7 +136,7 @@ const ReadingPane = ({
           </div>
         </div>
 
-        <div className="email-actions">
+      <div className="email-actions">
           {email.isDraft ? (
             <div
               style={{
@@ -174,13 +174,23 @@ const ReadingPane = ({
                 )}
               </button>
 
-              <button
-                className="action-button danger"
-                onClick={() => onDeleteEmail && onDeleteEmail(email.id)}
-                title="Move to trash"
-              >
-                <Trash2 size={16} /> Delete
-              </button>
+              {email.folder === "trash" || email.isTrashed ? (
+                <button
+                  className="action-button danger"
+                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, true)}
+                  title="Delete permanently"
+                >
+                  <Trash2 size={16} /> Delete Permanently
+                </button>
+              ) : (
+                <button
+                  className="action-button danger"
+                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, false)}
+                  title="Move to trash"
+                >
+                  <Trash2 size={16} /> Delete
+                </button>
+              )}
 
               <select
                 className="action-button secondary folder-dropdown"

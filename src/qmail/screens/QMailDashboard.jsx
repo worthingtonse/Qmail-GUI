@@ -19,12 +19,14 @@ import {
   markEmailRead,
   moveEmail,
   deleteEmail,
+  deleteEmailPermanent,
   getMailNotifications,
   downloadEmailContent,
   downloadMailAttachment,
 } from "../../api/qmailApiServices";
 
 import "./QMailDashboard.css";
+
 
 const QMailDashboard = ({ initValues }) => {
   const [activeView, setActiveView] = useState("inbox");
@@ -158,7 +160,7 @@ const QMailDashboard = ({ initValues }) => {
 
       await Promise.all([loadFolders(), loadMailCounts(), loadDrafts()]);
       await loadEmails(currentFolder);
-      await checkForNewMail();
+      // await checkForNewMail();
     } catch (error) {
       console.error("Error loading initial data:", error);
       setNotification("Error loading dashboard data");
@@ -198,20 +200,20 @@ const QMailDashboard = ({ initValues }) => {
     }
   };
 
-  const checkForNewMail = async () => {
-    try {
-      const result = await pingQMail();
-      if (result.success) {
-        setMessageCount(result.data.messageCount);
-        if (result.data.hasMail) {
-          loadEmails(currentFolder);
-          setNotification("New mail received!");
-        }
-      }
-    } catch (error) {
-      console.error("Ping error:", error);
-    }
-  };
+  // const checkForNewMail = async () => {
+  //   try {
+  //     const result = await pingQMail();
+  //     if (result.success) {
+  //       setMessageCount(result.data.messageCount);
+  //       if (result.data.hasMail) {
+  //         loadEmails(currentFolder);
+  //         setNotification("New mail received!");
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error("Ping error:", error);
+  //   }
+  // };
 
   const loadFolders = async () => {
     const result = await getMailFolders();
@@ -296,7 +298,7 @@ const QMailDashboard = ({ initValues }) => {
       if (result.success) {
         setTotalEmailCount(result.data.totalCount);
 
-        const transformedEmails = result.data.emails.map((email) => ({
+       const transformedEmails = result.data.emails.map((email) => ({
           id: email.EmailID || email.id,
           sender:
             email.sender || email.sender_address || email.from || "Unknown",
@@ -312,15 +314,21 @@ const QMailDashboard = ({ initValues }) => {
             email.ReceivedTimestamp ||
             email.receivedTimestamp ||
             email.timestamp,
-          isRead: email.is_read || email.isRead || false,
-          isDownloaded:
+          // FIX: Force read status in trash to prevent "new email" bolding
+          isRead: folder === 'trash' ? true : (email.is_read || email.isRead || false),
+          // FIX: Force downloaded status in trash to bypass the download button UI
+          isDownloaded: folder === 'trash' ? true : (
             email.downloaded === true ||
             email.downloaded === "true" ||
             email.downloaded === 1 ||
-            email.isDownloaded === true,
+            email.isDownloaded === true
+          ),
           tags: email.tags || [],
           starred: email.isStarred || false,
           senderStatus: "none",
+          // FIX: Attach the folder identity so ReadingPane knows to use "Delete Permanently"
+          folder: folder,
+          isTrashed: folder === 'trash'
         }));
 
         setEmails(transformedEmails);
@@ -462,8 +470,10 @@ const QMailDashboard = ({ initValues }) => {
               String(e.id).toLowerCase() === String(email.id).toLowerCase()
                 ? {
                     ...e,
-                    preview: fetchedData.body?.substring(0, 100),
-                    body: fetchedData.body,
+                    // FIX: Ab yahan subject aur preview dono backend ke fresh data se update honge
+                    subject: fetchedData.Subject || fetchedData.subject || e.subject,
+                    preview: fetchedData.preview || (fetchedData.body ? fetchedData.body.substring(0, 100) : "No preview available..."),
+                    body: fetchedData.body || e.body,
                   }
                 : e,
             ),
@@ -549,9 +559,15 @@ const QMailDashboard = ({ initValues }) => {
     }
   };
 
-  const handleDeleteEmail = async (emailId) => {
+const handleDeleteEmail = async (emailId, isPermanent = false) => {
+    // FIX: Automatically force permanent delete if we are currently viewing the trash folder!
+    const forcePermanent = isPermanent || currentFolder === "trash";
+
     try {
-      const result = await deleteEmail(emailId);
+      const result = forcePermanent 
+        ? await deleteEmailPermanent(emailId) 
+        : await deleteEmail(emailId);
+
       if (result.success) {
         setEmails((prevEmails) =>
           prevEmails.filter((email) => email.id !== emailId),
