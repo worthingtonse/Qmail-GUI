@@ -1,7 +1,14 @@
 import React, { useState } from "react";
-import { Search, Mail, RefreshCw } from "lucide-react";
+import { Search, Mail, RefreshCw, Trash2 } from "lucide-react";
 import EmailListItem from "./EmailListItem";
 import "./EmailListPane.css";
+
+const SORT_OPTIONS = [
+  { key: "newest", label: "Newest" },
+  { key: "unread", label: "Unread" },
+  { key: "fee", label: "Highest Paying" },
+  { key: "starred", label: "Starred" },
+];
 
 const EmailListPane = ({
   emails,
@@ -15,8 +22,28 @@ const EmailListPane = ({
   onPageChange,
   onMarkAsRead,
   onDeleteEmail,
+  onToggleStar,
+  sortMode = "newest",
+  onSortChange,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [checkedIds, setCheckedIds] = useState(new Set());
+
+  const handleCheck = (id) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleTrashChecked = async () => {
+    for (const id of checkedIds) {
+      await onDeleteEmail(id, false);
+    }
+    setCheckedIds(new Set());
+  };
 
   const handleSearch = (e) => {
     const value = e.target.value;
@@ -55,11 +82,36 @@ const EmailListPane = ({
       </div>
 
       <div className="email-list-header">
-        <h3 className="email-list-title">{getFolderTitle(currentFolder)}</h3>
-        <span className="email-count-total">
-          {emails.length} {emails.length === 1 ? "message" : "messages"}
-        </span>
+        <div className="email-list-header-top">
+          <h3 className="email-list-title">{getFolderTitle(currentFolder)}</h3>
+          <span className="email-count-total">
+            {emails.length} {emails.length === 1 ? "message" : "messages"}
+          </span>
+        </div>
+        {onSortChange && (
+          <div className="sort-bar">
+            <span className="sort-label">Sort:</span>
+            {SORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                className={`sort-btn ${sortMode === opt.key ? "sort-active" : ""}`}
+                onClick={() => onSortChange(opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {currentFolder === "drafts" && checkedIds.size > 0 && (
+        <div className="draft-trash-bar">
+          <span>{checkedIds.size} selected</span>
+          <button className="draft-trash-btn" onClick={handleTrashChecked}>
+            <Trash2 size={14} /> Delete
+          </button>
+        </div>
+      )}
 
       <div className="email-list">
         {isLoading ? (
@@ -90,6 +142,9 @@ const EmailListPane = ({
               }
               onMarkAsRead={onMarkAsRead}
               onDeleteEmail={onDeleteEmail}
+              onToggleStar={onToggleStar}
+              isChecked={checkedIds.has(email.id)}
+              onCheck={handleCheck}
             />
           ))
         )}

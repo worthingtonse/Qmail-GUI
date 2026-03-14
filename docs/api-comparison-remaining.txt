@@ -1,0 +1,825 @@
+================================================================================
+  API COMPARISON: QMail-GUI  vs  rest_core (C Backend)
+  Focus: ALL REMAINING endpoints (non-wallet, non-system)
+  Generated: 2026-03-11
+================================================================================
+
+Legend:
+  [MATCH]        - GUI endpoint matches rest_core exactly
+  [MISMATCH]     - GUI calls a path that differs from rest_core
+  [METHOD-DIFF]  - Path matches but HTTP method is wrong
+  [RESPONSE-DIFF]- Path matches but response field names differ
+  [GUI-ONLY]     - GUI calls an endpoint that doesn't exist in rest_core
+  [BACKEND-ONLY] - rest_core has an endpoint the GUI never calls
+
+NOTE: All rest_core endpoints use query parameters, NOT path parameters.
+      GUI often uses REST-style paths like /mail/{id} which don't exist.
+
+
+================================================================================
+  SECTION 1: HEALTH ENDPOINTS
+================================================================================
+
+------------------------------------------------------------------------------
+1.1  Fix Fracked Coins
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallettools/fix                    (apiService.js:~1038)
+  Backend:  GET /api/health/fix?wallet_path={p}         (api_handlers.c:26)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Wrong path: /wallettools/fix vs /health/fix
+    2. GUI sends no query params; backend requires wallet_path
+
+  Backend returns: { success, coins_processed, coins_healed, coins_partially_healed,
+    coins_authentic, coins_counterfeit, coins_failed, errors, elapsed_ms, details[] }
+
+  FIX: Change path to /api/health/fix, add wallet_path param
+
+------------------------------------------------------------------------------
+1.2  Encryption Health Check
+------------------------------------------------------------------------------
+  GUI:      GET /api/health/encryption-health           (apiService.js:~1543)
+  Backend:  (NO ENDPOINT — does not exist)
+  Status:   [GUI-ONLY]
+
+  Notes: Backend has /api/health/encryption-repair but NOT /encryption-health.
+         The GUI treats these as two separate operations (check then repair).
+
+  DECISION NEEDED: Add /api/health/encryption-health to backend, or
+                   remove from GUI and only use encryption-repair?
+
+------------------------------------------------------------------------------
+1.3  Encryption Repair
+------------------------------------------------------------------------------
+  GUI:      GET /api/health/encryption-repair           (apiService.js:~1600)
+  Backend:  GET /api/health/encryption-repair?wallet_path={p}  (api_handlers.c:25)
+  Status:   [MATCH] (path correct)
+
+  Issues:
+    1. GUI sends no wallet_path param; backend requires it
+
+  Backend returns: { success, broken_raida_count, fixed_count, failed_count }
+
+  FIX: Add wallet_path parameter to GUI call
+
+------------------------------------------------------------------------------
+1.4  Health Check (async)
+------------------------------------------------------------------------------
+  GUI:      (no direct call)
+  Backend:  GET /api/health/check?wallet_path={p}       (api_handlers.c:29)
+  Status:   [BACKEND-ONLY]
+
+  Returns task_id for async polling. No action needed unless GUI wants it.
+
+------------------------------------------------------------------------------
+1.5  Authenticate Coins
+------------------------------------------------------------------------------
+  GUI:      (no direct call — uses pollTaskUntilComplete with deposit)
+  Backend:  GET /api/health/authenticate?wallet_path={p}  (api_handlers.c:27)
+  Status:   [BACKEND-ONLY]
+
+  No action needed — authentication is triggered as part of deposit flow.
+
+------------------------------------------------------------------------------
+1.6  Find Limbo Coins
+------------------------------------------------------------------------------
+  GUI:      (no direct call)
+  Backend:  GET /api/health/find?wallet_path={p}        (api_handlers.c:28)
+  Status:   [BACKEND-ONLY]
+
+  No action needed unless GUI wants a "find lost coins" feature.
+
+
+================================================================================
+  SECTION 2: COIN MANAGEMENT
+================================================================================
+
+  GUI:      (no direct calls to /api/coins/*)
+  Backend:  /api/coins/import, /api/coins/break, /api/coins/join
+
+  Status: [BACKEND-ONLY] for all three.
+  The GUI uses /api/transactions/deposit for imports instead.
+  No action needed.
+
+
+================================================================================
+  SECTION 3: TRANSACTION ENDPOINTS
+================================================================================
+
+------------------------------------------------------------------------------
+3.1  Export CloudCoins
+------------------------------------------------------------------------------
+  GUI:      GET /api/transactions/export                (apiService.js:~862)
+  Backend:  GET /api/transactions/export                (api_handlers.c:69)
+  Status:   [MATCH]
+
+  GUI sends: amount, destination, wallet_path (all as query params)
+  Backend accepts: wallet_path, destination, amount, memo/tag, repeat, auto_change
+
+  Backend returns: { status, command, files_created, coins_exported, value_exported,
+                     files[] }
+  GUI reads: data.task_id (BUT backend does NOT return task_id — this is synchronous)
+
+  Issue: GUI tries to poll with task_id, but export is synchronous.
+
+  FIX: GUI should read success response directly, not poll for task_id.
+       Response field: use data.status === "success" or data.coins_exported.
+
+------------------------------------------------------------------------------
+3.2  Deposit / Import Files
+------------------------------------------------------------------------------
+  GUI:      GET /api/transactions/deposit               (apiService.js:~1249)
+  Backend:  GET/POST /api/transactions/deposit          (api_handlers.c:65)
+  Status:   [MATCH]
+
+  GUI sends: file (repeated), memo, wallet_path
+  Backend accepts: wallet_path, source_folder, memo, skip_fix
+  Backend returns: { success, task_id, message }
+
+  Issue: GUI sends "file" params with individual file paths. Backend may expect
+         "source_folder" instead (a directory to scan for .bin files).
+
+  DECISION NEEDED: Verify if backend accepts individual file paths via "file"
+                   param or only "source_folder".
+
+------------------------------------------------------------------------------
+3.3  Transfer Between Wallets
+------------------------------------------------------------------------------
+  GUI:      (no direct call)
+  Backend:  GET/POST /api/transactions/transfer         (api_handlers.c:68)
+  Status:   [BACKEND-ONLY]
+
+  No action needed unless GUI wants wallet-to-wallet transfer.
+
+------------------------------------------------------------------------------
+3.4  Export Locations
+------------------------------------------------------------------------------
+  GUI:      (no direct call — handled via getDropdownData)
+  Backend:  GET /api/transactions/export-locations      (api_handlers.c:70)
+  Status:   [BACKEND-ONLY]
+
+  GUI uses /api/system/dropdown?file=export-locations.txt instead.
+  Both work. No action needed.
+
+------------------------------------------------------------------------------
+3.5  Locker Download
+------------------------------------------------------------------------------
+  GUI:      GET /api/transactions/locker/download       (apiService.js:~1396)
+  Backend:  GET /api/transactions/locker/download       (api_handlers.c:84)
+            GET /api/locker/download                    (api_handlers.c:75)
+  Status:   [MATCH] (GUI uses the /transactions/ alias which is registered)
+
+  GUI sends: locker_key, wallet_path
+  Backend accepts: locker_key, wallet_path
+
+  Backend returns: { status, operation, coins_found, coins_saved, total_value,
+    graded_to_bank, graded_to_fracked, graded_to_counterfeit, wallet_path,
+    locker_key, raida_success, task_id }
+  GUI reads: data.task_id (for polling)
+
+  Issue: Backend returns task_id as reference but operation IS synchronous.
+         GUI polls but should read response directly.
+
+  FIX: Read synchronous response. task_id is informational, not for polling.
+
+------------------------------------------------------------------------------
+3.6  Locker Upload
+------------------------------------------------------------------------------
+  GUI:      GET /api/transactions/locker/upload         (apiService.js:~1468)
+  Backend:  GET/POST /api/transactions/locker/upload    (api_handlers.c:80)
+            GET/POST /api/locker/upload                 (api_handlers.c:73)
+  Status:   [MATCH]
+
+  GUI sends: locker_key, amount, wallet_path
+  Backend accepts: locker_key, wallet_path, amount, denomination
+
+  Backend returns: { status, operation, amount_uploaded, coins_uploaded,
+    locker_key, successful_uploads, message, task_id }
+  GUI reads: data.task_id (for polling)
+
+  Issue: Same as locker download — synchronous but GUI polls.
+
+  FIX: Read synchronous response directly.
+
+------------------------------------------------------------------------------
+3.7  Upgrade CCV1/CCV2
+------------------------------------------------------------------------------
+  GUI:      (no direct call)
+  Backend:  GET /api/transactions/upgrade-ccv1          (api_handlers.c:66)
+            GET /api/transactions/upgrade-ccv2          (api_handlers.c:67)
+  Status:   [BACKEND-ONLY]
+
+  No action needed.
+
+
+================================================================================
+  SECTION 4: QMAIL EMAIL ENDPOINTS
+================================================================================
+
+  IMPORTANT PATTERN: The GUI uses REST-style path parameters like /mail/{emailId}
+  while the backend uses query parameters like /api/qmail/read?email_id={id}.
+  Almost ALL qmail email endpoints have this mismatch.
+
+------------------------------------------------------------------------------
+4.1  Get Email (Read)
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/{emailId}                     (qmailApiServices.js:~618)
+  Backend:  GET /api/qmail/read?email_id={id}           (api_handlers.c:98)
+  Status:   [MISMATCH]
+
+  Backend returns: { success, email_id, subject, sender_sn, received_timestamp,
+    is_read, is_starred, folder, body, body_length }
+
+  GUI expects: id/EmailID/email_id, sender.auto_address, recipients, cc,
+    Subject, Body, ReceivedTimestamp, is_read, folder, downloaded, attachments[]
+
+  Issues:
+    1. Path: /mail/{id} vs /qmail/read?email_id={id}
+    2. Backend returns sender_sn (serial number), not sender object with auto_address
+    3. Backend doesn't return recipients, cc, attachments in this endpoint
+    4. Attachments are fetched separately via /api/qmail/attachments?email_id={id}
+
+  FIX: Change to /api/qmail/read?email_id={id}
+       Map sender_sn to sender info (may need /api/qmail/convert_coin_to_email)
+       Fetch attachments separately if needed
+
+------------------------------------------------------------------------------
+4.2  Mark Email Read
+------------------------------------------------------------------------------
+  GUI:      PUT /api/mail/{emailId}/read                (qmailApiServices.js:~1005)
+            Body: { is_read: boolean }
+  Backend:  POST /api/qmail/mark-read?email_id={id}&is_read={bool}
+                                                        (api_handlers.c:101)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/{id}/read vs /qmail/mark-read?email_id={id}
+    2. Method: GUI uses PUT with JSON body; backend uses POST with query params
+    3. Backend reads is_read from query param, not request body
+
+  Backend returns: { success, email_id, is_read }
+
+  FIX: Change to POST /api/qmail/mark-read?email_id={id}&is_read={bool}
+
+------------------------------------------------------------------------------
+4.3  Move Email
+------------------------------------------------------------------------------
+  GUI:      PUT /api/mail/{emailId}/move                (qmailApiServices.js:~1042)
+            Body: { folder: string }
+  Backend:  POST /api/qmail/move?email_id={id}&folder={int}
+                                                        (api_handlers.c:116)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/{id}/move vs /qmail/move?email_id={id}
+    2. Method: GUI uses PUT with JSON body; backend uses POST with query params
+    3. GUI sends folder as string name; backend expects folder as int (0-5):
+       0=inbox, 1=sent, 2=drafts, 3=trash, 4=starred, 5=archive
+
+  Backend returns: { success, message, folder }
+
+  FIX: Change to POST /api/qmail/move?email_id={id}&folder={int}
+       Map folder names to IDs
+
+------------------------------------------------------------------------------
+4.4  Delete Email (Soft — to trash)
+------------------------------------------------------------------------------
+  GUI:      DELETE /api/mail/{emailId}                  (qmailApiServices.js:~1078)
+  Backend:  DELETE /api/qmail/trash?email_id={id}       (api_handlers.c:117)
+            DELETE /api/qmail/delete?email_id={id}      (api_handlers.c:99)
+  Status:   [MISMATCH]
+
+  Notes: Backend has TWO delete endpoints:
+    - /api/qmail/delete → soft-delete (moves to trash)
+    - /api/qmail/trash → also soft-delete (same behavior)
+    - /api/qmail/delete-permanent → hard delete (must be in trash first)
+
+  Issues:
+    1. Path: /mail/{id} vs /qmail/trash?email_id={id} or /qmail/delete?email_id={id}
+    2. Both backend endpoints use DELETE method (matches GUI method)
+
+  FIX: Change to DELETE /api/qmail/trash?email_id={id}
+
+------------------------------------------------------------------------------
+4.5  Delete Email Permanent
+------------------------------------------------------------------------------
+  GUI:      DELETE /api/mail/{emailId}/permanent        (qmailApiServices.js:~1430)
+  Backend:  DELETE /api/qmail/delete-permanent?email_id={id}
+                                                        (api_handlers.c:118)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/{id}/permanent vs /qmail/delete-permanent?email_id={id}
+
+  Backend returns: { success, message }
+
+  FIX: Change to DELETE /api/qmail/delete-permanent?email_id={id}
+
+------------------------------------------------------------------------------
+4.6  Email Attachments List
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/{emailId}/attachments         (qmailApiServices.js:~672)
+  GUI also: GET /api/mail/{guid}/attachments            (qmailApiServices.js:~1358)
+  Backend:  GET /api/qmail/attachments?email_id={id}    (api_handlers.c:112)
+  Status:   [MISMATCH]
+
+  Backend returns: { success, count, attachments: [{ attachment_id, name,
+    extension, storage_mode, size_bytes, dangerous, file_path }] }
+
+  GUI expects: email_id, attachments[] with attachment_id, name, file_extension, size
+
+  Issues:
+    1. Path: /mail/{id}/attachments vs /qmail/attachments?email_id={id}
+    2. Field name: GUI reads "file_extension", backend returns "extension"
+    3. Field name: GUI reads "size", backend returns "size_bytes"
+
+  FIX: Change to /api/qmail/attachments?email_id={id}
+       Map extension → file_extension, size_bytes → size
+
+------------------------------------------------------------------------------
+4.7  Download Attachment
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/{guid}/attachment/{n}         (qmailApiServices.js:~1379)
+  Backend:  GET /api/qmail/attachment/download?email_id={id}&attachment_id={n}
+                                                        (api_handlers.c:113)
+  Status:   [MISMATCH]
+
+  Backend returns: Binary file data (or JSON with ?info=1)
+
+  Issues:
+    1. Path: /mail/{guid}/attachment/{n} vs /qmail/attachment/download?email_id&attachment_id
+
+  FIX: Change to /api/qmail/attachment/download?email_id={id}&attachment_id={n}
+
+------------------------------------------------------------------------------
+4.8  Download Email Content
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/download/{guid}               (qmailApiServices.js:~1345)
+  Backend:  POST /api/qmail/download?file_guid={guid}   (api_handlers.c:96)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/download/{guid} vs /qmail/download?file_guid={guid}
+    2. Method: GUI uses GET; backend uses POST
+
+  Backend returns: { success, message, email_id, subject, sender_sn,
+    stripes_downloaded, stripes_recovered }
+
+  FIX: Change to POST /api/qmail/download?file_guid={guid}
+
+------------------------------------------------------------------------------
+4.9  Send Email
+------------------------------------------------------------------------------
+  GUI:      POST /api/mail/send                         (qmailApiServices.js:~1197)
+            Body: { to[], cc[], bcc[], subject, body, attachments[], storage_weeks }
+  Backend:  POST /api/qmail/send?to=...&body=...&subject=...&cc=...&storage_weeks=...
+                                                        (api_handlers.c:93)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/send vs /qmail/send
+    2. GUI sends JSON body; backend reads query parameters
+    3. Backend may also accept /api/qmail/upload for more complex sends
+
+  Backend returns: { success, message, file_guid, upload_successes,
+    upload_failures, tell_success }
+
+  GUI expects: status (success/accepted), message, task_id, timestamp
+
+  Issues:
+    4. GUI expects task_id — /api/qmail/send is synchronous (no task_id)
+    5. /api/qmail/upload IS async and returns task_id
+    6. Field mismatch: GUI reads "task_id" but backend returns "file_guid"
+
+  DECISION NEEDED:
+    - If GUI needs async with task_id → use /api/qmail/upload (POST, query params)
+    - If synchronous is OK → use /api/qmail/send (POST, query params)
+    - Either way, switch from JSON body to query params
+
+------------------------------------------------------------------------------
+4.10 Search Emails
+------------------------------------------------------------------------------
+  GUI:      GET /api/data/emails/search?q=...           (qmailApiServices.js:~450)
+  Backend:  GET /api/qmail/search?query=...&limit=...   (api_handlers.c:102)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /data/emails/search vs /qmail/search
+    2. Param name: GUI sends "q"; backend reads "query"
+
+  Backend returns: { success, query, count, results: [{ email_id, subject,
+    sender_sn, received_timestamp, is_read, folder, body_preview }] }
+
+  GUI expects: query, results[], count, limit, offset
+
+  FIX: Change to /api/qmail/search?query={q}&limit={n}
+
+------------------------------------------------------------------------------
+4.11 Inbox / Mail List
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/list?folder=...&limit=...&offset=...
+                                                        (qmailApiServices.js:~126)
+  Backend:  GET /api/qmail/inbox?folder={int}&limit=...&offset=...
+                                                        (api_handlers.c:97)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/list vs /qmail/inbox
+    2. GUI sends folder as string name; backend expects folder as int (0-5)
+
+  Backend returns: { success, count, folder, limit, offset, total_in_folder,
+    unread_count, emails: [{ email_id, subject, sender_sn, received_timestamp,
+    is_read, is_starred, folder, body_preview }] }
+
+  GUI expects: emails[] with EmailID, Subject, sender, ReceivedTimestamp,
+    SentTimestamp, is_read, is_starred, is_trashed, downloaded, folder, preview
+
+  Issues:
+    3. Backend returns sender_sn (int), GUI expects sender (string/object)
+    4. Backend returns email_id, GUI reads EmailID
+    5. Backend returns received_timestamp (unix int64), GUI reads ReceivedTimestamp
+    6. Backend doesn't return: SentTimestamp, is_trashed, downloaded
+    7. Backend returns body_preview, GUI reads preview
+
+  FIX: Change path and map all field names.
+       Need folder name-to-ID mapping helper.
+
+------------------------------------------------------------------------------
+4.12 Mail Folders
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/folders                       (qmailApiServices.js:~551)
+  Backend:  GET /api/qmail/folders                      (api_handlers.c:114)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/folders vs /qmail/folders
+
+  Backend returns: { success, folders: [{ id, name }] }
+  GUI expects: folders[] with name, display_name
+
+  FIX: Change to /api/qmail/folders
+       Map id → name (backend returns name), add display_name if needed
+
+------------------------------------------------------------------------------
+4.13 Mail Counts
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/count                         (qmailApiServices.js:~579)
+  Backend:  GET /api/qmail/counts                       (api_handlers.c:115)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/count vs /qmail/counts (plural)
+
+  Backend returns: { success, folders: { inbox: {total, unread}, sent: {total, unread}, ... } }
+  GUI expects: counts, summary.total_emails, summary.total_unread
+
+  FIX: Change to /api/qmail/counts, map response structure
+
+------------------------------------------------------------------------------
+4.14 Star Email
+------------------------------------------------------------------------------
+  GUI:      (no direct star function found — uses moveEmail or inline)
+  Backend:  POST /api/qmail/star?email_id={id}&starred={bool}
+                                                        (api_handlers.c:100)
+  Status:   Needs verification — check if GUI stars emails
+
+  Backend returns: { success, email_id, is_starred }
+
+
+================================================================================
+  SECTION 5: QMAIL CONTACTS
+================================================================================
+
+------------------------------------------------------------------------------
+5.1  List Contacts
+------------------------------------------------------------------------------
+  GUI:      GET /api/contacts                           (qmailApiServices.js:~711)
+  Backend:  GET /api/qmail/contacts/list                (api_handlers.c:104)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /contacts vs /qmail/contacts/list
+
+  Backend returns: { success, count, contacts: [{ serial_number, denomination,
+    first_name, last_name, auto_address, description, class_name, is_favorite,
+    created_at }] }
+
+  GUI expects: contacts[] or data[] with user_id, first_name, last_name,
+    middle_name, auto_address, description, sending_fee, beacon_id
+
+  Issues:
+    2. Field: GUI reads user_id, backend returns serial_number
+    3. Field: GUI reads middle_name, beacon_id, sending_fee — backend doesn't have these
+
+  FIX: Change to /api/qmail/contacts/list
+       Map serial_number → user_id
+
+------------------------------------------------------------------------------
+5.2  Add Contact
+------------------------------------------------------------------------------
+  GUI:      POST /api/qmail/contacts/add?params...      (qmailApiServices.js:~803)
+  Backend:  POST /api/qmail/contacts/add?params...      (api_handlers.c:103)
+  Status:   [MATCH]
+
+  Both use POST with query params. Matching parameter names.
+
+------------------------------------------------------------------------------
+5.3  Delete Contact
+------------------------------------------------------------------------------
+  GUI:      DELETE /api/qmail/contacts/delete?serial_number=...
+                                                        (qmailApiServices.js:~829)
+  Backend:  DELETE /api/qmail/contacts/delete?serial_number=...
+                                                        (api_handlers.c:105)
+  Status:   [MATCH]
+
+------------------------------------------------------------------------------
+5.4  Popular Contacts
+------------------------------------------------------------------------------
+  GUI:      GET /api/data/contacts/popular?limit=...    (qmailApiServices.js:~78)
+  Backend:  (NO ENDPOINT)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add endpoint to backend, or remove from GUI?
+                   Could be implemented by sorting contacts by usage count.
+
+
+================================================================================
+  SECTION 6: QMAIL DRAFTS
+================================================================================
+
+------------------------------------------------------------------------------
+6.1  List Drafts
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/drafts                        (qmailApiServices.js:~183)
+  Backend:  GET /api/qmail/drafts?limit=...&offset=...  (api_handlers.c:130)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/drafts vs /qmail/drafts
+
+  Backend returns: { success, count, drafts: [{ draft_id, subject,
+    to_addresses, saved_at, body_preview }] }
+
+  FIX: Change to /api/qmail/drafts
+
+------------------------------------------------------------------------------
+6.2  Save Draft
+------------------------------------------------------------------------------
+  GUI:      POST /api/mail/draft                        (qmailApiServices.js:~238)
+            Body: { subject, body, to, cc, bcc, subsubject }
+  Backend:  POST /api/qmail/draft?to=...&subject=...&body=...&cc=...&bcc=...
+                                                        (api_handlers.c:131)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/draft vs /qmail/draft
+    2. GUI sends JSON body; backend reads query params (+ wallet_path)
+
+  Backend returns: { success, message, draft_id, saved_at }
+
+  FIX: Change to POST /api/qmail/draft with query params
+
+------------------------------------------------------------------------------
+6.3  Update Draft
+------------------------------------------------------------------------------
+  GUI:      PUT /api/mail/draft/{draftId}               (qmailApiServices.js:~290)
+            Body: { subject, body, to, cc, bcc, subsubject }
+  Backend:  POST /api/qmail/draft/update?draft_id={id}&to=...&subject=...
+                                                        (api_handlers.c:132)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/draft/{id} vs /qmail/draft/update?draft_id={id}
+    2. Method: GUI uses PUT; backend uses POST
+    3. GUI sends JSON body; backend reads query params
+
+  Backend returns: { success, message, draft_id, updated_at }
+
+  FIX: Change to POST /api/qmail/draft/update?draft_id={id}&...
+
+
+================================================================================
+  SECTION 7: QMAIL NOTIFICATIONS & PENDING TELLS
+================================================================================
+
+------------------------------------------------------------------------------
+7.1  Get Notifications
+------------------------------------------------------------------------------
+  GUI:      GET /api/mail/notifications                 (qmailApiServices.js:~1332)
+  Backend:  GET /api/qmail/notifications?limit=...      (api_handlers.c:124)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /mail/notifications vs /qmail/notifications
+
+  Backend returns: { success, count, notifications: [{ file_guid, sender_sn,
+    sender_name, tell_type, total_file_size, timestamp, downloaded }] }
+
+  FIX: Change to /api/qmail/notifications
+
+------------------------------------------------------------------------------
+7.2  Dismiss Notification
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  DELETE /api/qmail/notifications/dismiss?id={n}
+                                                        (api_handlers.c:125)
+  Status:   [BACKEND-ONLY]
+
+------------------------------------------------------------------------------
+7.3  Pending Tells
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  GET /api/qmail/pending-tells?status=...     (api_handlers.c:121)
+            POST /api/qmail/pending-tells/retry?tell_id=...  (api_handlers.c:122)
+            DELETE /api/qmail/pending-tells/sent        (api_handlers.c:123)
+  Status:   [BACKEND-ONLY]
+
+  No action needed unless GUI wants pending-tells management.
+
+
+================================================================================
+  SECTION 8: QMAIL IDENTITY & STATUS
+================================================================================
+
+------------------------------------------------------------------------------
+8.1  Get Identity
+------------------------------------------------------------------------------
+  GUI:      GET /api/account/identity                   (qmailApiServices.js:~1323)
+  Backend:  GET /api/qmail/identity                     (api_handlers.c:135)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /account/identity vs /qmail/identity
+
+  Backend returns: { success, identity: { sn, denomination, email, first_name,
+    last_name, description, class, beacon_raida } }
+  GUI reads: data.configured (doesn't exist in backend response)
+
+  FIX: Change to /api/qmail/identity
+       Map identity.sn to determine "configured" (sn > 0 = configured)
+
+------------------------------------------------------------------------------
+8.2  Heal Identity
+------------------------------------------------------------------------------
+  GUI:      POST /api/wallet/heal                       (qmailApiServices.js:~1284)
+  Backend:  POST /api/qmail/heal-identity?wallet_path=... (api_handlers.c:136)
+  Status:   [MISMATCH]
+
+  Issues:
+    1. Path: /wallet/heal vs /qmail/heal-identity
+    2. GUI sends no params; backend accepts wallet_path
+
+  Backend returns: { success, message, healed }
+
+  FIX: Change to POST /api/qmail/heal-identity
+
+------------------------------------------------------------------------------
+8.3  Prepare Change
+------------------------------------------------------------------------------
+  GUI:      POST /api/wallet/prepare-change             (qmailApiServices.js:~1307)
+  Backend:  (NO ENDPOINT — does not exist)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add to backend or remove from GUI?
+
+------------------------------------------------------------------------------
+8.4  QMail Status
+------------------------------------------------------------------------------
+  GUI:      (no direct call)
+  Backend:  GET /api/qmail/status                       (api_handlers.c:106)
+  Status:   [BACKEND-ONLY]
+
+  Could be useful for a status dashboard. No action needed now.
+
+------------------------------------------------------------------------------
+8.5  Ping QMail
+------------------------------------------------------------------------------
+  GUI:      GET /api/qmail/ping                         (qmailApiServices.js:~346)
+  Backend:  (NO ENDPOINT — /api/qmail/ping not registered)
+  Status:   [GUI-ONLY]
+
+  Notes: Closest backend endpoints are /api/qmail/status or /api/qmail/check.
+         The GUI uses this for periodic health checks / beacon polling.
+
+  DECISION NEEDED: Map to /api/qmail/status, /api/qmail/check, or add /api/qmail/ping?
+
+
+================================================================================
+  SECTION 9: QMAIL PAYMENT
+================================================================================
+
+  GUI:      (no direct payment calls found in catalog)
+  Backend:  GET /api/qmail/payment?email_id={id}        (api_handlers.c:128)
+            POST /api/qmail/payment/claim?email_id={id} (api_handlers.c:129)
+  Status:   [BACKEND-ONLY]
+
+  No action needed unless GUI has payment features elsewhere.
+
+
+================================================================================
+  SECTION 10: ADMIN / SETUP ENDPOINTS
+================================================================================
+
+------------------------------------------------------------------------------
+10.1 Version Check
+------------------------------------------------------------------------------
+  GUI:      GET /api/admin/version-check                (qmailApiServices.js:~1231)
+  Backend:  (NO ENDPOINT)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add to backend or remove from GUI?
+
+------------------------------------------------------------------------------
+10.2 Import Credentials
+------------------------------------------------------------------------------
+  GUI:      POST /api/setup/import-credentials          (qmailApiServices.js:~1253)
+            Body: { locker_code: string }
+  Backend:  (NO ENDPOINT)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add to backend or remove from GUI?
+
+------------------------------------------------------------------------------
+10.3 Servers List
+------------------------------------------------------------------------------
+  GUI:      GET /api/data/servers                       (qmailApiServices.js:~853)
+  Backend:  (NO ENDPOINT — but server info is in /api/qmail/status response)
+  Status:   [GUI-ONLY]
+
+  Could map to /api/qmail/status and extract the servers section.
+
+  DECISION NEEDED: Use /api/qmail/status, add /api/data/servers, or remove?
+
+------------------------------------------------------------------------------
+10.4 Parity Server
+------------------------------------------------------------------------------
+  GUI:      GET /api/admin/servers/parity               (qmailApiServices.js:~883)
+  Backend:  (NO ENDPOINT)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add to backend or remove from GUI?
+
+------------------------------------------------------------------------------
+10.5 Sync Data
+------------------------------------------------------------------------------
+  GUI:      POST /api/admin/sync                        (qmailApiServices.js:~924)
+  Backend:  (NO ENDPOINT)
+  Status:   [GUI-ONLY]
+
+  DECISION NEEDED: Add to backend or remove from GUI?
+
+
+================================================================================
+  SECTION 11: BACKEND-ONLY ENDPOINTS (no GUI call)
+================================================================================
+
+  /api/qmail/convert_coin_to_email    — Convert serial number to email address
+  /api/qmail/base32                   — Base32 encode/decode utility
+  /api/qmail/whoami                   — Get own identity info
+  /api/qmail/poll                     — Long-poll for new mail
+  /api/qmail/check                    — Check for new mail (beacon)
+  /api/qmail/upload                   — Upload email (async, returns task_id)
+  /api/recovery/status                — Recovery status
+  /api/tools/support-zip              — Generate support ZIP
+  /api/debug/loopback-test            — RAIDA loopback diagnostic
+  /api/raida/version                  — RAIDA version info
+  /api/raida/count                    — RAIDA coin count
+
+
+================================================================================
+  SECTION 12: SUMMARY OF DECISIONS NEEDED
+================================================================================
+
+Before implementing fixes, these design decisions need your input:
+
+CROSS-CUTTING ISSUE:
+  A. The backend uses query params everywhere. The GUI uses JSON bodies for
+     POST/PUT. Should we change ALL GUI POST calls to use query params?
+     (Affects: sendEmail, saveDraft, updateDraft, markEmailRead, moveEmail,
+      importCredentials, syncData, healWallet)
+
+  B. Folder IDs: Backend uses integers (0-5) for folders. GUI uses string names.
+     Should we add a mapping helper in the GUI?
+
+PER-ENDPOINT DECISIONS:
+  1. /api/health/encryption-health — Add to backend or remove from GUI?
+  2. /api/data/contacts/popular — Add to backend or remove from GUI?
+  3. /api/wallet/prepare-change — Add to backend or remove from GUI?
+  4. /api/qmail/ping — Map to /api/qmail/status, /api/qmail/check, or add?
+  5. /api/admin/version-check — Add to backend or remove from GUI?
+  6. /api/setup/import-credentials — Add to backend or remove from GUI?
+  7. /api/data/servers — Map to /api/qmail/status or add endpoint?
+  8. /api/admin/servers/parity — Add to backend or remove from GUI?
+  9. /api/admin/sync — Add to backend or remove from GUI?
+  10. /api/mail/send — Use synchronous /qmail/send or async /qmail/upload?
+  11. /api/transactions/deposit — Does backend accept individual file paths
+      or only source_folder?
+
+STRAIGHTFORWARD FIXES (no decision needed):
+  - 15+ path swaps from /mail/* to /qmail/*
+  - 3 HTTP method changes (PUT → POST)
+  - 5+ response field mappings
+  - Folder name→ID mapping helper
+
+================================================================================

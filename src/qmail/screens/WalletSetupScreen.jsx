@@ -9,8 +9,9 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
 
   const handleHeal = async () => {
     setIsProcessing(true);
+    // BUG-15 FIX: healWallet returns raw JSON; check both possible success indicators
     const result = await healWallet();
-    if (result.status === "success") setStatus('healthy');
+    if (result.success || result.status === "success") setStatus('healthy');
     setIsProcessing(false);
   };
 

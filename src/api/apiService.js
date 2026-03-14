@@ -1,8 +1,9 @@
 // --- src/api/apiService.js ---
 // This file will store all your API call functions.
 
-// Define the base URL for your local server
-const API_BASE_URL = 'http://localhost:8080/api';
+// API port is configurable via VITE_API_PORT env variable (default: 8080)
+const API_PORT = import.meta.env.VITE_API_PORT || '8080';
+const API_BASE_URL = `http://localhost:${API_PORT}/api`;
 
 /**
  * A helper function to handle fetch responses.
@@ -20,46 +21,91 @@ const handleResponse = async (response) => {
   return data;
 };
 
-/**
- * Helper function to expand relative paths to absolute paths
- * @param {string} path - The path to expand
- * @returns {string} - Expanded absolute path
- */
-function expandPath(path) {
-  if (!path) return '';
-  
-  // If it's already an absolute path, return as-is
-  if (path.match(/^[a-zA-Z]:\\/) || path.startsWith('/') || path.startsWith('\\\\')) {
-    return path;
-  }
-  
-  // For relative folder names, assume Windows user directory structure
-  // Users can override this by providing full paths
-  const commonExpansions = {
-  'Downloads': 'C:\\Users\\%USERNAME%\\Downloads',
-  'Documents': 'C:\\Users\\%USERNAME%\\Documents', 
-  'Desktop': 'C:\\Users\\%USERNAME%\\Desktop',
-  'CloudCoin': 'C:\\Users\\%USERNAME%\\CloudCoin',
-  'Data': 'Data\\Wallets',  // ← ADD THIS LINE
-  'Export': 'Export'
-};
-  
-  // Check if it's a common folder name
-  if (commonExpansions[path]) {
-    return commonExpansions[path];
-  }
-  
-  // For unknown single folder names (no slashes), expand to user directory
-  // Examples: "MyFolder" → "C:\Users\%USERNAME%\MyFolder"
-  if (!path.includes('\\') && !path.includes('/')) {
-    console.log(`Expanding relative folder "${path}" to user directory`);
-    return `C:\\Users\\%USERNAME%\\${path}`;
-  }
-  
-  // If it contains slashes, assume user knows what they're doing
-  // Examples: "folder/subfolder", "relative\path"
-  return path;
+// BUG-08 FIX: Resolve home directory at runtime instead of using literal %USERNAME%
+let _homeDir = null;
+let _homeDirPromise = null;
+
+function getHomeDir() {
+  if (_homeDir) return Promise.resolve(_homeDir);
+  if (_homeDirPromise) return _homeDirPromise;
+  _homeDirPromise = (async () => {
+    if (window.electronAPI && window.electronAPI.getHomeDir) {
+      _homeDir = await window.electronAPI.getHomeDir();
+    } else {
+      // Fallback for browser testing
+      _homeDir = 'C:\\Users\\User';
+    }
+    return _homeDir;
+  })();
+  return _homeDirPromise;
 }
+
+/**
+ * Helper function to expand relative paths to absolute paths.
+ * Now async to ensure home directory is resolved before use.
+ * @param {string} pathStr - The path to expand
+ * @returns {Promise<string>} - Expanded absolute path
+ */
+async function expandPath(pathStr) {
+  if (!pathStr) return '';
+
+  // If it's already an absolute path, return as-is
+  if (pathStr.match(/^[a-zA-Z]:\\/) || pathStr.startsWith('/') || pathStr.startsWith('\\\\')) {
+    return pathStr;
+  }
+
+  const homeDir = await getHomeDir();
+
+  const commonExpansions = {
+    'Downloads': homeDir + '\\Downloads',
+    'Documents': homeDir + '\\Documents',
+    'Desktop': homeDir + '\\Desktop',
+    'CloudCoin': homeDir + '\\CloudCoin',
+    'Data': 'Data\\Wallets',
+    'Export': 'Export'
+  };
+
+  // Check if it's a common folder name
+  if (commonExpansions[pathStr]) {
+    return commonExpansions[pathStr];
+  }
+
+  // For unknown single folder names (no slashes), expand to user directory
+  if (!pathStr.includes('\\') && !pathStr.includes('/')) {
+    console.log(`Expanding relative folder "${pathStr}" to user directory`);
+    return homeDir + '\\' + pathStr;
+  }
+
+  // If it contains slashes, assume user knows what they're doing
+  return pathStr;
+}
+
+// Start resolving home dir early (non-blocking)
+getHomeDir();
+
+/**
+ * Checks if the application is running from a USB drive.
+ * Calls the REST API directly from the renderer (no IPC middleman).
+ * @returns {Promise<{onUsb: boolean, required: boolean, rootPath: string}>}
+ */
+export const checkUsbDrive = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/system/config/usb`);
+    if (!response.ok) {
+      console.warn('USB check returned', response.status);
+      return { onUsb: false, required: false, rootPath: '' };
+    }
+    const data = await response.json();
+    return {
+      onUsb: data.on_usb === true,
+      required: data.required !== false, // default to required if not specified
+      rootPath: data.root_path || '',
+    };
+  } catch (error) {
+    console.error('USB check API failed:', error);
+    return { onUsb: false, required: false, rootPath: '' };
+  }
+};
 
 /**
  * Helper function to normalize file paths - keep backslashes for file paths
@@ -110,29 +156,19 @@ export const runEchoTest = async () => {
  */
 export const listWallets = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallets`);
+    // API-FIX: Changed /api/wallets → /api/wallets/list to match rest_core
+    const response = await fetch(`${API_BASE_URL}/wallets/list`);
     const data = await handleResponse(response);
-    console.log('Data received from /wallets:', data);
+    console.log('Data received from /wallets/list:', data);
 
     if (data && Array.isArray(data.wallets)) {
-      return { success: true, data: data.wallets, total_balance: 0 };
-    }
-    else if (data && Array.isArray(data.locations)) {
-      let allWallets = [];
-      data.locations.forEach(location => {
-        if (location && Array.isArray(location.wallets)) {
-          const walletsWithLocation = location.wallets.map(wallet => ({
-            ...wallet,
-            name: wallet.wallet_name || wallet.name,
-            path: location.path || location.active_path,
-            balance: wallet.balance || 0,
-            coins: wallet.total_coins || 0,
-            total_value: wallet.total_value || 0
-          }));
-          allWallets = allWallets.concat(walletsWithLocation);
-        }
-      });
-      return { success: true, data: allWallets, total_balance: data.total_balance || 0 };
+      // API-FIX: Backend returns wallet_name/wallet_path, map to name/path for GUI
+      const mapped = data.wallets.map(w => ({
+        ...w,
+        name: w.wallet_name || w.name,
+        path: w.wallet_path || w.path,
+      }));
+      return { success: true, data: mapped, total_balance: 0 };
     }
     else {
       const receivedDataString = JSON.stringify(data, null, 2);
@@ -151,18 +187,29 @@ export const listWallets = async () => {
 };
 
 /**
- * Gets the balance for wallets - NEVER throws, always returns success/error object
+ * Gets the balance for a specific wallet.
+ * API-FIX: Changed from /api/wallets/active/balance to /api/wallets/balance?wallet_path=
+ * rest_core does not track "active wallet" — it requires wallet_path each time.
+ * If no walletPath is provided, the backend defaults to the "Default" wallet.
+ * @param {string} walletPath - Optional wallet path. Omit to use Default wallet.
  */
-export const getWalletBalance = async () => {
+export const getWalletBalance = async (walletPath = null) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallets/active/balance`);
-    
+    const queryParams = new URLSearchParams();
+    if (walletPath) {
+      queryParams.append('wallet_path', walletPath);
+    }
+    const url = queryParams.toString()
+      ? `${API_BASE_URL}/wallets/balance?${queryParams.toString()}`
+      : `${API_BASE_URL}/wallets/balance`;
+
+    const response = await fetch(url);
+
     // Handle non-OK responses gracefully
     if (!response.ok) {
       console.warn(`Balance fetch returned ${response.status}`);
-      // Return empty data instead of throwing
-      return { 
-        success: true, 
+      return {
+        success: true,
         data: {
           wallets: [],
           total_balance: 0,
@@ -171,24 +218,43 @@ export const getWalletBalance = async () => {
         }
       };
     }
-    
+
     const data = await response.json();
-    console.log('Data received from /wallets/active/balance:', data);
+    console.log('Data received from /wallets/balance:', data);
 
-    if (data && Array.isArray(data.wallets)) {
-      return { 
-        success: true, 
+    // API-FIX: rest_core returns a single wallet balance object with fields:
+    // { success, total_value, total_notes, bank_value, bank_notes,
+    //   fracked_value, fracked_notes, limbo_value, limbo_notes, wallet_name, wallet_path }
+    // We map this into the shape callers expect.
+    if (data && data.success) {
+      return {
+        success: true,
         data: {
-          wallets: data.wallets,
-          total_balance: data.total_balance || 0,
-          total_coins: data.total_coins || 0,
-          denomination_counts: data.denomination_counts || {}
+          wallets: [{
+            name: data.wallet_name || 'Default',
+            path: data.wallet_path || '',
+            balance: data.total_value || 0,
+            coins: data.total_notes || 0,
+            has_fracked: (data.fracked_notes || 0) > 0,
+            has_limbo: (data.limbo_notes || 0) > 0,
+            denomination_counts: {},
+            folders: {
+              bank_coins: data.bank_notes || 0,
+              bank_value: data.bank_value || 0,
+              fracked_coins: data.fracked_notes || 0,
+              fracked_value: data.fracked_value || 0,
+              limbo_coins: data.limbo_notes || 0,
+              limbo_value: data.limbo_value || 0,
+            }
+          }],
+          total_balance: data.total_value || 0,
+          total_coins: data.total_notes || 0,
+          denomination_counts: {}
         }
       };
     } else {
-      // Return empty data instead of throwing
-      return { 
-        success: true, 
+      return {
+        success: true,
         data: {
           wallets: [],
           total_balance: 0,
@@ -196,143 +262,85 @@ export const getWalletBalance = async () => {
           denomination_counts: {}
         }
       };
-    }
-
-  } catch (error) { 
-    console.error('Get wallet balance failed:', error);
-    // Return empty data instead of error
-    return { 
-      success: true, 
-      data: {
-        wallets: [],
-        total_balance: 0,
-        total_coins: 0,
-        denomination_counts: {}
-      }
-    };
-  }
-};
-export const getTotalBalance = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/wallets`);
-    const data = await handleResponse(response);
-    
-    console.log('Data received from /wallets:', data);
-
-    // The endpoint returns:
-    // {
-    //   "total_balance": 0,
-    //   "locations": [{
-    //     "path": "...",
-    //     "wallets": [{
-    //       "name": "Default",
-    //       "index": 0,
-    //       "active": false,
-    //       "balance": 0,
-    //       "total_coins": 0,
-    //       "total_value": 0.0,
-    //       "has_limbo": false,
-    //       "has_fracked": false,
-    //       "denomination_counts": {}
-    //     }]
-    //   }]
-    // }
-
-    // Validate the response structure
-    if (data && Array.isArray(data.locations) && typeof data.total_balance !== 'undefined') {
-      // Extract all wallets from all locations
-      let allWallets = [];
-      data.locations.forEach(location => {
-        if (location && Array.isArray(location.wallets)) {
-          location.wallets.forEach(wallet => {
-            allWallets.push({
-              name: wallet.wallet_name || wallet.name || 'Unknown',
-              balance: wallet.balance || 0,
-              coins: wallet.total_coins || 0,
-              location: location.path || location.active_path || '',
-              has_fracked: wallet.has_fracked || false,
-              has_limbo: wallet.has_limbo || false,
-              denomination_counts: wallet.denomination_counts || {}
-            });
-          });
-        }
-      });
-
-      return { 
-        success: true, 
-        data: {
-          wallets: allWallets,
-          total_balance: data.total_balance || 0,
-          total_coins: allWallets.reduce((sum, w) => sum + w.coins, 0),
-          denomination_counts: {}
-        }
-      };
-    } else {
-      // If the structure doesn't match, throw an error
-      const receivedDataString = JSON.stringify(data, null, 2);
-      throw new Error(
-        'Received invalid/unexpected data from server for /wallets.\n\n' + 
-        'Expected: { locations: [...], total_balance: number }\n\n' +
-        'Data received:\n' +
-        `${receivedDataString.substring(0, 500)}${receivedDataString.length > 500 ? '...' : ''}`
-      );
-    }
-
-  } catch (error) { 
-    console.error('Get total balance failed:', error);
-    
-    const errorMessage = `Error: ${error.message}\n\n` +
-                         `Is the Core server running?`;
-                         
-    return { success: false, error: errorMessage };
-  }
-};
-/**
- * Switches the active wallet to the specified wallet name.
- * @param {string} walletName - The name of the wallet to switch to
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- * On success: { success: true, data: { message, wallet_name } }
- * On failure: { success: false, error: "Error message" }
- */
-export const switchWallet = async (walletName) => {
-  try {
-    // Validate input
-    if (!walletName || typeof walletName !== 'string') {
-      throw new Error('Wallet name is required and must be a string');
-    }
-
-    // URL encode the wallet name to handle special characters
-    const encodedWalletName = encodeURIComponent(walletName);
-    
-    const response = await fetch(`${API_BASE_URL}/wallet/switch?name=${encodedWalletName}`);
-    const data = await handleResponse(response);
-    
-    console.log('Data received from /wallet/switch:', data);
-
-    // Check if the response indicates success
-    // Adjust this based on what your API actually returns
-    if (data && (data.success || data.status === 'success' || data.message)) {
-      return { 
-        success: true, 
-        data: {
-          message: data.message || `Switched to wallet: ${walletName}`,
-          wallet_name: walletName,
-          ...data
-        }
-      };
-    } else {
-      throw new Error(data.error || 'Failed to switch wallet');
     }
 
   } catch (error) {
-    console.error('Switch wallet failed:', error);
-    
-    const errorMessage = `Error switching to wallet "${walletName}": ${error.message}\n\n` +
-                         `Is the Core server running?`;
-                         
+    console.error('Get wallet balance failed:', error);
+    // BUG-11 FIX: Report failure so the UI can show an error indicator
+    return {
+      success: false,
+      error: `Failed to load wallet balance: ${error.message}`
+    };
+  }
+};
+/**
+ * Gets total balance across all wallets by listing wallets then fetching each balance.
+ * API-FIX: rest_core has no single "total balance" endpoint.
+ * We list wallets via /api/wallets/list, then call /api/wallets/balance for each.
+ */
+export const getTotalBalance = async () => {
+  try {
+    // 1. Get wallet list
+    const listResponse = await fetch(`${API_BASE_URL}/wallets/list`);
+    const listData = await handleResponse(listResponse);
+    console.log('Data received from /wallets/list (for total balance):', listData);
+
+    if (!listData || !Array.isArray(listData.wallets)) {
+      throw new Error('Invalid wallet list response');
+    }
+
+    // 2. Fetch balance for each wallet
+    let allWallets = [];
+    let totalBalance = 0;
+    let totalCoins = 0;
+
+    for (const w of listData.wallets) {
+      const walletPath = w.wallet_path || w.path;
+      try {
+        const balResult = await getWalletBalance(walletPath);
+        if (balResult.success && balResult.data.wallets.length > 0) {
+          const bal = balResult.data.wallets[0];
+          allWallets.push({
+            name: w.wallet_name || w.name || 'Unknown',
+            balance: bal.balance || 0,
+            coins: bal.coins || 0,
+            location: walletPath,
+            has_fracked: bal.has_fracked || false,
+            has_limbo: bal.has_limbo || false,
+            denomination_counts: bal.denomination_counts || {}
+          });
+          totalBalance += bal.balance || 0;
+          totalCoins += bal.coins || 0;
+        }
+      } catch (balErr) {
+        console.warn(`Failed to get balance for wallet ${walletPath}:`, balErr);
+        allWallets.push({
+          name: w.wallet_name || w.name || 'Unknown',
+          balance: 0, coins: 0, location: walletPath,
+          has_fracked: false, has_limbo: false, denomination_counts: {}
+        });
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        wallets: allWallets,
+        total_balance: totalBalance,
+        total_coins: totalCoins,
+        denomination_counts: {}
+      }
+    };
+
+  } catch (error) {
+    console.error('Get total balance failed:', error);
+    const errorMessage = `Error: ${error.message}\n\nIs the Core server running?`;
     return { success: false, error: errorMessage };
   }
 };
+// API-FIX: switchWallet() removed — rest_core does not track "active wallet" state.
+// The GUI tracks the selected wallet locally and passes wallet_path to each API call.
+// If no wallet_path is provided, rest_core defaults to the "Default" wallet.
 
 /**
  * Creates a new wallet with the specified name.
@@ -406,10 +414,11 @@ export const addWalletLocation = async (path) => {
     // URL encode the path to handle special characters and spaces
     const encodedPath = encodeURIComponent(path.trim());
     
-    const response = await fetch(`${API_BASE_URL}/wallet/add-location?path=${encodedPath}`);
+    // API-FIX: Changed /api/wallet/add-location → /api/wallets/locations to match rest_core
+    const response = await fetch(`${API_BASE_URL}/wallets/locations?path=${encodedPath}`);
     const data = await handleResponse(response);
-    
-    console.log('Data received from /wallet/add-location:', data);
+
+    console.log('Data received from /wallets/locations:', data);
 
     // Check if the response indicates success
     if (data && (data.success || data.status === 'success' || data.message)) {
@@ -457,12 +466,11 @@ export const renameWallet = async (walletPath, newName) => {
     const encodedPath = encodeURIComponent(walletPath);
     const encodedNewName = encodeURIComponent(newName.trim());
     
-    const response = await fetch(`${API_BASE_URL}/wallets/rename?wallet_path=${encodedPath}&new_name=${encodedNewName}`, {
-      method: 'POST'
-    });
+    // API-FIX: Changed from POST to GET — rest_core uses GET for all wallet endpoints
+    const response = await fetch(`${API_BASE_URL}/wallets/rename?wallet_path=${encodedPath}&new_name=${encodedNewName}`);
     const data = await handleResponse(response);
-    
-    console.log('Data received from /wallets/active/rename:', data);
+
+    console.log('Data received from /wallets/rename:', data);
 
     if (data && (data.success === true || data.status === 'success')) {
       return { 
@@ -498,41 +506,20 @@ export const deleteWallet = async (walletPath) => {
     
     const encodedPath = encodeURIComponent(walletPath);
     
-    // Use fetch with mode: 'cors' and handle CORS issues
-    const response = await fetch(`${API_BASE_URL}/wallets/delete?wallet_path=${encodedPath}`, {
-      method: 'DELETE',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    }).catch(fetchError => {
-      // CORS error or network error - wallet is likely deleted but browser blocked response
-      console.warn('Fetch failed (likely CORS), assuming wallet deleted:', fetchError);
-      return null;
-    });
-    
-    // If fetch was blocked by CORS, assume success
-    if (!response) {
-      console.log('DELETE request blocked by CORS - assuming wallet was deleted');
-      return { 
-        success: true, 
-        data: { 
-          message: 'Wallet deleted successfully',
-          note: 'Request completed but response blocked by browser CORS policy'
-        } 
-      };
-    }
-    
+    // BUG-05 FIX: Do not assume network errors mean success
+    // API-FIX: Changed from DELETE to GET — rest_core uses GET for all wallet endpoints
+    const response = await fetch(`${API_BASE_URL}/wallets/delete?wallet_path=${encodedPath}`);
+
     console.log('Delete response status:', response.status);
-    
+
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unable to read error');
       console.error('Delete error response:', errorText);
       throw new Error(`Server responded with ${response.status}: ${errorText}`);
     }
-    
+
     const data = await response.json();
-    console.log('Data received from /wallets/active/delete:', data);
+    console.log('Data received from /wallets/delete:', data);
     
     if (data && (data.success === true || data.command === 'wallet-delete')) {
       return { 
@@ -549,29 +536,6 @@ export const deleteWallet = async (walletPath) => {
     
   } catch (error) {
     console.error('Delete wallet failed:', error);
-    
-    // If error is CORS-related, treat as success since Postman confirms it works
-    if (error.message.includes('Failed to fetch') || 
-        error.message.includes('CORS') || 
-        error.message.includes('NetworkError')) {
-      console.log('CORS error detected - wallet likely deleted successfully');
-      return { 
-        success: true, 
-        data: { 
-          message: 'Wallet deleted successfully',
-          note: 'CORS prevented reading response, but deletion completed'
-        } 
-      };
-    }
-    
-    // If 404, wallet doesn't exist (already deleted)
-    if (error.message.includes('404') || error.message.includes('Not Found')) {
-      return { 
-        success: true, 
-        data: { message: 'Wallet already deleted or does not exist' } 
-      };
-    }
-    
     return { success: false, error: `Error deleting wallet: ${error.message}` };
   }
 };
@@ -641,7 +605,7 @@ export const deleteWallet = async (walletPath) => {
  * On success: { success: true, data: { status, operation, wallet, destination, filename, full_path, message } }
  * On failure: { success: false, error: "Error message" }
  */
-export const createWalletBackup = async (destination) => {
+export const createWalletBackup = async (destination, walletPath = null) => {
   try {
     // 1. Validate input
     if (!destination || typeof destination !== 'string' || destination.trim().length === 0) {
@@ -650,27 +614,32 @@ export const createWalletBackup = async (destination) => {
     
     const encodedDestination = encodeURIComponent(destination.trim());
 
-    // 2. Make the fetch call
-    const response = await fetch(`${API_BASE_URL}/wallet/backup?destination=${encodedDestination}`);
-    
+    // 2. Build URL with optional wallet_path
+    // API-FIX: rest_core endpoint is /api/wallets/backup?destination=...&wallet_path=...
+    let url = `${API_BASE_URL}/wallets/backup?destination=${encodedDestination}`;
+    if (walletPath) {
+      url += `&wallet_path=${encodeURIComponent(walletPath)}`;
+    }
+
+    const response = await fetch(url);
+
     // 3. Get JSON data regardless of response.ok
-    // This allows us to parse the error message from the server
     const data = await response.json();
 
     // 4. Handle non-ok responses (400, 500, etc.)
     if (!response.ok) {
-      // Use the error message from the JSON body if it exists
-      throw new Error(data.error || `Server responded with ${response.status} ${response.statusText}`);
+      throw new Error(data.error || data.message || `Server responded with ${response.status} ${response.statusText}`);
     }
 
     // 5. Handle successful response
-    // Validate success data structure
-    // FIX: Changed check from 'data.status === "success"' to 'data.success === true'
-    // This matches the actual server response shown in the screenshot.
-    if (data && data.success === true && data.full_path) {
-      return { success: true, data: data };
+    // API-FIX: rest_core returns { success, command, wallet_path, wallet_name, zip_path,
+    //   destination, files_added, files_skipped, message }
+    if (data && data.success === true) {
+      return { success: true, data: {
+        ...data,
+        full_path: data.zip_path || '',
+      }};
     } else {
-      // This case handles a 200 OK response that is not in the expected format
       const receivedDataString = JSON.stringify(data, null, 2);
       throw new Error(
         'Received an unexpected success response from server.\n\n' +
@@ -798,23 +767,25 @@ export const getTaskStatus = async (taskId) => {
 
     const response = await fetch(`${API_BASE_URL}/system/tasks?task_id=${encodeURIComponent(taskId)}`);
     const data = await handleResponse(response);
-    
+
     console.log('Data received from /system/tasks:', data);
 
-    // Validate the response structure
-    if (data && data.task_id && data.status) {
-      return { 
-        success: true, 
+    // API-FIX: rest_core returns { status: "success", payload: { id, status, progress, message, data } }
+    // The task's actual status is nested inside payload, not at the top level.
+    if (data && data.payload) {
+      const p = data.payload;
+      return {
+        success: true,
         data: {
-          status: data.status,
-          task_id: data.task_id,
-          progress: data.progress || 0,
-          message: data.message || '',
-          data: data.data || {}
+          status: p.status,
+          task_id: p.id || taskId,
+          progress: p.progress || 0,
+          message: p.message || '',
+          data: p.data || {}
         }
       };
     } else {
-      throw new Error(data.error || 'Invalid task status response');
+      throw new Error(data.message || data.error || 'Invalid task status response');
     }
 
   } catch (error) {
@@ -835,11 +806,16 @@ export const getTaskStatus = async (taskId) => {
  * On success: { success: true, data: { task data } }
  * On failure: { success: false, error: "Error message" }
  */
+// BUG-07 FIX: Add max attempts and handle unknown terminal statuses
 export const pollTaskUntilComplete = async (taskId, pollInterval = 1000, onProgress = null) => {
+  const MAX_ATTEMPTS = 300; // 5 minutes at 1s interval
+  let attempts = 0;
+
   try {
-    while (true) {
+    while (attempts < MAX_ATTEMPTS) {
+      attempts++;
       const result = await getTaskStatus(taskId);
-      
+
       if (!result.success) {
         return result; // Return error immediately
       }
@@ -855,20 +831,22 @@ export const pollTaskUntilComplete = async (taskId, pollInterval = 1000, onProgr
       if (taskData.status === 'success') {
         console.log('Task completed successfully:', taskData);
         return { success: true, data: taskData };
-      } else if (taskData.status === 'error' || taskData.status === 'failed') {
-        console.error('Task failed:', taskData);
-        throw new Error(taskData.message || 'Task failed');
+      } else if (taskData.status === 'error' || taskData.status === 'failed' ||
+                 taskData.status === 'cancelled' || taskData.status === 'timeout' ||
+                 taskData.status === 'aborted') {
+        console.error('Task ended with status:', taskData.status);
+        throw new Error(taskData.message || `Task ${taskData.status}`);
       }
 
       // Wait before next poll
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
+
+    // Max attempts reached
+    throw new Error(`Task polling timed out after ${MAX_ATTEMPTS} attempts`);
   } catch (error) {
     console.error('Error polling task:', error);
-    
-    const errorMessage = `Error polling task: ${error.message}`;
-                         
-    return { success: false, error: errorMessage };
+    return { success: false, error: `Error polling task: ${error.message}` };
   }
 };
 
@@ -921,22 +899,25 @@ export const exportCloudCoins = async (amount, destination = 'Export', walletPat
     const data = await response.json();
     console.log('Export response data:', data);
 
-    // Return the response data - should contain task_id for polling
-    if (data && (data.task_id || data.success)) {
-      return { 
-        success: true, 
+    // API-FIX: Export is synchronous — backend returns { status, command, files_created, coins_exported, value_exported, files[] }
+    // Check for data.status or data.coins_exported instead of data.task_id
+    if (data && (data.status === 'success' || data.status || data.coins_exported !== undefined)) {
+      return {
+        success: true,
         data: {
-          task_id: data.task_id,
-          status: 'success',
+          status: data.status || 'success',
           operation: data.command || data.operation || 'export',
-          amount: data.amount || amount,
+          amount: data.value_exported || data.amount || amount,
+          coins_exported: data.coins_exported,
+          files_created: data.files_created,
+          files: data.files,
           destination: data.destination || normalizedDestination,
-          message: data.message || 'Export task started successfully',
+          message: data.message || `Export completed: ${data.coins_exported || 0} coins exported`,
           ...data
         }
       };
     } else {
-      throw new Error(data.error || data.message || 'Failed to start export task');
+      throw new Error(data.error || data.message || 'Export operation failed');
     }
 
   } catch (error) {
@@ -1058,11 +1039,17 @@ export const saveExportLocation = async (location) => {
  * On success: { success: true, data: { status, operation, message, wallet, note } }
  * On failure: { success: false, error: "Error message" }
  */
-export const fixFrackedCoins = async () => {
+// API-FIX: Changed path from /wallettools/fix to /health/fix, added optional walletPath parameter
+export const fixFrackedCoins = async (walletPath = null) => {
   try {
     console.log('Starting fix fracked coins request...');
-    
-    const response = await fetch(`${API_BASE_URL}/wallettools/fix`, {
+
+    // API-FIX: Build URL with optional wallet_path query param
+    const url = walletPath
+      ? `${API_BASE_URL}/health/fix?wallet_path=${encodeURIComponent(walletPath)}`
+      : `${API_BASE_URL}/health/fix`;
+
+    const response = await fetch(url, {
       method: 'GET'
     });
 
@@ -1182,10 +1169,11 @@ export const getWalletReceipt = async (filename, walletPath = null) => {
       queryParams.append('wallet_path', walletPath);
     }
 
-    const response = await fetch(`${API_BASE_URL}/wallets/active/receipts?${queryParams.toString()}`);
+    // API-FIX: Changed /api/wallets/active/receipts → /api/wallets/receipts to match rest_core
+    const response = await fetch(`${API_BASE_URL}/wallets/receipts?${queryParams.toString()}`);
     const data = await handleResponse(response);
-    
-    console.log('Data received from /wallets/active/receipts:', data);
+
+    console.log('Data received from /wallets/receipts:', data);
 
     // Validate the response structure
     if (data && data.success && data.content) {
@@ -1222,8 +1210,9 @@ export const getWalletReceipt = async (filename, walletPath = null) => {
  */
 export const listWalletReceipts = async (walletPath = null) => {
   try {
-    let url = `${API_BASE_URL}/wallets/active/receipts`;
-    
+    // API-FIX: Changed /api/wallets/active/receipts → /api/wallets/receipts to match rest_core
+    let url = `${API_BASE_URL}/wallets/receipts`;
+
     if (walletPath) {
       const queryParams = new URLSearchParams();
       queryParams.append('wallet_path', walletPath);
@@ -1232,18 +1221,18 @@ export const listWalletReceipts = async (walletPath = null) => {
 
     const response = await fetch(url);
     const data = await handleResponse(response);
-    
-    console.log('Data received from /wallets/active/receipts (list):', data);
 
-    // Validate the response structure
-    if (data && data.success && Array.isArray(data.receipts)) {
+    console.log('Data received from /wallets/receipts (list):', data);
+
+    // API-FIX: rest_core returns { command, success, files: [...], count } (not "receipts" array)
+    if (data && data.success && (Array.isArray(data.files) || Array.isArray(data.receipts))) {
       return { 
         success: true, 
         data: {
           command: data.command || 'wallet-receipt-list',
           wallet_name: data.wallet_name || data.wallet || 'Unknown',
           wallet_path: data.wallet_path || '',
-          receipts: data.receipts || [],
+          receipts: data.files || data.receipts || [],
           raw_response: data
         }
       };
@@ -1286,9 +1275,9 @@ export const importCloudCoinFiles = async (filePaths, memo = '', walletPath = ''
     }
 
     // Expand and normalize paths - file paths use backslashes, wallet path uses forward slashes
-    const expandedFilePaths = filePaths.map(path => expandPath(path));
-    const expandedWalletPath = walletPath ? expandPath(walletPath) : '';
-    
+    const expandedFilePaths = await Promise.all(filePaths.map(path => expandPath(path)));
+    const expandedWalletPath = walletPath ? await expandPath(walletPath) : '';
+
     const normalizedFilePaths = expandedFilePaths.map(path => normalizePath(path, true)); // true = file path (backslashes)
     const normalizedWalletPath = expandedWalletPath ? normalizePath(expandedWalletPath, false) : ''; // false = wallet path (forward slashes)
 
@@ -1433,7 +1422,7 @@ export const downloadFromLocker = async (lockerKey, walletPath = "") => {
     
     // Add wallet path if provided
     if (walletPath && walletPath.trim()) {
-      const expandedWalletPath = expandPath(walletPath);
+      const expandedWalletPath = await expandPath(walletPath);
       const normalizedWalletPath = normalizePath(expandedWalletPath, false); // false = wallet path (forward slashes)
       url.searchParams.append("wallet_path", normalizedWalletPath.trim());
     }
@@ -1456,14 +1445,21 @@ export const downloadFromLocker = async (lockerKey, walletPath = "") => {
     const data = await response.json();
     console.log("Locker download response data:", data);
 
-    // Return the response data
-    if (data && (data.task_id || data.success)) {
-      return { 
-        success: true, 
+    // API-FIX: Response is synchronous — backend returns { status, operation, coins_found, coins_saved, total_value, wallet_path, locker_key, task_id, message }
+    // task_id is informational only, not for polling. Check status or coins_saved for success.
+    if (data && (data.status === "success" || data.coins_saved >= 0)) {
+      return {
+        success: true,
         data: {
-          task_id: data.task_id,
-          message: data.message || "Locker download started successfully",
-          locker_key: normalizedKey,
+          status: data.status || "success",
+          operation: data.operation || "locker_download",
+          coins_found: data.coins_found,
+          coins_saved: data.coins_saved,
+          total_value: data.total_value,
+          wallet_path: data.wallet_path,
+          message: data.message || `Locker download completed: ${data.coins_saved || 0} coins saved`,
+          locker_key: data.locker_key || normalizedKey,
+          task_id: data.task_id, // informational only
           ...data
         }
       };
@@ -1473,7 +1469,7 @@ export const downloadFromLocker = async (lockerKey, walletPath = "") => {
 
   } catch (error) {
     console.error("Download from locker failed:", error);
-    
+
     const errorMessage = `Error downloading from locker: ${error.message}`;
     return { success: false, error: errorMessage };
   }
@@ -1510,7 +1506,7 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
     
     // Add wallet path if provided
     if (walletPath && walletPath.trim()) {
-      const expandedWalletPath = expandPath(walletPath);
+      const expandedWalletPath = await expandPath(walletPath);
       const normalizedWalletPath = normalizePath(expandedWalletPath, false); // false = wallet path (forward slashes)
       url.searchParams.append("wallet_path", normalizedWalletPath.trim());
     }
@@ -1533,15 +1529,20 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
     const data = await response.json();
     console.log("Locker upload response data:", data);
 
-    // Return the response data
-    if (data && (data.task_id || data.success)) {
-      return { 
-        success: true, 
+    // API-FIX: Response is synchronous — backend returns { status, operation, amount_uploaded, coins_uploaded, locker_key, message, task_id }
+    // task_id is informational only, not for polling. Return success directly.
+    if (data && (data.status === "success" || data.status || data.coins_uploaded !== undefined)) {
+      return {
+        success: true,
         data: {
-          task_id: data.task_id,
-          message: data.message || "Locker upload started successfully",
-          locker_key: normalizedKey,
-          amount: amount,
+          status: data.status || "success",
+          operation: data.operation || "locker_upload",
+          amount_uploaded: data.amount_uploaded,
+          coins_uploaded: data.coins_uploaded,
+          locker_key: data.locker_key || normalizedKey,
+          amount: data.amount_uploaded || amount,
+          message: data.message || `Locker upload completed: ${data.coins_uploaded || 0} coins uploaded`,
+          task_id: data.task_id, // informational only
           ...data
         }
       };
@@ -1551,7 +1552,7 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
 
   } catch (error) {
     console.error("Upload to locker failed:", error);
-    
+
     const errorMessage = `Error uploading to locker: ${error.message}`;
     return { success: false, error: errorMessage };
   }
@@ -1561,11 +1562,17 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
  * Run encryption health check - checks the health of encryption systems
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const runEncryptionHealthCheck = async () => {
+// API-FIX: Changed path from /health/encryption-health to /health/check, added optional walletPath, returns task_id (async)
+export const runEncryptionHealthCheck = async (walletPath = null) => {
   try {
     console.log("Running encryption health check...");
 
-    const response = await fetch(`${API_BASE_URL}/health/encryption-health`, {
+    // API-FIX: Build URL with optional wallet_path query param
+    const url = walletPath
+      ? `${API_BASE_URL}/health/check?wallet_path=${encodeURIComponent(walletPath)}`
+      : `${API_BASE_URL}/health/check`;
+
+    const response = await fetch(url, {
       method: "GET"
     });
 
@@ -1588,31 +1595,29 @@ export const runEncryptionHealthCheck = async () => {
 
     console.log("Encryption health check response data:", data);
 
-    // Consider the operation successful if we got a response (even non-200)
-    // The actual health status might be in the response data
+    // BUG-11 FIX: Only report success on 2xx status codes
     if (!response.ok) {
-      console.warn(`Health check returned ${response.status}, but continuing...`);
-      return { 
-        success: true, // Still consider it successful that we got a response
-        data: {
-          message: data.message || `Health check returned ${response.status}`,
-          status_code: response.status,
-          ...data
-        }
+      console.warn(`Health check returned ${response.status}`);
+      return {
+        success: false,
+        error: data.message || `Health check returned ${response.status}`,
+        data: { status_code: response.status, ...data }
       };
     }
 
-    return { 
-      success: true, 
+    // API-FIX: Backend returns { success, task_id, message } — this is async, return task_id for polling
+    return {
+      success: true,
       data: {
-        message: data.message || "Encryption health check completed",
+        task_id: data.task_id,
+        message: data.message || "Health check started",
         ...data
       }
     };
 
   } catch (error) {
     console.error("Encryption health check failed:", error);
-    
+
     const errorMessage = `Error running encryption health check: ${error.message}`;
     return { success: false, error: errorMessage };
   }
@@ -1622,11 +1627,17 @@ export const runEncryptionHealthCheck = async () => {
  * Run encryption repair - repairs encryption issues found
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const runEncryptionRepair = async () => {
+// API-FIX: Added optional walletPath parameter, path already correct at /health/encryption-repair
+export const runEncryptionRepair = async (walletPath = null) => {
   try {
     console.log("Running encryption repair...");
 
-    const response = await fetch(`${API_BASE_URL}/health/encryption-repair`, {
+    // API-FIX: Build URL with optional wallet_path query param
+    const url = walletPath
+      ? `${API_BASE_URL}/health/encryption-repair?wallet_path=${encodeURIComponent(walletPath)}`
+      : `${API_BASE_URL}/health/encryption-repair`;
+
+    const response = await fetch(url, {
       method: "GET"
     });
 
@@ -1649,17 +1660,13 @@ export const runEncryptionRepair = async () => {
 
     console.log("Encryption repair response data:", data);
 
-    // Consider the operation successful if we got a response (even non-200)
-    // The actual repair status might be in the response data
+    // BUG-11 FIX: Only report success on 2xx status codes
     if (!response.ok) {
-      console.warn(`Encryption repair returned ${response.status}, but continuing...`);
-      return { 
-        success: true, // Still consider it successful that we got a response
-        data: {
-          message: data.message || `Encryption repair returned ${response.status}`,
-          status_code: response.status,
-          ...data
-        }
+      console.warn(`Encryption repair returned ${response.status}`);
+      return {
+        success: false,
+        error: data.message || `Encryption repair returned ${response.status}`,
+        data: { status_code: response.status, ...data }
       };
     }
 

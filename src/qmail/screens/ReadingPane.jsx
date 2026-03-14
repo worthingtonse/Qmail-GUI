@@ -3,7 +3,6 @@ import {
   Mail,
   Trash2,
   Reply,
-  RefreshCw,
   Paperclip,
   FileText,
   File,
@@ -14,6 +13,8 @@ import {
   ShieldCheck,
   Loader2,
   Download,
+  Star,
+  Forward,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 import "./ReadingPane.css";
@@ -41,7 +42,7 @@ const ReadingPane = ({
     );
   }
 
-  // AGAR EMAIL DOWNLOAD NAHI HUA HAI
+  // Pending / not-yet-downloaded email
   if (
     email.isPending ||
     email.isDownloaded === false ||
@@ -121,74 +122,71 @@ const ReadingPane = ({
     }
   };
 
+  // Build practical "Move to" options — exclude the current folder
+  const currentFolder = email.folder || "inbox";
+  const moveOptions = [
+    { value: "inbox", label: "Inbox" },
+    { value: "archive", label: "Archive" },
+    { value: "starred", label: "Starred" },
+    { value: "trash", label: "Trash" },
+  ].filter((opt) => opt.value !== currentFolder);
+
   return (
     <section className="reading-pane">
       <div className="reading-pane-header">
-        <div className="email-meta">
-          <h2 className="email-subject-full">{email.subject}</h2>
-          <div className="sender-info">
-            <SenderAvatar sender={email.sender} status={email.senderStatus} />
-            <div className="sender-details">
-              <span className="sender-name">
-                {email.from || email.senderEmail || email.sender}
-              </span>
+        {/* Row 1: Sender avatar + name on left, action buttons on right */}
+        {email.isDraft ? (
+          <div className="header-top-row">
+            <div className="sender-info">
+              <SenderAvatar sender={email.sender} email={email.senderEmail || email.from} status={email.senderStatus} />
+              <div className="sender-details">
+                <span className="sender-name">Draft</span>
+              </div>
+            </div>
+            <div className="email-actions">
+              <div
+                style={{
+                  padding: "var(--space-sm) var(--space-md)",
+                  backgroundColor: "var(--tertiary-bg)",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--border-medium)",
+                  color: "var(--text-secondary)",
+                  fontSize: "var(--font-size-sm)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--space-sm)",
+                }}
+              >
+                <FileEdit size={16} />
+                <span>Click on the draft to edit</span>
+              </div>
+              <button
+                className="action-button danger"
+                onClick={() => onDeleteEmail && onDeleteEmail(email.id, false)}
+                title="Move to trash"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           </div>
-        </div>
-
-      <div className="email-actions">
-          {email.isDraft ? (
-            <div
-              style={{
-                padding: "var(--space-md)",
-                backgroundColor: "var(--tertiary-bg)",
-                borderRadius: "var(--radius-md)",
-                border: "1px solid var(--border-medium)",
-                color: "var(--text-secondary)",
-                fontSize: "var(--font-size-sm)",
-                display: "flex",
-                alignItems: "center",
-                gap: "var(--space-sm)",
-              }}
-            >
-              <FileEdit size={16} />
-              <span>Click on the draft message to edit</span>
+        ) : (
+          <div className="header-top-row">
+            <div className="sender-info">
+              <SenderAvatar sender={email.sender} email={email.senderEmail || email.from} status={email.senderStatus} />
+              <div className="sender-details">
+                <span className="sender-name">
+                  {email.from || email.senderEmail || email.sender}
+                </span>
+              </div>
             </div>
-          ) : (
-            <>
-              <button
-                className="action-button secondary"
-                onClick={() =>
-                  onMarkAsRead && onMarkAsRead(email.id, !email.isRead)
-                }
-                title={email.isRead ? "Mark as unread" : "Mark as read"}
-              >
-                {email.isRead ? (
-                  <>
-                    <Mail size={16} /> Mark Unread
-                  </>
-                ) : (
-                  <>
-                    <Mail size={16} /> Mark Read
-                  </>
-                )}
-              </button>
-
-              {email.folder === "trash" || email.isTrashed ? (
+            <div className="email-actions">
+              {onReply && (
                 <button
-                  className="action-button danger"
-                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, true)}
-                  title="Delete permanently"
+                  className="action-button secondary"
+                  onClick={() => onReply(email)}
+                  title="Reply to email"
                 >
-                  <Trash2 size={16} /> Delete Permanently
-                </button>
-              ) : (
-                <button
-                  className="action-button danger"
-                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, false)}
-                  title="Move to trash"
-                >
-                  <Trash2 size={16} /> Delete
+                  <Reply size={16} /> Reply
                 </button>
               )}
 
@@ -204,24 +202,36 @@ const ReadingPane = ({
                 <option value="" disabled>
                   Move to...
                 </option>
-                <option value="inbox">Inbox</option>
-                <option value="sent">Sent</option>
-                <option value="drafts">Drafts</option>
-                <option value="trash">Trash</option>
+                {moveOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
               </select>
 
-              {onReply && (
+              {email.folder === "trash" || email.isTrashed ? (
                 <button
-                  className="action-button secondary"
-                  onClick={() => onReply(email)}
-                  title="Reply to email"
+                  className="action-button danger"
+                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, true)}
+                  title="Delete permanently"
                 >
-                  <Reply size={16} /> Reply
+                  <Trash2 size={16} /> Delete Forever
+                </button>
+              ) : (
+                <button
+                  className="action-button danger"
+                  onClick={() => onDeleteEmail && onDeleteEmail(email.id, false)}
+                  title="Move to trash"
+                >
+                  <Trash2 size={16} />
                 </button>
               )}
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
+
+        {/* Row 2: Subject */}
+        <h2 className="email-subject-full">{email.subject}</h2>
       </div>
 
       <div className="reading-pane-body">
@@ -239,7 +249,6 @@ const ReadingPane = ({
               </h4>
               <div className="attachments-list">
                 {attachments.map((attachment, index) => {
-                  // FIX: Grab the actual database ID from the attachment object
                   const correctAttachmentId =
                     attachment.attachmentId || attachment.id;
 

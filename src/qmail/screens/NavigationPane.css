@@ -12,37 +12,17 @@
   overflow-y: auto;
 }
 
-/* ==================== WALLET BALANCE HEADER ==================== */
-.wallet-balance-header {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: var(--space-md) var(--space-lg);
-  background: linear-gradient(135deg, #aaddcc, #059669);
-  border-radius: var(--radius-md);
-  margin: 0 var(--space-lg) var(--space-md);
+/* ==================== WALLET BALANCE (inline in nav link) ==================== */
+.wallet-balance-inline {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--accent-success, #10b981);
+  white-space: nowrap;
 }
 
-.balance-info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: var(--primary-bg);
-}
-
-.balance-value {
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-  color: var(--primary-bg);
-}
-
-.low-balance-warning {
-  color: var(--accent-danger);
-  background-color: rgba(239, 68, 68, 0.1);
-  padding: var(--space-xs);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
+.nav-link.active .wallet-balance-inline {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 
@@ -244,33 +224,46 @@ margin-top: var(--space-lg);  /* Reduced margin */
   height: 14px;
 }
 
-/* ==================== CONNECTION STATUS INDICATOR ==================== */
-.connection-status {
+/* ==================== RAIDA HEALTH GRID ==================== */
+.raida-health-section {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 6px;
   padding: var(--space-sm) var(--space-md);
   margin-top: var(--space-sm);
   border-top: 1px solid var(--border-subtle);
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
+.raida-health-grid {
+  display: grid;
+  grid-template-columns: repeat(13, 1fr);
+  gap: 3px;
+  width: 100%;
+}
+
+.raida-dot {
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.status-dot.status-online {
-  background-color: var(--status-online);
-  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+.raida-dot.raida-online {
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
 }
 
-.status-dot.status-offline {
-  background-color: var(--status-offline);
+.raida-dot.raida-offline {
+  background-color: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
 }
 
-.status-text {
+.raida-dot.raida-unknown {
+  background-color: var(--border-medium);
+}
+
+.raida-health-text {
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);
   font-weight: 500;
@@ -288,11 +281,6 @@ margin-top: var(--space-lg);  /* Reduced margin */
     overflow-x: auto;
     overflow-y: visible;
     padding: var(--space-lg);
-  }
-
-   .wallet-balance-header {
-    margin: 0 0 var(--space-lg);
-    border-radius: 0;
   }
 
   .compose-button-container {
@@ -335,7 +323,7 @@ margin-top: var(--space-lg);  /* Reduced margin */
     white-space: nowrap;
   }
 
-   .connection-status {
+   .raida-health-section {
     padding: 0;
     margin-top: 0;
     margin-left: var(--space-lg);

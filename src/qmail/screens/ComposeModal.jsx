@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   X,
   Send,
@@ -55,6 +55,13 @@ const ComposeModal = ({
   const [isPolling, setIsPolling] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
+
+  // BUG-04 FIX: Cancellation ref for polling loop
+  const cancelledRef = useRef(false);
+  useEffect(() => {
+    cancelledRef.current = false;
+    return () => { cancelledRef.current = true; };
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
@@ -482,12 +489,13 @@ const handleSaveDraft = async () => {
         const currentTaskId = result.data.taskId;
         setTaskId(currentTaskId);
         
-        // Inline polling loop: Solves React state closure bugs completely
+        // BUG-04 FIX: Polling loop now checks cancellation ref
         let taskFinished = false;
-        while (!taskFinished) {
+        while (!taskFinished && !cancelledRef.current) {
           // Wait 1 second before checking status
           await new Promise(resolve => setTimeout(resolve, 1000));
-          
+          if (cancelledRef.current) break;
+
           const taskResult = await getTaskStatus(currentTaskId);
           if (taskResult.success) {
             const { state, progress: currentProgress, message, isFinished, isSuccessful, error: taskError } = taskResult.data;
@@ -502,6 +510,7 @@ const handleSaveDraft = async () => {
                 setSendingStatus("completed");
                 setSendProgress("Email sent successfully!");
                 setTimeout(() => {
+                  if (cancelledRef.current) return;
                   onSend(emailData);
                   setIsSending(false);
                   setSendingStatus(null);
@@ -518,7 +527,7 @@ const handleSaveDraft = async () => {
           } else {
             taskFinished = true; // Break loop on API failure
             setSendingStatus("failed");
-            setError("Failed to track email status");
+            setError(taskResult.error || "Failed to track email status");
             setIsSending(false);
             setTaskId(null);
           }
@@ -528,6 +537,7 @@ const handleSaveDraft = async () => {
         setSendingStatus("completed");
         setSendProgress("Email sent successfully!");
         setTimeout(() => {
+          if (cancelledRef.current) return;
           onSend(emailData);
           setIsSending(false);
           setSendingStatus(null);

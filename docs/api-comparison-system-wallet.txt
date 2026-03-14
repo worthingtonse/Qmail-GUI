@@ -1,0 +1,572 @@
+================================================================================
+  API COMPARISON: QMail-GUI  vs  rest_core (C Backend)
+  Focus: System, Wallet, and Program endpoints
+  Generated: 2026-03-10
+================================================================================
+
+Legend:
+  [MATCH]     - GUI endpoint matches rest_core exactly
+  [MISMATCH]  - GUI calls a path that differs from rest_core's registered path
+  [GUI-ONLY]  - GUI calls an endpoint that doesn't exist in rest_core
+  [BACKEND-ONLY] - rest_core has an endpoint the GUI never calls
+  [PARAM-DIFF]   - Path matches but parameters or response expectations differ
+
+
+================================================================================
+  SECTION 1: SYSTEM ENDPOINTS
+================================================================================
+
+------------------------------------------------------------------------------
+1.1  USB Config
+------------------------------------------------------------------------------
+  GUI:      GET /api/system/config/usb                      (apiService.js:92)
+  Backend:  GET /api/system/config/usb                      (api_handlers.c:55)
+  Status:   [MATCH]
+
+  GUI expects:    { on_usb: bool, required: bool, root_path: string }
+  Backend returns: { status: "success", command: "program-on-usb",
+                     on_usb: bool, required: false, root_path: string }
+
+  Notes: Perfect match. GUI correctly reads on_usb, required, root_path.
+         Backend always returns required=false. GUI falls back to
+         { onUsb: false, required: false } on error — safe default.
+
+------------------------------------------------------------------------------
+1.2  Mobile Config
+------------------------------------------------------------------------------
+  GUI:      (none — no function calls /api/system/config/mobile)
+  Backend:  GET /api/system/config/mobile                   (api_handlers.c:56)
+  Status:   [BACKEND-ONLY]
+
+  Backend returns: { status: "success", command: "program-on-mobile",
+                     on_mobile: bool }
+
+  Notes: The GUI doesn't query this. Useful only for mobile builds (Android/iOS).
+         If desktop-only, this can be safely ignored. If the GUI will ever run
+         on mobile/tablets, a call should be added.
+
+  Recommendation: No action needed for desktop. Leave for future mobile support.
+
+------------------------------------------------------------------------------
+1.3  Theme
+------------------------------------------------------------------------------
+  GUI:      (none — no function calls /api/system/theme)
+  Backend:  GET/POST /api/system/theme                      (api_handlers.c:57)
+  Status:   [BACKEND-ONLY]
+
+  Backend GET returns:  { status, command, exists, size, content }
+  Backend POST accepts: Raw CSS body, returns { status, command, action, size }
+
+  Notes: The GUI has no theme customization feature. The backend stores themes
+         in Data/Themes/custom_theme.txt.
+
+  Recommendation: Add GUI support if custom theming is planned. Otherwise ignore.
+
+------------------------------------------------------------------------------
+1.4  Dropdown Data
+------------------------------------------------------------------------------
+  GUI:      GET /api/system/dropdown?file={name}            (apiService.js:975)
+  Backend:  GET /api/system/dropdown?file={name}            (api_handlers.c:58)
+  Status:   [MATCH]
+
+  GUI sends:       file= one of: wallet_paths.txt, BackupPlaces.txt,
+                   export-locations.txt
+  Backend accepts: file= whitelisted: wallet_paths.txt, BackupPlaces.txt,
+                   export-locations.txt
+
+  Backend returns: { status: "success", command: "dropdown", file: string,
+                     lines: [string], count: int }
+
+  GUI expects:     data.lines (array of strings)
+
+  Notes: Perfect match. Whitelist is identical on both sides.
+
+------------------------------------------------------------------------------
+1.5  Tasks / Polling
+------------------------------------------------------------------------------
+  GUI (apiService.js):
+      GET /api/system/tasks?task_id={id}                    (apiService.js:799)
+
+  GUI (qmailApiServices.js):
+      GET /api/task/status/{taskId}                         (qmailApiServices.js:406)
+
+  Backend:
+      GET /api/system/tasks?id={id}  (also accepts task_id=) (api_handlers.c:61)
+
+  Status: [MISMATCH] for qmailApiServices.js — path /api/task/status/{id} does NOT exist
+
+  Backend returns: { status: "success", payload: { id, status, progress,
+                     message, data, raida_responded, elapsed_ms, timeout_ms,
+                     raida_total } }
+
+  --- apiService.js analysis ---
+  GUI sends: task_id= query param → Backend accepts both "id" and "task_id" → OK
+  GUI reads: data.payload.status, data.payload.progress, data.payload.message
+  Backend returns: payload.status, payload.progress, payload.message → MATCH
+
+  --- qmailApiServices.js analysis ---
+  GUI sends: GET /api/task/status/{taskId}  (path-based, not query-based)
+  Backend has NO endpoint at /api/task/status/*
+  This call will always 404.
+
+  GUI reads from qmailApiServices:
+    data.status (expects "completed"/"failed"/"error")
+    data.progress, data.result
+
+  Backend returns under payload: { status, progress, message, data }
+    - "data" field (not "result")
+    - status is nested under "payload", not top-level
+
+  FIX REQUIRED:
+    Option A: Change qmailApiServices.js getTaskStatus() to call
+              /api/system/tasks?task_id={id} and read payload.status, payload.data
+    Option B: Add /api/task/status/{id} to rest_core (not recommended — duplication)
+
+  Recommendation: Option A — unify both files to use /api/system/tasks?task_id={id}
+
+------------------------------------------------------------------------------
+1.6  Disclaimer
+------------------------------------------------------------------------------
+  GUI:      (none — no function calls /api/program/disclaimer)
+  Backend:  GET /api/program/disclaimer                     (api_handlers.c:52)
+  Status:   [BACKEND-ONLY]
+
+  Backend returns: { status: "success", command: "disclaimer",
+                     disclaimer: string }
+
+  Notes: GUI currently shows a hardcoded disclaimer in WelcomeScreen.jsx.
+         The backend has the canonical disclaimer text.
+
+  Recommendation: GUI should fetch from /api/program/disclaimer instead of
+                  hardcoding. This ensures legal text stays in sync.
+
+------------------------------------------------------------------------------
+1.7  Login / Logout
+------------------------------------------------------------------------------
+  GUI:      (none — no login/logout API calls exist)
+  Backend:  (none — no login/logout endpoints registered)
+  Status:   Neither side has these endpoints.
+
+  Notes: The GUI has a PasswordScreen that hashes a password client-side via
+         SHA-256 and checks it locally. There is no backend authentication
+         endpoint. This is by design — the wallet password is used to
+         derive local encryption, not for server-side auth.
+
+  Recommendation: No action needed unless server-side auth is planned.
+
+------------------------------------------------------------------------------
+1.8  Program Echo
+------------------------------------------------------------------------------
+  GUI:      (none — no function calls /api/program/echo)
+  Backend:  GET /api/program/echo                           (api_handlers.c:51)
+  Status:   [BACKEND-ONLY]
+
+  Notes: Simple health-check / ping endpoint. GUI uses /api/raida/echo instead.
+
+  Recommendation: No action needed. GUI can use either for health checks.
+
+
+================================================================================
+  SECTION 2: WALLET ENDPOINTS
+================================================================================
+
+------------------------------------------------------------------------------
+2.1  Wallet Balance
+------------------------------------------------------------------------------
+  GUI (apiService.js):
+      GET /api/wallets/active/balance                       (apiService.js:203)
+
+  GUI (qmailApiServices.js):
+      GET /api/wallet/balance                               (qmailApiServices.js:956)
+
+  Backend:
+      GET /api/wallets/balance?wallet_path={path}           (api_handlers.c:32)
+
+  Status: [MISMATCH] — both GUI paths are wrong
+
+  Backend requires: wallet_path query parameter
+  Backend returns:  { command, success, wallet_path, wallet_name,
+                      total_notes, total_value, bank_notes, bank_value,
+                      fracked_notes, fracked_value, limbo_notes, limbo_value,
+                      balance_reconciled, log_balance }
+
+  GUI (apiService) expects: data.total (doesn't exist — backend uses total_value)
+  GUI (qmailApiServices) expects: data.balance (doesn't exist)
+
+  Issues:
+    1. Path: /api/wallets/active/balance → not registered in backend
+    2. Path: /api/wallet/balance → not registered (singular "wallet" vs "wallets")
+    3. Neither GUI function passes wallet_path query param
+    4. Response field names don't match (total vs total_value, balance vs total_value)
+
+  FIX REQUIRED:
+    - Both functions should call GET /api/wallets/balance?wallet_path={path}
+    - Read total_value from response (not "total" or "balance")
+    - Need to determine the active wallet path (from wallet list or registry)
+
+------------------------------------------------------------------------------
+2.2  Wallet List
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallets                                (apiService.js:158, 257)
+  Backend:  GET /api/wallets/list                           (api_handlers.c:33)
+  Status:   [MISMATCH]
+
+  Backend returns: { command, success, count, wallets: [{wallet_path, wallet_name, online}] }
+  GUI expects:     data.wallets (array) — field name matches if path is fixed
+
+  Issues:
+    1. GUI calls /api/wallets but backend registers /api/wallets/list
+    2. GUI reads wallet.name — backend returns wallet_name
+
+  FIX REQUIRED:
+    - Change GUI to call /api/wallets/list
+    - Map wallet_name → name (or update GUI to use wallet_name)
+
+------------------------------------------------------------------------------
+2.3  Wallet Create
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallets/create?wallet_path={path}      (apiService.js:399)
+  Backend:  GET /api/wallets/create?wallet_path={path}      (api_handlers.c:36)
+  Status:   [MATCH]
+
+  Backend returns: { command, success, wallet_name, wallet_path, message }
+  GUI reads:       data.success, data.task_id (for polling)
+
+  Notes: Backend does NOT return a task_id — this is synchronous.
+         GUI code has polling logic that may never trigger (harmless but dead code).
+         The wallet_path construction in the GUI includes normalizePath() which
+         should produce a valid path for the backend.
+
+  Minor issue: GUI expects task_id but backend doesn't return one.
+  Recommendation: Remove polling logic from createWallet, just check success.
+
+------------------------------------------------------------------------------
+2.4  Wallet Rename
+------------------------------------------------------------------------------
+  GUI:      PUT /api/wallets/rename?wallet_path={p}&new_name={n}  (apiService.js:500)
+  Backend:  GET /api/wallets/rename?wallet_path={p}&new_name={n}  (api_handlers.c:39)
+  Status:   [PARAM-DIFF] — HTTP method mismatch
+
+  Backend returns: { command, success, old_path, new_path, new_name, message }
+  GUI reads:       data.success
+
+  Issues:
+    1. GUI uses PUT method; backend only handles GET
+    2. Some HTTP servers may reject PUT if handler only checks GET
+
+  FIX REQUIRED:
+    - Change GUI to use GET method (or update backend to accept PUT)
+    - Recommendation: Change GUI to GET since all other backend endpoints use GET
+
+------------------------------------------------------------------------------
+2.5  Wallet Delete
+------------------------------------------------------------------------------
+  GUI:      DELETE /api/wallets/delete?wallet_path={path}   (apiService.js:542)
+  Backend:  GET /api/wallets/delete?wallet_path={path}      (api_handlers.c:40)
+  Status:   [PARAM-DIFF] — HTTP method mismatch
+
+  Backend returns: { command, success, wallet_path, message }
+  GUI reads:       data.success
+
+  Issues:
+    1. GUI uses DELETE method; backend only handles GET
+    2. BUG-05 was already fixed (no longer assumes CORS error = success)
+
+  FIX REQUIRED:
+    - Change GUI to use GET method (or update backend to accept DELETE)
+
+------------------------------------------------------------------------------
+2.6  Wallet Switch
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallet/switch?name={walletName}        (apiService.js:347)
+  Backend:  (no /api/wallet/switch endpoint registered)
+  Status:   [GUI-ONLY]
+
+  Notes: The backend has no concept of "switching" wallets. The GUI tracks
+         active wallet client-side via selectedWalletIndex / walletName.
+         All backend calls accept wallet_path as a parameter.
+
+  FIX REQUIRED:
+    - Remove switchWallet() API call OR
+    - The GUI should track active wallet locally and pass wallet_path to
+      each API call, rather than asking the backend to "switch"
+    - If backend needs a "set active wallet" concept, add endpoint to rest_core
+
+------------------------------------------------------------------------------
+2.7  Add Location
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallet/add-location?path={path}        (apiService.js:449)
+  Backend:  GET /api/wallets/locations?path={path}           (api_handlers.c:34)
+  Status:   [MISMATCH]
+
+  GUI path:     /api/wallet/add-location (singular "wallet")
+  Backend path: /api/wallets/locations   (plural "wallets")
+
+  Backend returns: { status, operation, location, wallet, wallet_path, message, note }
+  GUI reads:       data.success (backend uses status: "success", not success: true)
+
+  FIX REQUIRED:
+    - Change GUI path to /api/wallets/locations
+    - Check for data.status === "success" (not data.success)
+
+------------------------------------------------------------------------------
+2.8  Wallet Backup
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallet/backup?destination={dest}       (apiService.js:654)
+  Backend:  (no /api/wallet/backup endpoint registered)
+  Status:   [GUI-ONLY]
+
+  Notes: No backup endpoint exists in rest_core.
+
+  FIX REQUIRED:
+    - Add /api/wallet/backup endpoint to rest_core, OR
+    - Remove backupWallet() from GUI if not supported
+
+------------------------------------------------------------------------------
+2.9  Wallet Transactions
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallets/transactions?wallet_path={p}&limit={n}  (apiService.js:603)
+  Backend:  GET /api/wallets/transactions?wallet_path={p}&limit={n}  (api_handlers.c:37)
+  Status:   [MATCH]
+
+  Backend returns: { command, success, count, transactions: [{raw: "CSV line"}] }
+  GUI reads:       data.transactions
+
+  Notes: Backend returns raw CSV lines in transactions[].raw. GUI may need to
+         parse CSV fields from the raw string. Check if GUI handles this format.
+
+------------------------------------------------------------------------------
+2.10 Wallet Receipts
+------------------------------------------------------------------------------
+  GUI:      GET /api/wallets/active/receipts?{params}       (apiService.js:1192)
+  Backend:  GET /api/wallets/receipts?wallet_path={p}       (api_handlers.c:38)
+  Status:   [MISMATCH]
+
+  GUI path:     /api/wallets/active/receipts
+  Backend path: /api/wallets/receipts
+
+  Issues:
+    1. "/active/" segment doesn't exist in backend
+    2. GUI may not be passing wallet_path
+
+  FIX REQUIRED:
+    - Change GUI to /api/wallets/receipts?wallet_path={path}
+
+------------------------------------------------------------------------------
+2.11 Show Coins
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  GET /api/wallets/show-coins?wallet_path={p}&folder={f}  (api_handlers.c:35)
+  Status:   [BACKEND-ONLY]
+
+  Recommendation: Add if GUI needs a coin browser feature.
+
+------------------------------------------------------------------------------
+2.12 Coin Details
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  GET /api/wallets/coin-details?wallet_path={p}&serial_number={s}&denomination={d}
+                                                            (api_handlers.c:41)
+  Status:   [BACKEND-ONLY]
+
+  Recommendation: Add if GUI needs coin inspection feature.
+
+------------------------------------------------------------------------------
+2.13 Wallet Register (Denomination Breakdown)
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  GET /api/wallets/register?wallet_path={p}       (api_handlers.c:42)
+  Status:   [BACKEND-ONLY]
+
+  Recommendation: Add if GUI needs denomination breakdown display.
+
+------------------------------------------------------------------------------
+2.14 Wallet Consolidate
+------------------------------------------------------------------------------
+  GUI:      (no direct call found)
+  Backend:  GET /api/wallets/consolidate?wallet_path={p}    (api_handlers.c:43)
+  Status:   [BACKEND-ONLY]
+
+  Notes: Backend implementation is a placeholder.
+
+
+================================================================================
+  SECTION 3: OTHER CALLS IN GUI THAT HIT NON-EXISTENT BACKEND PATHS
+================================================================================
+
+------------------------------------------------------------------------------
+3.1  Wallet Tools Fix / Heal
+------------------------------------------------------------------------------
+  GUI (apiService.js):
+      GET /api/wallettools/fix                              (apiService.js:1072)
+  GUI (qmailApiServices.js):
+      POST /api/wallet/heal                                 (qmailApiServices.js:1284)
+  Backend:
+      GET /api/health/fix                                   (api_handlers.c:26)
+      GET /api/health/authentication                        (api_handlers.c:27, misread — actually "authenticate")
+
+  Status: [MISMATCH]
+  FIX: Change /api/wallettools/fix → /api/health/fix
+       Change /api/wallet/heal → determine correct backend endpoint
+
+------------------------------------------------------------------------------
+3.2  Encryption Health / Repair
+------------------------------------------------------------------------------
+  GUI:      GET /api/health/encryption-health               (apiService.js:1575)
+  GUI:      POST /api/health/encryption-repair              (apiService.js:1632)
+  Backend:  GET /api/health/encryption-repair               (api_handlers.c:25)
+
+  Status: [MISMATCH] for encryption-health (no such endpoint)
+          [PARAM-DIFF] for encryption-repair (GUI uses POST, backend uses GET)
+
+  FIX: Remove /encryption-health or add to backend.
+       Change /encryption-repair from POST to GET.
+
+------------------------------------------------------------------------------
+3.3  RAIDA Echo
+------------------------------------------------------------------------------
+  GUI:      GET /api/raida/echo                             (apiService.js:132)
+  Backend:  GET /api/raida/echo                             (api_handlers.c:20)
+  Status:   [MATCH]
+
+------------------------------------------------------------------------------
+3.4  Task Status in qmailApiServices
+------------------------------------------------------------------------------
+  GUI:      GET /api/task/status/{taskId}                   (qmailApiServices.js:406)
+  Backend:  GET /api/system/tasks?id={id}                   (api_handlers.c:61)
+  Status:   [MISMATCH] — see Section 1.5 above
+
+
+================================================================================
+  SECTION 4: SUMMARY OF REQUIRED FIXES
+================================================================================
+
+Priority 1 — Will cause runtime failures (404s or wrong responses):
+  1. qmailApiServices getTaskStatus(): /api/task/status/{id} → /api/system/tasks?task_id={id}
+  2. Wallet balance (apiService):  /api/wallets/active/balance → /api/wallets/balance?wallet_path={p}
+  3. Wallet balance (qmailApiServices): /api/wallet/balance → /api/wallets/balance?wallet_path={p}
+  4. Wallet list:    /api/wallets → /api/wallets/list
+  5. Wallet switch:  /api/wallet/switch → remove (no backend) or add backend endpoint
+  6. Add location:   /api/wallet/add-location → /api/wallets/locations
+  7. Receipts:       /api/wallets/active/receipts → /api/wallets/receipts?wallet_path={p}
+  8. Wallet backup:  /api/wallet/backup → remove or add backend endpoint
+
+Priority 2 — HTTP method mismatches (may work on some servers, fail on others):
+  9. Wallet rename:  PUT → GET
+  10. Wallet delete:  DELETE → GET
+  11. Encryption repair: POST → GET
+
+Priority 3 — Response field mismatches:
+  12. Balance response: GUI reads "total"/"balance" but backend returns "total_value"
+  13. Wallet list: GUI reads wallet.name but backend returns wallet_name
+  14. Add location: GUI reads data.success but backend returns status: "success"
+  15. Task status (qmail): GUI reads data.status but backend nests under payload.status
+
+Priority 4 — Missing GUI features (backend exists, GUI doesn't call):
+  16. /api/program/disclaimer — GUI hardcodes disclaimer text
+  17. /api/system/theme — no theme feature in GUI
+  18. /api/system/config/mobile — no mobile detection
+  19. /api/wallets/show-coins — no coin browser
+  20. /api/wallets/coin-details — no coin inspection
+  21. /api/wallets/register — no denomination breakdown
+  22. /api/program/echo — GUI uses /api/raida/echo instead (fine)
+
+Priority 5 — Missing backend endpoints (GUI calls, backend doesn't have):
+  23. /api/wallet/switch — wallet switching concept
+  24. /api/wallet/backup — wallet backup
+  25. /api/health/encryption-health — encryption health check
+  26. /api/wallettools/fix — (should be /api/health/fix)
+
+
+================================================================================
+  SECTION 5: RECOMMENDED ACTION PLAN
+================================================================================
+
+Phase 1 — Fix GUI paths (no backend changes needed):
+  - Fix all [MISMATCH] endpoints in apiService.js and qmailApiServices.js
+  - Fix HTTP method mismatches (PUT/DELETE/POST → GET)
+  - Fix response field name expectations
+
+Phase 2 — Decide on GUI-ONLY endpoints:
+  - /api/wallet/switch: Decide if backend should track active wallet
+  - /api/wallet/backup: Decide if backup feature is needed
+  - /api/health/encryption-health: Add to backend or remove from GUI
+
+Phase 3 — Add GUI features for existing backend endpoints:
+  - Fetch disclaimer from backend instead of hardcoding
+  - Add theme support if desired
+  - Add denomination breakdown, coin browser if desired
+
+
+================================================================================
+  SECTION 6: FIXES APPLIED (2026-03-11)
+================================================================================
+
+The following fixes have been implemented:
+
+--- QMail-GUI changes (apiService.js) ---
+
+  1. [DONE] Wallet list: /api/wallets → /api/wallets/list
+     - Response mapping: wallet_name → name, wallet_path → path
+
+  2. [DONE] Wallet balance (getWalletBalance): /api/wallets/active/balance → /api/wallets/balance
+     - Now accepts optional walletPath parameter
+     - Maps rest_core response (total_value, total_notes, bank_value, etc.)
+       into the shape GUI callers expect (wallets array with balance, coins, etc.)
+     - If no walletPath provided, rest_core defaults to "Default" wallet
+
+  3. [DONE] getTotalBalance: /api/wallets → /api/wallets/list + per-wallet /api/wallets/balance
+     - Now lists wallets first, then fetches balance for each one
+     - Aggregates totals across all wallets
+
+  4. [DONE] switchWallet: REMOVED entirely
+     - rest_core does not track "active wallet" state
+     - GUI tracks selected wallet locally, passes wallet_path per call
+     - StoreTab.jsx updated: removed import, state, and handler
+
+  5. [DONE] Add location: /api/wallet/add-location → /api/wallets/locations
+
+  6. [DONE] Wallet rename: Changed from POST to GET (rest_core uses GET)
+
+  7. [DONE] Wallet delete: Changed from DELETE to GET (rest_core uses GET)
+
+  8. [DONE] Task status (apiService getTaskStatus): Response mapping fixed
+     - Backend returns { status, payload: { id, status, progress, message, data } }
+     - GUI now reads from payload instead of top-level fields
+
+  9. [DONE] Receipts (getWalletReceipt + listWalletReceipts):
+     /api/wallets/active/receipts → /api/wallets/receipts
+     - Also handles rest_core "files" array (not "receipts")
+
+  10. [DONE] Wallet backup: /api/wallet/backup → /api/wallets/backup
+      - Added optional walletPath parameter
+      - Maps rest_core response (zip_path → full_path for backward compat)
+
+--- QMail-GUI changes (qmailApiServices.js) ---
+
+  11. [DONE] Task status: /api/task/status/{id} → /api/system/tasks?task_id={id}
+      - Complete response mapping rewrite to handle payload nesting
+      - Maps status into isFinished/isSuccessful booleans for ComposeModal
+
+  12. [DONE] Wallet balance (getQMailWalletBalance): /api/wallet/balance → /api/wallets/balance
+      - Maps rest_core field names (total_notes, bank_notes, etc.) to GUI shape
+
+--- rest_core changes ---
+
+  13. [DONE] Added /api/wallets/backup endpoint (api_handlers_wallet.c)
+      - Handler: api_handle_wallet_backup
+      - Params: wallet_path (optional, defaults to Default), destination (required)
+      - Zips all .bin files from Bank and Fracked folders using miniz
+      - Returns: { success, wallet_path, wallet_name, zip_path, destination,
+                   files_added, files_skipped, message }
+      - Registered in api_handlers.c, declared in api_handlers.h
+
+--- Remaining items (NOT yet fixed) ---
+
+  - /api/wallettools/fix → should be /api/health/fix (Section 3.1)
+  - /api/wallet/heal → needs correct backend endpoint (Section 3.1)
+  - /api/health/encryption-health → no backend endpoint (Section 3.2)
+  - /api/health/encryption-repair → POST should be GET (Section 3.2)
+  - Priority 4 items (backend-only endpoints GUI doesn't call yet)
+
+================================================================================

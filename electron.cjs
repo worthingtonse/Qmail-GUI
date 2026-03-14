@@ -132,9 +132,13 @@ function createWindow() {
 
   // mainWindow.webContents.openDevTools();
   
+  // BUG-09 FIX: Only start backend once (not on every F5 refresh)
+  // BUG-19 FIX: Also add a fallback timer in case did-finish-load never fires
   mainWindow.webContents.on('did-finish-load', () => {
     log('Window loaded');
-    startBackend();
+    if (!backendProcess) {
+      startBackend();
+    }
   });
 
   if (isDev) {
@@ -145,9 +149,10 @@ function createWindow() {
 }
 
 // IPC Handlers (tumhare existing handlers)
+// USB check is now handled by direct REST API call from the renderer.
+// This IPC handler is kept as a fallback stub.
 ipcMain.handle('check-usb-drive', async () => {
-  // USB check logic
-  return { success: true };
+  return true;
 });
 
 ipcMain.handle('show-error-dialog', async (event, title, message) => {
@@ -163,6 +168,11 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+// BUG-08 FIX: Expose home directory so renderer can build valid paths
+ipcMain.handle('get-home-dir', () => {
+  return require('os').homedir();
+});
+
 ipcMain.handle('quit-app', () => {
   app.quit();
 });
@@ -174,8 +184,13 @@ ipcMain.handle('run-command', async (event, command) => {
 
 ipcMain.handle('read-file', async (event, filename) => {
   try {
-    const filePath = path.join(process.resourcesPath, filename);
-    const content = fs.readFileSync(filePath, 'utf-8');
+    // BUG-01 FIX: Validate path to prevent path traversal attacks
+    const base = isDev ? path.join(__dirname, 'public') : process.resourcesPath;
+    const resolved = path.resolve(base, filename);
+    if (!resolved.startsWith(base)) {
+      return { success: false, error: 'Access denied: path traversal detected' };
+    }
+    const content = fs.readFileSync(resolved, 'utf-8');
     return { success: true, content };
   } catch (error) {
     return { success: false, error: error.message };
@@ -184,7 +199,18 @@ ipcMain.handle('read-file', async (event, filename) => {
 
 app.whenReady().then(createWindow);
 
+// BUG-24 FIX: Kill backend on all exit paths, not just window-all-closed
+const killBackend = () => {
+  if (backendProcess) {
+    backendProcess.kill();
+    backendProcess = null;
+  }
+};
+
+app.on('before-quit', killBackend);
 app.on('window-all-closed', () => {
-  if (backendProcess) backendProcess.kill();
+  killBackend();
   app.quit();
 });
+process.on('SIGTERM', killBackend);
+process.on('SIGINT', killBackend);

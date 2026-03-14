@@ -1,9 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './USBCheckScreen.css';
 
 const USBCheckScreen = ({ isUSBDrive, onContinue }) => {
   console.log('USBCheckScreen rendered with isUSBDrive:', isUSBDrive);
   const [usbStatus, setUsbStatus] = useState(isUSBDrive);
+
+  // BUG-10 FIX: Sync local state when the prop changes
+  useEffect(() => {
+    setUsbStatus(isUSBDrive);
+  }, [isUSBDrive]);
 
   const recheckUSB = async () => {
     console.log('Manually rechecking USB...');

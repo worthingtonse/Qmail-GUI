@@ -236,8 +236,7 @@ display: flex;
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background-color: var(--surface-bg);
-  color: var(--text-primary);
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -248,27 +247,63 @@ display: flex;
   position: relative;
 }
 
-/* Status indicators */
+/* Status indicators — border only, background comes from hash color */
 .contact-avatar.status-gold {
   border-color: var(--tier-gold);
-  background: linear-gradient(135deg, var(--tier-gold), #f59e0b);
-  color: var(--primary-bg);
 }
 
 .contact-avatar.status-silver {
   border-color: var(--tier-silver);
-  background: linear-gradient(135deg, var(--tier-silver), #9ca3af);
-  color: var(--primary-bg);
 }
 
 .contact-avatar.status-bronze {
   border-color: var(--tier-bronze);
-  background: linear-gradient(135deg, var(--tier-bronze), #92400e);
-  color: white;
 }
 
 .contact-avatar.status-none {
   border-color: var(--border-medium);
+}
+
+/* ==================== CONTACT SOURCE STYLES ==================== */
+.contact-item.contact-drd {
+  border-left: 3px solid var(--accent-warning, #f59e0b);
+}
+
+.contact-item.contact-user {
+  border-left: 3px solid var(--accent-primary, #3b82f6);
+}
+
+.contact-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.contact-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-drd {
+  background-color: rgba(251, 146, 60, 0.15);
+  color: var(--accent-warning, #f59e0b);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.badge-user {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--accent-primary, #3b82f6);
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 /* ==================== CONTACT DETAILS ==================== */
@@ -281,7 +316,6 @@ display: flex;
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: var(--space-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

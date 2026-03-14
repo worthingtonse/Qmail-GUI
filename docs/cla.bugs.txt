@@ -1,0 +1,624 @@
+===============================================================================
+  QMAIL-GUI CONSOLIDATED BUG REPORT
+  Generated: 2026-03-10
+  Primary Reviewer: Claude Opus 4.6
+  Cross-referenced with: Gemini (gem.bugs.txt), GPT (gpt.bugs.txt)
+  Codebase: https://github.com/worthingtonse/Qmail-GUI
+===============================================================================
+
+SUMMARY: 25 confirmed bugs (2 CRITICAL, 9 HIGH, 10 MEDIUM, 4 LOW)
+
+###############################################################################
+  PART 1 — CONFIRMED BUGS (consolidated from all three models)
+###############################################################################
+
+===============================================================================
+  CRITICAL BUGS
+===============================================================================
+
+BUG-01 — Path Traversal in read-file IPC handler
+  File:     electron.cjs, lines 175-183
+  Severity: CRITICAL
+  Found by: Claude, Gemini (partial — BUG-13 noted dev-mode path issue)
+
+  The 'read-file' IPC handler joins process.resourcesPath with the
+  caller-supplied filename without any validation or sanitization:
+
+    ipcMain.handle('read-file', async (event, filename) => {
+      const filePath = path.join(process.resourcesPath, filename);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return { success: true, content };
+    });
+
+  Any renderer-side code can pass '../../../../../../etc/passwd' or any
+  other relative path and the main process will read and return its
+  contents. Even though contextIsolation is enabled, any code in the
+  renderer can call window.electronAPI.readFile(maliciousPath).
+
+  Additionally (from Gemini BUG-13): In dev mode, process.resourcesPath
+  is undefined or points to Electron's internal resources, not the app's
+  public/ folder. So readFile always fails in development.
+
+  FIX PLAN:
+  1. Validate that the resolved path stays within a safe base directory:
+       const base = isDev ? path.join(__dirname, 'public') : process.resourcesPath;
+       const resolved = path.resolve(base, filename);
+       if (!resolved.startsWith(base)) {
+         return { success: false, error: 'Access denied' };
+       }
+  2. Also whitelist allowed filenames (currently only eff_large_wordlist.txt
+     is used) to further reduce attack surface.
+
+-------------------------------------------------------------------------------
+
+BUG-02 — handleRefresh calls undefined function checkForNewMail
+  File:     src/qmail/screens/QMailDashboard.jsx, line 410
+  Severity: CRITICAL
+  Found by: Claude, GPT
+
+  The function checkForNewMail is entirely commented out (lines 203-216),
+  but handleRefresh still calls it:
+
+    const handleRefresh = async () => {
+      setIsRefreshing(true);
+      await checkForNewMail();   // <-- ReferenceError at runtime
+      await loadEmails(currentFolder);
+      ...
+    };
+
+  IMPACT: Clicking the Refresh button throws a ReferenceError. Because the
+  error occurs before loadEmails() and loadDrafts(), the email list never
+  updates and isRefreshing stays true, leaving the button permanently
+  disabled/spinning.
+
+  FIX PLAN:
+  1. Remove the `await checkForNewMail();` line from handleRefresh.
+  2. The remaining loadEmails + loadDrafts calls already refresh the data.
+
+===============================================================================
+  HIGH SEVERITY BUGS
+===============================================================================
+
+BUG-03 — loadEmails("drafts") reads stale drafts state
+  File:     src/qmail/screens/QMailDashboard.jsx, lines 266-293
+  Severity: HIGH
+  Found by: Claude
+
+  When folder === "drafts", the code calls await loadDrafts() then
+  immediately reads the 'drafts' state variable:
+
+    await loadDrafts();
+    const transformedDrafts = drafts.map((draft) => ({  // stale closure
+
+  Because 'drafts' is captured from the closure at call time, it reflects
+  the OLD value before loadDrafts updated state. The Drafts folder will
+  consistently display stale or empty content.
+
+  FIX PLAN:
+  1. Modify loadDrafts() to return the draft list:
+       const loadDrafts = async () => {
+         const result = await getDrafts();
+         const draftsList = result.success ? (result.data.drafts || []) : [];
+         setDrafts(draftsList);
+         return draftsList;
+       };
+  2. In loadEmails, use the return value:
+       const freshDrafts = await loadDrafts();
+       const transformedDrafts = freshDrafts.map(...);
+
+-------------------------------------------------------------------------------
+
+BUG-04 — Infinite polling loop in ComposeModal with no cancellation
+  File:     src/qmail/screens/ComposeModal.jsx, lines 486-525
+  Severity: HIGH
+  Found by: Claude, GPT (related)
+
+  handleSend runs a while(true) loop polling getTaskStatus with 1-second
+  delays. There is no way to cancel this loop. If the user closes the
+  modal or navigates away while polling, the loop continues calling
+  setState on the now-unmounted component (memory leak + React warnings).
+  It can also call onSend(emailData) via setTimeout after the component
+  is gone.
+
+  FIX PLAN:
+  1. Add a useRef for cancellation: const cancelledRef = useRef(false);
+  2. In the useEffect cleanup, set cancelledRef.current = true.
+  3. Check cancelledRef.current at the top of each loop iteration:
+       while (!taskFinished && !cancelledRef.current) { ... }
+  4. Guard the setTimeout callbacks with the same check.
+
+-------------------------------------------------------------------------------
+
+BUG-05 — deleteWallet reports success when server is unreachable
+  File:     src/api/apiService.js, lines 508-575
+  Severity: HIGH
+  Found by: Claude, Gemini (BUG-2)
+
+  The deleteWallet function returns { success: true } when fetch throws
+  a network error, assuming CORS blocked the response:
+
+    if (error.message.includes('Failed to fetch') ||
+        error.message.includes('CORS') || ...) {
+      return { success: true, ... };
+    }
+
+  'Failed to fetch' also occurs when the server is completely unreachable.
+  The UI will show "Wallet deleted successfully" even when the backend
+  never received the request.
+
+  FIX PLAN:
+  1. Remove the CORS-success assumption. Return { success: false }.
+  2. If the backend truly has CORS issues on DELETE, fix it server-side
+     by adding proper CORS headers rather than guessing in the client.
+
+-------------------------------------------------------------------------------
+
+BUG-06 — SenderAvatar crashes if sender prop is undefined
+  File:     src/qmail/screens/SenderAvatar.jsx, lines 4-11
+  Severity: HIGH
+  Found by: Claude
+
+  getInitials() calls .split(" ") directly on the sender argument with
+  no null/undefined guard. The merge in handleSelectEmail (QMailDashboard
+  line 461) can leave selectedEmail.sender as undefined during brief
+  render windows.
+
+  FIX PLAN:
+  1. Add guard at top of getInitials:
+       const getInitials = (sender) => {
+         if (!sender) return "?";
+         const parts = sender.split(" ");
+         ...
+       };
+
+-------------------------------------------------------------------------------
+
+BUG-07 — pollTaskUntilComplete loops forever on unknown task status
+  File:     src/api/apiService.js, lines 838-873
+  Severity: HIGH
+  Found by: Claude
+
+  pollTaskUntilComplete runs while(true) and only breaks on status
+  'success', 'error', or 'failed'. If the backend returns any other
+  terminal status (e.g., 'cancelled', 'timeout', 'aborted'), the loop
+  never exits. The UI is permanently stuck with isProcessing = true.
+
+  FIX PLAN:
+  1. Add a maximum attempt counter (e.g., 300 = 5 minutes at 1s interval).
+  2. Add a catch-all for unknown statuses after N attempts.
+  3. Handle additional terminal states: 'cancelled', 'timeout', 'aborted'.
+
+-------------------------------------------------------------------------------
+
+BUG-08 — %USERNAME% placeholder never expanded in expandPath
+  File:     src/api/apiService.js, lines 38-57
+  Severity: HIGH
+  Found by: Claude, Gemini (BUG-1)
+
+  The commonExpansions map uses literal %USERNAME% strings:
+
+    'Downloads': 'C:\\Users\\%USERNAME%\\Downloads',
+
+  JavaScript does not expand Windows environment variables. The resulting
+  paths sent to the backend will literally contain '%USERNAME%', causing
+  all import/export operations using short folder names to fail.
+
+  FIX PLAN:
+  1. Add an IPC call to get the home directory from the main process:
+       // In electron.cjs:
+       ipcMain.handle('get-home-dir', () => require('os').homedir());
+       // In preload.cjs:
+       getHomeDir: () => ipcRenderer.invoke('get-home-dir')
+  2. In apiService.js, call this at initialization and use the result
+     to build the commonExpansions map dynamically.
+  3. Alternatively, let the backend resolve paths (it has access to env vars).
+
+-------------------------------------------------------------------------------
+
+BUG-09 — Backend respawned on every window refresh (F5)
+  File:     electron.cjs, lines 135-138
+  Severity: HIGH
+  Found by: Gemini (BUG-11)
+
+  startBackend() is called inside the 'did-finish-load' event:
+
+    mainWindow.webContents.on('did-finish-load', () => {
+      startBackend();
+    });
+
+  This event fires every time the page reloads (F5, location.reload()).
+  Each reload spawns a new qmail-backend.exe without killing the previous
+  one. This causes port 8080 conflicts and orphaned processes.
+
+  FIX PLAN:
+  1. Guard startBackend() to only spawn if backendProcess is null:
+       mainWindow.webContents.on('did-finish-load', () => {
+         if (!backendProcess) startBackend();
+       });
+  2. Or better: move startBackend() to app.whenReady(), before window
+     creation, so it only runs once.
+
+-------------------------------------------------------------------------------
+
+BUG-10 — USB check IPC returns object, but frontend expects boolean
+  File:     electron.cjs, line 149; src/wallet/Wallet.jsx, line 30
+  Severity: HIGH
+  Found by: Gemini (BUG-12), GPT (related)
+
+  The IPC handler returns { success: true } (an object):
+
+    ipcMain.handle('check-usb-drive', async () => {
+      return { success: true };
+    });
+
+  But Wallet.jsx sets state directly with the result:
+
+    const result = await window.electronAPI.checkUSBDrive();
+    setIsUSBDrive(result);  // result is { success: true }, not a boolean
+
+  Since any object is truthy, isUSBDrive is always "truthy" regardless of
+  actual USB status. The USB check is effectively bypassed.
+
+  Additionally (from GPT): USBCheckScreen copies the prop into local state
+  via useState(isUSBDrive) on mount, so even if the parent updates the
+  prop later, the local state never changes.
+
+  FIX PLAN:
+  1. Fix the IPC handler to return a boolean:
+       ipcMain.handle('check-usb-drive', async () => {
+         // Actual USB detection logic here
+         return true; // or false
+       });
+  2. In USBCheckScreen, either remove the local state copy and use the
+     prop directly, or sync it via useEffect when the prop changes.
+
+-------------------------------------------------------------------------------
+
+BUG-11 — API error masking in getWalletBalance and encryption functions
+  File:     src/api/apiService.js, lines 155-213, 1564-1663
+  Severity: HIGH
+  Found by: Gemini (BUG-2), Claude (partial overlap with BUG-05)
+
+  getWalletBalance returns { success: true } with empty data on ANY error,
+  including network failures and server 500s (lines 201-213). The UI
+  silently shows zero balance instead of informing the user of a problem.
+
+  runEncryptionHealthCheck and runEncryptionRepair (lines 1593-1602,
+  1654-1663) return { success: true } even on 4xx/5xx responses,
+  treating "got a response" as success regardless of status code.
+
+  FIX PLAN:
+  1. getWalletBalance: Return { success: false } on error so the UI can
+     show a "failed to load balance" indicator.
+  2. Encryption functions: Only return success on 2xx responses. Log but
+     don't mask server errors.
+
+===============================================================================
+  MEDIUM SEVERITY BUGS
+===============================================================================
+
+BUG-12 — Pagination loads wrong page offset
+  File:     src/qmail/screens/QMailDashboard.jsx, lines 521-524
+  Severity: MEDIUM
+  Found by: Claude
+
+    const handlePageChange = (newPage) => {
+      setCurrentPage(newPage);
+      loadEmails(currentFolder);  // uses OLD currentPage from closure
+    };
+
+  setCurrentPage is asynchronous. loadEmails captures currentPage from
+  the closure and computes offset = currentPage * EMAILS_PER_PAGE using
+  the OLD page number.
+
+  FIX PLAN:
+  1. Add a page parameter to loadEmails and pass newPage directly:
+       const handlePageChange = (newPage) => {
+         setCurrentPage(newPage);
+         loadEmails(currentFolder, newPage);
+       };
+
+-------------------------------------------------------------------------------
+
+BUG-13 — Stale statusMessage closure in LockerUploadTab setTimeout
+  File:     src/wallet/components/tabs/LockerUploadTab.jsx, lines 51-56
+  Severity: MEDIUM
+  Found by: Claude
+
+    setTimeout(() => {
+      if (statusMessage.includes('generated')) {  // stale closure
+        setStatusMessage('');
+      }
+      setIsGeneratingKey(false);
+    }, 3000);
+
+  FIX PLAN:
+  1. Use a useRef to track statusMessage, or just unconditionally clear:
+       setTimeout(() => {
+         setStatusMessage('');
+         setIsGeneratingKey(false);
+       }, 3000);
+
+-------------------------------------------------------------------------------
+
+BUG-14 — Add/delete contact is local-only, lost on next server fetch
+  File:     src/qmail/screens/ContactsPane.jsx, lines 119-140
+  Severity: MEDIUM
+  Found by: Claude
+
+  handleAddContact and delete only update local React state. No backend
+  API call persists the change. On next loadContacts(), locally-added
+  contacts vanish.
+
+  FIX PLAN:
+  1. Call the backend's add-contact and delete-contact API endpoints
+     before updating local state. Roll back local state on API failure.
+
+-------------------------------------------------------------------------------
+
+BUG-15 — healWallet result checked on wrong property
+  File:     src/qmail/screens/WalletSetupScreen.jsx, line 13
+  Severity: MEDIUM
+  Found by: Claude
+
+    const result = await healWallet();
+    if (result.status === "success") setStatus('healthy');
+
+  healWallet() returns raw JSON from handleResponse(). If the backend
+  returns { success: true }, result.status is undefined and the UI
+  never updates.
+
+  FIX PLAN:
+  1. Check the correct property: if (result.success || result.status === "success")
+  2. Or wrap healWallet() in a consistent { success, data } envelope.
+
+-------------------------------------------------------------------------------
+
+BUG-16 — Blob URL revoked before download completes
+  File:     src/api/qmailApiServices.js, lines 1340-1352
+  Severity: MEDIUM
+  Found by: Claude
+
+    a.click();
+    window.URL.revokeObjectURL(url);  // revoked immediately
+
+  FIX PLAN:
+  1. Delay the revocation:
+       a.click();
+       setTimeout(() => {
+         window.URL.revokeObjectURL(url);
+         document.body.removeChild(a);
+       }, 200);
+
+-------------------------------------------------------------------------------
+
+BUG-17 — Password silently lowercased before hashing
+  File:     src/wallet/components/PasswordScreen.jsx, line 25
+  Severity: MEDIUM
+  Found by: Claude
+
+    const data = encoder.encode(password.toLowerCase().trim());
+
+  "Secret123" and "secret123" produce the same hash. This cuts entropy
+  significantly and is not disclosed to the user.
+
+  FIX PLAN:
+  1. Remove .toLowerCase() to preserve case sensitivity, OR
+  2. Display a note in the UI: "Passwords are case-insensitive."
+
+-------------------------------------------------------------------------------
+
+BUG-18 — Hard-coded 32-char ID length check rejects valid IDs
+  File:     src/api/qmailApiServices.js, lines 611-616
+  Severity: MEDIUM
+  Found by: Claude
+
+    if (!emailId || emailId.length !== 32) {
+      throw new Error("Invalid email ID...");
+    }
+
+  FIX PLAN:
+  1. Use a more flexible validation: check for non-empty string and
+     hex characters, or remove the length restriction entirely.
+  2. Apply the same fix to getEmailAttachments (same validation).
+
+-------------------------------------------------------------------------------
+
+BUG-19 — Backend not started if window fails to load
+  File:     electron.cjs, lines 135-138
+  Severity: MEDIUM
+  Found by: Claude, Gemini (BUG-11 related)
+
+  startBackend() is called inside 'did-finish-load'. If the window fails
+  to load (e.g., dist/index.html missing), the backend is never started.
+
+  FIX PLAN:
+  1. Move startBackend() to app.whenReady(), before creating the window.
+     This also fixes BUG-09 (respawn on refresh).
+
+-------------------------------------------------------------------------------
+
+BUG-20 — State-changing API operations use HTTP GET
+  File:     src/api/apiService.js, lines 910, 1317, and others
+  Severity: MEDIUM
+  Found by: Gemini (BUG-6)
+
+  importCloudCoinFiles (line 1317) and export operations (line 910) use
+  method: 'GET' for state-changing operations. This violates REST
+  semantics and can cause problems with browser/proxy caching, prefetch,
+  and CSRF.
+
+  FIX PLAN:
+  1. Change these to POST requests.
+  2. Move query parameters into the request body as JSON.
+  3. Coordinate with the C backend to accept POST on these endpoints.
+  Note: This depends on the backend supporting POST. If the backend only
+  accepts GET, fix the backend first.
+
+-------------------------------------------------------------------------------
+
+BUG-21 — Race condition: folder switch without request cancellation
+  File:     src/qmail/screens/QMailDashboard.jsx, lines 266-346, 348-361
+  Severity: MEDIUM
+  Found by: Gemini (BUG-3)
+
+  loadEmails has no cancellation or "last-request-wins" tracking. If a
+  user quickly switches between folders, multiple fetch requests run
+  concurrently. The last one to resolve overwrites setEmails(), but that
+  may not correspond to the currently selected folder.
+
+  FIX PLAN:
+  1. Use an AbortController stored in a ref. Abort the previous request
+     when a new loadEmails call begins:
+       const abortRef = useRef(null);
+       const loadEmails = async (folder) => {
+         if (abortRef.current) abortRef.current.abort();
+         const controller = new AbortController();
+         abortRef.current = controller;
+         const result = await getMailList(folder, ..., { signal: controller.signal });
+         ...
+       };
+
+===============================================================================
+  LOW SEVERITY BUGS
+===============================================================================
+
+BUG-22 — searchDebounceTimer stored in useState causes leak
+  File:     src/qmail/screens/QMailDashboard.jsx, lines 62, 140, 364
+  Severity: LOW
+  Found by: Claude, Gemini (BUG-10)
+
+  The debounce timer ID is stored via useState. The useEffect cleanup
+  reads searchDebounceTimer from the closure captured at mount time
+  (null), so cleanup never clears a running timer.
+
+  FIX PLAN:
+  1. Replace useState with useRef for the timer:
+       const searchDebounceTimerRef = useRef(null);
+  2. In handleSearch, use searchDebounceTimerRef.current.
+  3. In cleanup, clear searchDebounceTimerRef.current.
+
+-------------------------------------------------------------------------------
+
+BUG-23 — ContactsPane search useEffect missing dependency
+  File:     src/qmail/screens/ContactsPane.jsx, lines 26-40
+  Severity: LOW
+  Found by: Claude
+
+  The effect depends on currentMode inside its callback body but
+  currentMode is not in the dependency array.
+
+  FIX PLAN:
+  1. Add currentMode to the useEffect dependency array.
+
+-------------------------------------------------------------------------------
+
+BUG-24 — Orphaned backend process on app crash
+  File:     electron.cjs
+  Severity: LOW
+  Found by: Gemini (BUG-14)
+
+  The backend process is only killed on 'window-all-closed'. If the
+  main process crashes or is killed (SIGKILL), qmail-backend.exe becomes
+  an orphaned process.
+
+  FIX PLAN:
+  1. Add handlers for 'before-quit' and process signals:
+       app.on('before-quit', () => { if (backendProcess) backendProcess.kill(); });
+       process.on('SIGTERM', () => { if (backendProcess) backendProcess.kill(); });
+  2. Consider spawning the backend with { detached: false } (already set)
+     and relying on process group cleanup on Windows.
+
+-------------------------------------------------------------------------------
+
+BUG-25 — document.title side effects outside useEffect
+  File:     src/qmail/screens/QMailDashboard.jsx, lines 256, 355-358
+  Severity: LOW
+  Found by: Gemini (BUG-9)
+
+  loadMailCounts and handleFolderChange directly set document.title.
+  This should be in a useEffect to stay in sync with state.
+
+  FIX PLAN:
+  1. Add a useEffect that sets document.title based on currentFolder
+     and mailCounts:
+       useEffect(() => {
+         const unread = mailCounts[currentFolder]?.unread || 0;
+         document.title = unread > 0
+           ? `(${unread}) QMail - ${currentFolder}`
+           : `QMail - ${currentFolder}`;
+       }, [currentFolder, mailCounts]);
+  2. Remove the inline document.title assignments.
+
+
+###############################################################################
+  PART 2 — REJECTED BUGS FROM OTHER MODELS
+###############################################################################
+
+The following bugs reported by Gemini and GPT were reviewed and rejected.
+Reasons are given for each.
+
+===============================================================================
+
+REJECTED-01 — Gemini BUG-4: "Inconsistent API Implementation" (two
+  handleResponse functions)
+  Reason: This is a code quality/maintainability observation, not a bug.
+  Having two files with different handleResponse implementations is a
+  design choice (apiService.js for wallet operations, qmailApiServices.js
+  for email operations). Both work correctly for their respective use
+  cases. The different error handling strategies are intentional — wallet
+  operations are more lenient, email operations extract backend error
+  messages. No user-facing bug results from this.
+
+-------------------------------------------------------------------------------
+
+REJECTED-02 — Gemini BUG-5: "Hardcoded API_BASE_URL"
+  Reason: Not a bug. This is a desktop Electron app that always runs its
+  own local backend on port 8080. There is no production/staging
+  environment distinction. The backend is bundled with the app. Hardcoding
+  localhost:8080 is the correct design for this use case.
+
+-------------------------------------------------------------------------------
+
+REJECTED-03 — Gemini BUG-7: "Inefficient client-side filtering in
+  getContacts"
+  Reason: Performance observation, not a bug. For a personal email client,
+  the contact list is unlikely to grow large enough for this to matter.
+  The filtering works correctly. If performance becomes an issue, the
+  backend search endpoint could be used instead, but this is an
+  optimization, not a bug fix.
+
+-------------------------------------------------------------------------------
+
+REJECTED-04 — Gemini BUG-8: "Manual path normalization is error-prone"
+  Reason: Code quality observation, not a bug. The normalizePath function
+  works correctly with its boolean flag. The concern that developers
+  might use the wrong flag is a maintainability issue, not a runtime bug.
+  No incorrect behavior has been identified.
+
+-------------------------------------------------------------------------------
+
+REJECTED-05 — GPT BUG-3: "pollTaskStatus reads result.data.status but
+  getTaskStatus returns state"
+  Reason: While the field mismatch is real (status vs state), the
+  pollTaskStatus function is dead code. The old handleSend that called it
+  (lines 350-437) is entirely commented out. The active handleSend
+  (line 439) does inline polling and correctly destructures 'state',
+  'isFinished', 'isSuccessful' from result.data. No runtime impact.
+  If pollTaskStatus is ever re-enabled, the field mismatch would need
+  fixing, but as shipped, this is not a bug.
+
+-------------------------------------------------------------------------------
+
+REJECTED-06 — Gemini BUG-3 (partial): "Multiple setInterval loops cause
+  redundant re-renders"
+  Reason: Having multiple intervals (10s for notifications, 60s for mail
+  counts, 120s for wallet balance) is not a bug. They update different
+  state variables at different frequencies, which is intentional. The
+  re-renders they cause are normal React behavior and do not constitute
+  a bug. The race condition aspect of folder switching WAS accepted as
+  BUG-21.
+
+===============================================================================
+  END OF REPORT
+===============================================================================

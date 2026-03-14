@@ -7,7 +7,7 @@ import Wallet from "./wallet/Wallet";
 import QMail from "./qmail/QMail";
 import { NotificationProvider } from "./components/common/notifications/NotificationContext";
 import NotificationContainer from "./components/common/notifications/NotificationContainer";
-import { checkVersion, getIdentity } from "./api/qmailApiServices";
+import { checkVersion, getIdentity, hasId } from "./api/qmailApiServices";
 
 const SERVICES = {
   NONE: "none",
@@ -36,13 +36,24 @@ function App() {
   const checkIdentity = async () => {
     try {
       const identity = await getIdentity();
-      
+
       if (identity && identity.configured) {
         // Identity found: Set data and navigate to Wallet Setup Screen
         setProvisioningData(identity);
         setSelectedService(SERVICES.PROVISIONING);
+        return;
       }
-      // If not configured, we stay on SERVICES.NONE (ServiceSelectionScreen)
+
+      // Fallback: identity endpoint may not have loaded yet, but coin files
+      // may already exist in the Mail wallet. Check with has-id.
+      const idCheck = await hasId();
+      if (idCheck && idCheck.has_id) {
+        // Coin files exist — go straight to QMail dashboard
+        setSelectedService(SERVICES.QMAIL);
+        return;
+      }
+
+      // No identity at all — stay on ServiceSelectionScreen
     } catch (error) {
       console.error("Failed to restore identity:", error);
       setSelectedService(SERVICES.NONE);

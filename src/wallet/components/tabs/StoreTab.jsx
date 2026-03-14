@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Pencil, Trash2, AlertTriangle } from 'lucide-react';
-import { listWallets, getWalletBalance, switchWallet, createWallet, renameWallet, deleteWallet, addWalletLocation } from '../../../api/apiService.js';
+// API-FIX: switchWallet removed — rest_core doesn't track active wallet state
+import { listWallets, getWalletBalance, createWallet, renameWallet, deleteWallet, addWalletLocation } from '../../../api/apiService.js';
 import TransactionsTab from './TransactionsTab';
 
 const StoreTab = () => {
@@ -12,7 +13,6 @@ const StoreTab = () => {
   const [newWalletName, setNewWalletName] = useState('');
   const [newWalletPath, setNewWalletPath] = useState('');
   const [isCreating, setIsCreating] = useState(false);
-  const [isSwitching, setIsSwitching] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   
   const [showAddLocation, setShowAddLocation] = useState(false);
@@ -40,6 +40,8 @@ const StoreTab = () => {
     }
   }, [successMessage]);
 
+  // API-FIX: rest_core returns balance per-wallet, not as a batch.
+  // We list wallets first, then fetch balance for each one.
   const loadWalletData = async (showSuccess = false, successMsg = '') => {
   setIsWalletsLoading(true);
   setWalletsError(null);
@@ -52,44 +54,40 @@ const StoreTab = () => {
     if (!listResult.success) {
       throw new Error(listResult.error);
     }
-    
-    console.log('Wallet list:', listResult.data);
-    
-    const walletList = listResult.data || [];
-    
-    // 2. Get balance info - wrap in try-catch to handle deleted wallet
-    let balanceData = { wallets: [], total_balance: 0, total_coins: 0 };
-    
-    try {
-      const balanceResult = await getWalletBalance();
-      if (balanceResult.success) {
-        balanceData = balanceResult.data || balanceData;
-      }
-    } catch (balanceError) {
-      console.warn('Balance fetch failed (might be due to deleted wallet):', balanceError);
-      // Continue with empty balance data
-    }
-    
-    console.log('Balance data:', balanceData);
-    
-    const walletBalances = balanceData.wallets || [];
-    const totalBalance = balanceData.total_balance || 0;
 
-    // 3. Merge wallet list with balance data
-    const mergedWallets = walletList.map(wallet => {
-      const balanceInfo = walletBalances.find(b => b.name === wallet.wallet_name || b.name === wallet.name);
-      
+    console.log('Wallet list:', listResult.data);
+
+    const walletList = listResult.data || [];
+
+    // 2. Fetch balance for each wallet individually
+    let totalBalance = 0;
+    const mergedWallets = await Promise.all(walletList.map(async (wallet) => {
+      const walletPath = wallet.path || wallet.wallet_path;
+      const walletName = wallet.name || wallet.wallet_name || 'Unknown';
+      let bal = { balance: 0, coins: 0, has_fracked: false, has_limbo: false, denomination_counts: {} };
+
+      try {
+        const balanceResult = await getWalletBalance(walletPath);
+        if (balanceResult.success && balanceResult.data.wallets.length > 0) {
+          bal = balanceResult.data.wallets[0];
+        }
+      } catch (balanceError) {
+        console.warn(`Balance fetch failed for ${walletName}:`, balanceError);
+      }
+
+      totalBalance += bal.balance || 0;
+
       return {
         ...wallet,
-        name: wallet.wallet_name || wallet.name || 'Unknown',
-        path: wallet.wallet_path || wallet.path,
-        balance: balanceInfo ? balanceInfo.balance : 0,
-        coins: balanceInfo ? balanceInfo.coins : 0,
-        has_fracked: balanceInfo ? balanceInfo.has_fracked : false,
-        has_limbo: balanceInfo ? balanceInfo.has_limbo : false,
-        denomination_counts: balanceInfo ? balanceInfo.denomination_counts : {}
+        name: walletName,
+        path: walletPath,
+        balance: bal.balance || 0,
+        coins: bal.coins || 0,
+        has_fracked: bal.has_fracked || false,
+        has_limbo: bal.has_limbo || false,
+        denomination_counts: bal.denomination_counts || {}
       };
-    });
+    }));
 
     console.log('Merged wallets:', mergedWallets);
 
@@ -108,27 +106,8 @@ const StoreTab = () => {
   }
 };
 
-  const handleSwitchWallet = async (walletName) => {
-    setIsSwitching(walletName);
-    setWalletsError(null);
-    setSuccessMessage(null);
-
-    try {
-      const result = await switchWallet(walletName);
-      
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      await loadWalletData(true, `Successfully switched to wallet: ${walletName}`);
-
-    } catch (error) {
-      console.error('Failed to switch wallet:', error);
-      setWalletsError(`Failed to switch wallet: ${error.message}`);
-    } finally {
-      setIsSwitching(null);
-    }
-  };
+  // API-FIX: handleSwitchWallet removed — rest_core doesn't track active wallet state.
+  // Wallet selection is handled locally by clicking a wallet card.
 
   const handleCreateWallet = async (e) => {
     e.preventDefault();
@@ -452,7 +431,7 @@ const StoreTab = () => {
                             className="action-btn rename-btn"
                             onClick={(e) => handleActionClick(e, startRename, wallet)}
                             title="Rename wallet"
-                            disabled={isSwitching !== null || deletingWallet !== null}
+                            disabled={deletingWallet !== null}
                           >
                             <Pencil size={16} />
                           </button>
@@ -460,7 +439,7 @@ const StoreTab = () => {
                             className="action-btn delete-btn"
                             onClick={(e) => handleActionClick(e, confirmDelete, wallet)}
                             title="Delete wallet"
-                            disabled={isSwitching !== null || deletingWallet !== null || wallet.active}
+                            disabled={deletingWallet !== null}
                           >
                             <Trash2 size={16} />
                           </button>

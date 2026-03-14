@@ -1,8 +1,9 @@
 // --- src/api/qmailApiServices.js ---
 // This file contains all QMail-specific API call functions.
 
-// Define the base URL for your local server
-const API_BASE_URL = "http://localhost:8080/api";
+// API port is configurable via VITE_API_PORT env variable (default: 8080)
+const API_PORT = import.meta.env.VITE_API_PORT || "8080";
+const API_BASE_URL = `http://localhost:${API_PORT}/api`;
 /**
  * A helper function to handle fetch responses.
  * It reads the exact backend error payload even on non-ok responses.
@@ -26,18 +27,33 @@ const handleResponse = async (response) => {
 
   // 3. If the status is a 4xx or 5xx error, extract the backend message
   if (!response.ok) {
-    // Extract the exact error message from your Python backend
-    // It checks 'error', then 'details', then 'message'
+    // Prefer human-readable 'message', then 'details', then code-level 'error'
     const backendError =
-      data.error ||
-      data.details ||
       data.message ||
+      data.details ||
+      data.error ||
       `Server responded with ${response.status}`;
     throw new Error(backendError);
   }
 
   return data;
 };
+
+// API-FIX: Backend uses integer folder IDs, GUI uses string names
+const FOLDER_NAME_TO_ID = {
+  inbox: 0, sent: 1, drafts: 2, trash: 3, starred: 4, archive: 5
+};
+const FOLDER_ID_TO_NAME = {
+  0: 'inbox', 1: 'sent', 2: 'drafts', 3: 'trash', 4: 'starred', 5: 'archive'
+};
+function folderNameToId(name) {
+  if (typeof name === 'number') return name;
+  return FOLDER_NAME_TO_ID[name?.toLowerCase()] ?? 0;
+}
+function folderIdToName(id) {
+  if (typeof id === 'string') return id;
+  return FOLDER_ID_TO_NAME[id] ?? 'inbox';
+}
 
 /**
  * Gets the health status of the QMail Client Core service.
@@ -77,11 +93,12 @@ const handleResponse = async (response) => {
  */
 export const getPopularContacts = async (limit = 10) => {
   try {
-    const url = `${API_BASE_URL}/data/contacts/popular?limit=${limit}`;
+    // API-FIX: Changed /data/contacts/popular → /qmail/contacts/popular
+    const url = `${API_BASE_URL}/qmail/contacts/popular?limit=${limit}`;
     const response = await fetch(url);
     const data = await handleResponse(response);
 
-    console.log("Data received from /data/contacts/popular:", data);
+    console.log("Data received from /qmail/contacts/popular:", data);
 
     if (data && Array.isArray(data.contacts)) {
       return {
@@ -123,32 +140,39 @@ export const getPopularContacts = async (limit = 10) => {
  * @param {number} offset - Number of emails to skip for pagination (default: 0)
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
+export const getMailList = async (folder = "inbox", limit = 50, offset = 0, sort = "newest") => {
   try {
-    const url = `${API_BASE_URL}/mail/list?folder=${folder}&limit=${limit}&offset=${offset}`;
+    // API-FIX: Changed /api/mail/list → /api/qmail/inbox, folder name → folder ID
+    // sort: "newest" (default), "unread", "fee", "starred"
+    const sortParam = sort && sort !== "newest" ? `&sort=${sort}` : "";
+    const url = `${API_BASE_URL}/qmail/inbox?folder=${folderNameToId(folder)}&limit=${limit}&offset=${offset}${sortParam}`;
     const response = await fetch(url);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/list:", data);
+    console.log("Data received from /qmail/inbox:", data);
 
     if (data && Array.isArray(data.emails)) {
       // Transform backend response to match frontend expectations
       const transformedEmails = data.emails.map((email) => ({
-        id: email.EmailID,
-        subject: email.Subject || "No Subject",
-        sender: email.sender || "Unknown Sender",
-        senderEmail: email.sender || "",
-        timestamp: email.ReceivedTimestamp || email.SentTimestamp,
-        sentTimestamp: email.SentTimestamp,
-        receivedTimestamp: email.ReceivedTimestamp,
+        // API-FIX: email.EmailID → email.email_id
+        id: email.email_id,
+        // API-FIX: email.Subject → email.subject
+        subject: email.subject || "No Subject",
+        // API-FIX: email.sender → email.sender_sn (serial number, convert to string)
+        sender: String(email.sender_sn || "Unknown Sender"),
+        senderEmail: String(email.sender_sn || ""),
+        // API-FIX: email.ReceivedTimestamp → email.received_timestamp, removed SentTimestamp
+        timestamp: email.received_timestamp,
+        receivedTimestamp: email.received_timestamp,
         isRead: email.is_read || false,
         isStarred: email.is_starred || false,
-        isTrashed: email.is_trashed || false,
-        isDownloaded: email.downloaded,
-        folder: email.folder || folder,
+        // API-FIX: email.is_trashed → email.folder === 3
+        isTrashed: email.folder === 3,
+        folder: email.folder != null ? folderIdToName(email.folder) : folder,
 
-        // Actually accept the preview snippet sent from the backend
-        preview: email.preview || "",
+        // API-FIX: email.preview → email.body_preview
+        preview: email.body_preview || "",
+        inboxFee: email.inbox_fee || 0,
 
         body: "",
       }));
@@ -156,9 +180,10 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
       return {
         success: true,
         data: {
-          folder: data.folder || folder,
+          folder: data.folder != null ? folderIdToName(data.folder) : folder,
           emails: transformedEmails,
-          totalCount: data.total_count || 0,
+          // API-FIX: data.total_count → data.total_in_folder
+          totalCount: data.total_in_folder || 0,
           limit: data.limit || limit,
           offset: data.offset || offset,
         },
@@ -180,10 +205,11 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0) => {
  */
 export const getDrafts = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/drafts`);
+    // API-FIX: Changed /api/mail/drafts → /api/qmail/drafts
+    const response = await fetch(`${API_BASE_URL}/qmail/drafts`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/drafts:", data);
+    console.log("Data received from /qmail/drafts:", data);
 
     // Check if there's an error in the response
     if (data.error || data.status === "error") {
@@ -235,7 +261,8 @@ export const getDrafts = async () => {
  */
 export const saveDraft = async (draftData) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/draft`, {
+    // API-FIX: Changed /api/mail/draft → /api/qmail/draft
+    const response = await fetch(`${API_BASE_URL}/qmail/draft`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -287,8 +314,10 @@ export const saveDraft = async (draftData) => {
  */
 export const updateDraft = async (draftId, draftData) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/draft/${draftId}`, {
-      method: "PUT",
+    // API-FIX: Changed PUT /api/mail/draft/{id} → POST /api/qmail/draft/update?draft_id={id}
+    const response = await fetch(`${API_BASE_URL}/qmail/draft/update?draft_id=${draftId}`, {
+      // API-FIX: Changed method from PUT to POST
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
@@ -304,7 +333,7 @@ export const updateDraft = async (draftId, draftData) => {
 
     const data = await handleResponse(response);
 
-    console.log("Data received from PUT /mail/draft:", data);
+    console.log("Data received from POST /qmail/draft/update:", data);
 
     if (data && data.status === "success") {
       return {
@@ -343,50 +372,46 @@ export const updateDraft = async (draftId, draftData) => {
  */
 export const pingQMail = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/qmail/ping`);
+    // API-FIX: Changed /api/qmail/ping → /api/qmail/check
+    const response = await fetch(`${API_BASE_URL}/qmail/check`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /qmail/ping:", data);
+    console.log("Data received from /qmail/check:", data);
 
-    if (data && data.status) {
-      // Handle error status (offline, etc.)
-      if (data.status === "error") {
+    // API-FIX: Backend /qmail/check returns { success, new_mail_count, total_remaining, notifications[] }
+    if (data) {
+      // API-FIX: Map rest_core response to GUI shape
+      const status = data.success ? "ok" : "error";
+
+      if (!data.success) {
         return {
           success: false,
           error: data.message || "Server returned error status",
         };
       }
 
-      // Handle ok and healing statuses
-      if (data.status === "ok" || data.status === "healing") {
-        return {
-          success: true,
-          data: {
-            status: data.status,
-            timestamp: data.timestamp,
-            // FIX 1: Default to 'good' if status is 'ok' but beacon_status is missing
-            beaconStatus:
-              data.beacon_status || (data.status === "ok" ? "good" : "unknown"),
-            // FIX 2: Check notification_count for mail presence
-            hasMail: data.has_mail || data.notification_count > 0 || false,
-            // FIX 3: Map notification_count to messageCount (which frontend expects)
-            messageCount: data.message_count || data.notification_count || 0,
-            messages: data.messages || [],
+      return {
+        success: true,
+        data: {
+          // API-FIX: status mapped from data.success
+          status: status,
+          beaconStatus: data.success ? "good" : "unknown",
+          // API-FIX: hasMail mapped from data.new_mail_count > 0
+          hasMail: data.new_mail_count > 0,
+          // API-FIX: messageCount mapped from data.new_mail_count
+          messageCount: data.new_mail_count || 0,
+          // API-FIX: messages mapped from data.notifications
+          messages: data.notifications || [],
 
-            // Healing logic
-            isHealing: data.status === "healing",
-            healingMessage:
-              data.status === "healing"
-                ? "Repairing mailbox identity... please wait."
-                : null,
-          },
-        };
-      }
+          isHealing: false,
+          healingMessage: null,
+        },
+      };
     }
 
-    throw new Error("Invalid response from qmail ping endpoint");
+    throw new Error("Invalid response from qmail check endpoint");
   } catch (error) {
-    console.error("QMail ping failed:", error);
+    console.error("QMail check failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to ping QMail server.`;
     return { success: false, error: errorMessage };
   }
@@ -403,30 +428,35 @@ export const getTaskStatus = async (taskId) => {
       throw new Error("Task ID is required");
     }
 
-    const response = await fetch(`${API_BASE_URL}/task/status/${taskId}`);
+    // API-FIX: Changed /api/task/status/{id} → /api/system/tasks?task_id={id} to match rest_core
+    const response = await fetch(`${API_BASE_URL}/system/tasks?task_id=${encodeURIComponent(taskId)}`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /task/status:", data);
+    console.log("Data received from /system/tasks:", data);
 
-    if (data && data.task_id) {
+    // API-FIX: rest_core returns { status: "success", payload: { id, status, progress, message, data } }
+    if (data && data.payload) {
+      const p = data.payload;
+      // Map rest_core payload fields to the shape ComposeModal expects
+      const taskStatus = p.status || '';
+      const isTerminal = ['completed', 'success', 'failed', 'error', 'cancelled', 'timeout'].includes(taskStatus);
+      const isSuccess = ['completed', 'success'].includes(taskStatus);
       return {
         success: true,
         data: {
-          taskId: data.task_id,
-          state: data.state,
-          progress: data.progress || 0,
-          message: data.message,
-          result: data.result,
-          error: data.error,
-          createdAt: data.created_at,
-          startedAt: data.started_at,
-          completedAt: data.completed_at,
-          isFinished: data.is_finished || false,
-          isSuccessful: data.is_successful || false,
+          taskId: p.id || taskId,
+          state: taskStatus,
+          status: taskStatus,
+          progress: p.progress || 0,
+          message: p.message || '',
+          result: p.data || null,
+          error: isSuccess ? null : (p.message || null),
+          isFinished: isTerminal,
+          isSuccessful: isSuccess,
         },
       };
     } else {
-      throw new Error("Invalid response from task status endpoint");
+      throw new Error(data.message || "Invalid response from task status endpoint");
     }
   } catch (error) {
     console.error("Get task status failed:", error);
@@ -449,11 +479,12 @@ export const searchEmails = async (query, limit = 50, offset = 0) => {
     }
 
     const encodedQuery = encodeURIComponent(query);
-    const url = `${API_BASE_URL}/data/emails/search?q=${encodedQuery}&limit=${limit}&offset=${offset}`;
+    // API-FIX: Changed /api/data/emails/search?q= → /api/qmail/search?query=, removed offset param
+    const url = `${API_BASE_URL}/qmail/search?query=${encodedQuery}&limit=${limit}`;
     const response = await fetch(url);
     const data = await handleResponse(response);
 
-    console.log("Data received from /data/emails/search:", data);
+    console.log("Data received from /qmail/search:", data);
 
     if (data) {
       return {
@@ -463,7 +494,6 @@ export const searchEmails = async (query, limit = 50, offset = 0) => {
           results: data.results || [],
           count: data.count || 0,
           limit: data.limit || limit,
-          offset: data.offset || offset,
         },
       };
     } else {
@@ -545,18 +575,22 @@ export const searchEmails = async (query, limit = 50, offset = 0) => {
  */
 export const getMailFolders = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/folders`);
+    // API-FIX: Changed /api/mail/folders → /api/qmail/folders
+    const response = await fetch(`${API_BASE_URL}/qmail/folders`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/folders:", data);
+    console.log("Data received from /qmail/folders:", data);
 
+    // API-FIX: Backend returns { success, folders: [{ id, name }] }
     if (data && Array.isArray(data.folders)) {
       return {
         success: true,
         data: {
           folders: data.folders.map((folder) => ({
+            // API-FIX: folder.id → id, folder.name → name, add displayName by capitalizing
+            id: folder.id,
             name: folder.name,
-            displayName: folder.display_name,
+            displayName: folder.name ? folder.name.charAt(0).toUpperCase() + folder.name.slice(1) : folder.name,
           })),
         },
       };
@@ -576,19 +610,25 @@ export const getMailFolders = async () => {
  */
 export const getMailCount = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/count`);
+    // API-FIX: Changed /api/mail/count → /api/qmail/counts
+    const response = await fetch(`${API_BASE_URL}/qmail/counts`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/count:", data);
+    console.log("Data received from /qmail/counts:", data);
 
-    if (data && data.counts) {
+    // API-FIX: Backend returns { success, folders: { inbox: {total, unread}, ... } }
+    if (data && data.folders) {
+      // API-FIX: Compute summary by summing all folder totals/unread
+      const folderKeys = Object.keys(data.folders);
+      const totalEmails = folderKeys.reduce((sum, key) => sum + (data.folders[key].total || 0), 0);
+      const totalUnread = folderKeys.reduce((sum, key) => sum + (data.folders[key].unread || 0), 0);
       return {
         success: true,
         data: {
-          counts: data.counts,
-          summary: data.summary || {
-            total_emails: 0,
-            total_unread: 0,
+          counts: data.folders,
+          summary: {
+            total_emails: totalEmails,
+            total_unread: totalUnread,
           },
         },
       };
@@ -599,6 +639,25 @@ export const getMailCount = async () => {
     console.error("Get mail count failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch mail counts.`;
     return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Toggles the starred state of an email.
+ * @param {string} emailId - The unique email identifier
+ * @param {boolean} starred - Whether to star (true) or unstar (false) the email
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const starEmail = async (emailId, starred) => {
+  try {
+    if (!emailId) throw new Error("Email ID is required");
+    const url = `${API_BASE_URL}/qmail/star?email_id=${encodeURIComponent(emailId)}&starred=${starred ? "true" : "false"}`;
+    const response = await fetch(url);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    console.error("Star email failed:", error);
+    return { success: false, error: error.message };
   }
 };
 
@@ -615,35 +674,32 @@ export const getEmailById = async (emailId) => {
       );
     }
 
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}`);
+    // API-FIX: Changed /api/mail/{emailId} → /api/qmail/read?email_id={emailId}
+    const response = await fetch(`${API_BASE_URL}/qmail/read?email_id=${emailId}`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/{id}:", data);
+    console.log("Data received from /qmail/read:", data);
 
-    // Look for EmailID or email_id from the Python backend instead of just 'id'
-    if (data && (data.id || data.EmailID || data.email_id)) {
+    // API-FIX: Backend returns { success, email_id, subject, sender_sn, received_timestamp, is_read, is_starred, folder, body, body_length }
+    if (data && (data.email_id || data.success)) {
       return {
         success: true,
         data: {
-          id: data.id || data.EmailID || data.email_id || emailId,
-          from: data.sender?.auto_address || data.from || "Unknown",
-          to: data.recipients || data.to || [],
-          cc: data.cc || [],
-
-          subject: data.Subject || data.subject || "No Subject",
-          body: data.Body || data.body || "",
-          timestamp: data.ReceivedTimestamp || data.timestamp,
+          // API-FIX: id mapped from data.email_id
+          id: data.email_id || emailId,
+          // API-FIX: from mapped from data.sender_sn (serial number as string)
+          from: String(data.sender_sn),
+          // API-FIX: subject mapped from data.subject
+          subject: data.subject || "No Subject",
+          // API-FIX: body mapped from data.body
+          body: data.body || "",
+          // API-FIX: timestamp mapped from data.received_timestamp
+          timestamp: data.received_timestamp,
+          // API-FIX: isRead mapped from data.is_read
           isRead: data.is_read,
-          folder: data.folder,
-
-          isDownloaded: data.downloaded !== false,
-
-          attachments: (data.attachments || []).map((att) => ({
-            fileType: att.file_extension || att.file_type,
-            filename: att.name || att.filename,
-            size: att.size_bytes || att.size,
-            attachmentId: att.attachment_id || att.Attachment_id,
-          })),
+          // API-FIX: folder mapped via folderIdToName
+          folder: folderIdToName(data.folder),
+          // API-FIX: Removed attachments mapping (they come from separate endpoint)
         },
       };
     } else {
@@ -669,10 +725,11 @@ export const getEmailAttachments = async (emailId) => {
       );
     }
 
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/attachments`);
+    // API-FIX: Changed /api/mail/{emailId}/attachments → /api/qmail/attachments?email_id={emailId}
+    const response = await fetch(`${API_BASE_URL}/qmail/attachments?email_id=${emailId}`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/{id}/attachments:", data);
+    console.log("Data received from /qmail/attachments:", data);
 
     if (data) {
       return {
@@ -682,8 +739,10 @@ export const getEmailAttachments = async (emailId) => {
           attachments: (data.attachments || []).map((att) => ({
             attachmentId: att.attachment_id,
             name: att.name,
-            fileExtension: att.file_extension,
-            size: att.size,
+            // API-FIX: att.extension → fileExtension (not file_extension)
+            fileExtension: att.extension,
+            // API-FIX: att.size_bytes → size
+            size: att.size_bytes,
           })),
           count: data.count || 0,
         },
@@ -705,8 +764,8 @@ export const getEmailAttachments = async (emailId) => {
  */
 export const getContacts = async (query = "") => {
   try {
-    // Always call the base endpoint without search params
-    const url = `${API_BASE_URL}/contacts`;
+    // API-FIX: Changed /api/contacts → /api/qmail/contacts/list
+    const url = `${API_BASE_URL}/qmail/contacts/list`;
 
     console.log("Fetching contacts from:", url);
 
@@ -720,11 +779,11 @@ export const getContacts = async (query = "") => {
     }
 
     const data = await response.json();
-    console.log("Data received from /contacts:", data);
+    console.log("Data received from /qmail/contacts/list:", data);
 
     let contacts = [];
 
-    // Handle different possible response formats
+    // API-FIX: Backend returns { success, count, contacts: [{ serial_number, denomination, first_name, last_name, auto_address, description, class_name }] }
     if (data && Array.isArray(data.contacts)) {
       contacts = data.contacts;
     } else if (data && Array.isArray(data)) {
@@ -735,7 +794,9 @@ export const getContacts = async (query = "") => {
 
     // Transform the contacts
     let transformedContacts = contacts.map((contact) => ({
+      // API-FIX: serial_number → userId
       userId:
+        contact.serial_number ||
         contact.user_id ||
         contact.userId ||
         Math.random().toString(36).substr(2, 9),
@@ -745,11 +806,11 @@ export const getContacts = async (query = "") => {
       autoAddress:
         contact.auto_address || contact.autoAddress || contact.email || "",
       description: contact.description || "",
-      sendingFee: contact.sending_fee || contact.sendingFee || 0,
-      beaconId: contact.beacon_id || contact.beaconId || "",
+      denomination: contact.denomination || "",
+      className: contact.class_name || "",
       fullName:
         `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() ||
-        contact.name ||
+        contact.denomination ||
         "Unknown Contact",
     }));
 
@@ -783,6 +844,67 @@ export const getContacts = async (query = "") => {
   }
 };
 
+// BUG-14 FIX: Add backend API calls for contact add/delete
+
+/**
+ * Adds a contact to the backend via POST /api/qmail/contacts/add
+ * @param {object} contactData - { serial_number, denomination, first_name, last_name, description, class_name }
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const addContact = async (contactData) => {
+  try {
+    const params = new URLSearchParams();
+    if (contactData.serial_number) params.append('serial_number', contactData.serial_number);
+    if (contactData.denomination) params.append('denomination', contactData.denomination);
+    if (contactData.first_name) params.append('first_name', contactData.first_name);
+    if (contactData.last_name) params.append('last_name', contactData.last_name);
+    if (contactData.description) params.append('description', contactData.description);
+    if (contactData.class_name) params.append('class_name', contactData.class_name);
+
+    const response = await fetch(`${API_BASE_URL}/qmail/contacts/add?${params.toString()}`, {
+      method: 'POST',
+    });
+    const data = await handleResponse(response);
+
+    if (data && data.success) {
+      return { success: true, data };
+    } else {
+      throw new Error(data.message || data.error || 'Failed to add contact');
+    }
+  } catch (error) {
+    console.error("Add contact failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Deletes a contact from the backend via DELETE /api/qmail/contacts/delete
+ * @param {number} serialNumber - The serial number of the contact to delete
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const deleteContact = async (serialNumber) => {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/contacts/delete?serial_number=${encodeURIComponent(serialNumber)}`,
+      { method: 'DELETE' }
+    );
+    const data = await handleResponse(response);
+
+    if (data && data.success) {
+      return { success: true, data };
+    } else {
+      throw new Error(data.message || data.error || 'Failed to delete contact');
+    }
+  } catch (error) {
+    console.error("Delete contact failed:", error);
+    let userMessage = error.message;
+    if (error.message === "Failed to fetch") {
+      userMessage = `Cannot reach the mail server. Please make sure the backend is running on port ${API_PORT}.`;
+    }
+    return { success: false, error: userMessage };
+  }
+};
+
 /**
  * Gets information about all RAIDA servers.
  * @param {boolean} includeUnavailable - Whether to include unavailable servers (default: false)
@@ -790,19 +912,22 @@ export const getContacts = async (query = "") => {
  */
 export const getServers = async (includeUnavailable = false) => {
   try {
-    const url = `${API_BASE_URL}/data/servers?include_unavailable=${includeUnavailable}`;
+    // API-FIX: Changed /api/data/servers → /api/qmail/status
+    const url = `${API_BASE_URL}/qmail/status`;
     const response = await fetch(url);
     const data = await handleResponse(response);
 
-    console.log("Data received from /data/servers:", data);
+    console.log("Data received from /qmail/status:", data);
 
-    if (data && Array.isArray(data.servers)) {
+    // API-FIX: Backend returns { success, servers: { count, list: [...] } }
+    if (data && data.servers && Array.isArray(data.servers.list)) {
       return {
         success: true,
         data: {
-          servers: data.servers,
-          totalServers: data.count || data.servers.length,
-          availableServers: data.servers.filter((s) => s.is_available).length,
+          // API-FIX: data.servers.list → servers array
+          servers: data.servers.list,
+          totalServers: data.servers.count || data.servers.list.length,
+          availableServers: data.servers.list.filter((s) => s.is_available).length,
         },
       };
     } else {
@@ -818,41 +943,9 @@ export const getServers = async (includeUnavailable = false) => {
  * Gets the current parity server configuration.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
+// API-FIX: Parity server endpoint removed
 export const getParityServer = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/admin/servers/parity`);
-    const data = await handleResponse(response);
-
-    console.log("Data received from /admin/servers/parity:", data);
-
-    if (data) {
-      return {
-        success: true,
-        data: {
-          status: data.status,
-          parityServer: data.parity_server
-            ? {
-                serverId: data.parity_server.server_id,
-                address: data.parity_server.ip_address, // ← Changed from address to ip_address
-                port: data.parity_server.port,
-                isAvailable: data.parity_server.is_available,
-              }
-            : null,
-          message:
-            data.message ||
-            (data.status === "configured"
-              ? "Parity server configured"
-              : "Not configured"),
-        },
-      };
-    } else {
-      throw new Error("Invalid response from parity server endpoint");
-    }
-  } catch (error) {
-    console.error("Get parity server failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to fetch parity server configuration.`;
-    return { success: false, error: errorMessage };
-  }
+  return { success: false, error: 'Parity server endpoint removed' };
 };
 
 /**
@@ -889,39 +982,73 @@ export const syncData = async () => {
 };
 
 /**
+ * Pings all 25 RAIDA servers via echo and returns per-server status.
+ * @returns {Promise<{success: boolean, data?: {raidas: Array, totalAvailable: number, totalError: number, totalTimeout: number}}>}
+ */
+export const echoRaida = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/raida/echo`);
+    const data = await handleResponse(response);
+    if (data && Array.isArray(data.raidas)) {
+      return {
+        success: true,
+        data: {
+          raidas: data.raidas,
+          totalAvailable: data.total_available || 0,
+          totalError: data.total_error || 0,
+          totalTimeout: data.total_timeout || 0,
+          arrayUsable: data.array_usable || false,
+        },
+      };
+    }
+    throw new Error("Invalid echo response");
+  } catch (error) {
+    console.error("Echo RAIDA failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
  * Gets the wallet balance and coin distribution across folders.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const getWalletBalance = async () => {
+// Renamed from getWalletBalance to getQMailWalletBalance to avoid
+// name collision with apiService.js getWalletBalance (different endpoint/shape).
+export const getQMailWalletBalance = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallet/balance`);
+    // API-FIX: Changed /api/wallet/balance → /api/wallets/balance to match rest_core
+    // rest_core requires wallet_path param; omitting it defaults to "Default" wallet
+    const response = await fetch(`${API_BASE_URL}/wallets/balance`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /wallet/balance:", data);
+    console.log("Data received from /wallets/balance:", data);
 
-    if (data && data.status === "success") {
+    // API-FIX: rest_core returns { success, command, wallet_path, wallet_name,
+    //   total_value, total_notes, bank_value, bank_notes, fracked_value, fracked_notes,
+    //   limbo_value, limbo_notes }
+    if (data && data.success) {
       return {
         success: true,
         data: {
           walletPath: data.wallet_path,
           walletName: data.wallet_name,
-          totalCoins: data.total_coins,
-          totalValue: data.total_value,
+          totalCoins: data.total_notes || 0,
+          totalValue: data.total_value || 0,
           folders: {
             bank: {
-              coins: data.folders.bank_coins,
-              value: data.folders.bank_value,
+              coins: data.bank_notes || 0,
+              value: data.bank_value || 0,
             },
             fracked: {
-              coins: data.folders.fracked_coins,
-              value: data.folders.fracked_value,
+              coins: data.fracked_notes || 0,
+              value: data.fracked_value || 0,
             },
             limbo: {
-              coins: data.folders.limbo_coins,
-              value: data.folders.limbo_value,
+              coins: data.limbo_notes || 0,
+              value: data.limbo_value || 0,
             },
           },
-          denominations: data.denominations,
+          denominations: data.denominations || {},
           warnings: data.warnings || [],
         },
       };
@@ -943,18 +1070,17 @@ export const getWalletBalance = async () => {
  */
 export const markEmailRead = async (emailId, isRead = true) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/read`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ is_read: isRead }),
+    // API-FIX: Changed PUT /api/mail/{emailId}/read → POST /api/qmail/mark-read?email_id={emailId}&is_read={isRead}
+    const response = await fetch(`${API_BASE_URL}/qmail/mark-read?email_id=${emailId}&is_read=${isRead}`, {
+      // API-FIX: Changed method from PUT to POST, removed JSON body
+      method: "POST",
     });
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/{id}/read:", data);
+    console.log("Data received from /qmail/mark-read:", data);
 
-    if (data && data.status === "success") {
+    // API-FIX: Check data.success instead of data.status === "success"
+    if (data && data.success) {
       return {
         success: true,
         data: {
@@ -980,18 +1106,17 @@ export const markEmailRead = async (emailId, isRead = true) => {
  */
 export const moveEmail = async (emailId, folder) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/move`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ folder: folder }),
+    // API-FIX: Changed PUT /api/mail/{emailId}/move → POST /api/qmail/move?email_id={emailId}&folder={folderId}
+    const response = await fetch(`${API_BASE_URL}/qmail/move?email_id=${emailId}&folder=${folderNameToId(folder)}`, {
+      // API-FIX: Changed method from PUT to POST, removed JSON body
+      method: "POST",
     });
     const data = await handleResponse(response);
 
-    console.log("Data received from /mail/{id}/move:", data);
+    console.log("Data received from /qmail/move:", data);
 
-    if (data && data.status === "success") {
+    // API-FIX: Check data.success instead of data.status === "success"
+    if (data && data.success) {
       return {
         success: true,
         data: {
@@ -1016,14 +1141,16 @@ export const moveEmail = async (emailId, folder) => {
  */
 export const deleteEmail = async (emailId) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}`, {
+    // API-FIX: Changed DELETE /api/mail/{emailId} → DELETE /api/qmail/trash?email_id={emailId}
+    const response = await fetch(`${API_BASE_URL}/qmail/trash?email_id=${emailId}`, {
       method: "DELETE",
     });
     const data = await handleResponse(response);
 
-    console.log("Data received from DELETE /mail/{id}:", data);
+    console.log("Data received from DELETE /qmail/trash:", data);
 
-    if (data && data.status === "success") {
+    // API-FIX: Check data.success instead of data.status === "success"
+    if (data && data.success) {
       return {
         success: true,
         data: {
@@ -1124,44 +1251,67 @@ export const deleteEmail = async (emailId) => {
 
 export const sendEmail = async (emailData) => {
   try {
-    const payload = {
-      to: Array.isArray(emailData.to) ? emailData.to : [],
-      cc: Array.isArray(emailData.cc) ? emailData.cc : [],
-      bcc: Array.isArray(emailData.bcc) ? emailData.bcc : [],
-      subject: emailData.subject || "",
-      body: emailData.body || "",
-      attachments: emailData.attachments || [],
-      storage_weeks:
-        emailData.storage_weeks !== undefined ? emailData.storage_weeks : 8,
-    };
+    const toList = Array.isArray(emailData.to) ? emailData.to : [];
+    const ccList = Array.isArray(emailData.cc) ? emailData.cc : [];
 
-    const response = await fetch(`${API_BASE_URL}/mail/send`, {
+    // Build URL-encoded form body (backend parses POST body as query params)
+    const params = new URLSearchParams();
+    if (toList.length > 0) params.set("to", toList.join(","));
+    if (ccList.length > 0) params.set("cc", ccList.join(","));
+    if (emailData.subject) params.set("subject", emailData.subject);
+    if (emailData.body) params.set("body", emailData.body);
+    params.set("storage_weeks",
+      emailData.storage_weeks !== undefined ? String(emailData.storage_weeks) : "8");
+
+    const response = await fetch(`${API_BASE_URL}/qmail/send`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
     });
 
     const data = await handleResponse(response);
     console.log("Send API Response:", data);
 
-    // Check for 'accepted', 'success', or the presence of 'task_id'
     if (
       data &&
-      (data.status === "success" || data.status === "accepted" || data.task_id)
+      (data.success || data.status === "success" || data.status === "accepted" || data.file_guid)
     ) {
       return {
         success: true,
         data: {
-          message: data.message || "Email queued successfully",
-          taskId: data.task_id, // Safely extract the task ID from Python
+          message: data.message || "Email sent successfully",
+          // Only set taskId for async operations (task_id field).
+          // file_guid is the email identifier, NOT a pollable task.
+          taskId: data.task_id || null,
+          fileGuid: data.file_guid || null,
           timestamp: data.timestamp,
         },
       };
     } else {
-      throw new Error(data.error || "Invalid response from send endpoint");
+      throw new Error(data.message || data.error || "Server rejected the email");
     }
   } catch (error) {
     console.error("Send email failed:", error);
+    // Provide user-friendly error messages
+    let userMessage = error.message;
+    if (error.message === "Failed to fetch") {
+      userMessage = `Cannot reach the mail server. Please make sure the backend is running on port ${API_PORT}.`;
+    }
+    return { success: false, error: userMessage };
+  }
+};
+
+// Convert a coin serial number to a full email address
+export const convertSnToEmail = async (sn) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/qmail/convert_coin_to_email?sn=${sn}`);
+    const data = await handleResponse(response);
+    if (data && data.success && data.email) {
+      return { success: true, email: data.email, firstName: data.first_name, lastName: data.last_name };
+    }
+    return { success: false, error: data.message || "Lookup failed" };
+  } catch (error) {
+    console.error("Convert SN to email failed:", error);
     return { success: false, error: error.message };
   }
 };
@@ -1169,7 +1319,8 @@ export const sendEmail = async (emailData) => {
 // Version check
 export const checkVersion = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/admin/version-check`);
+    // API-FIX: Changed /admin/version-check → /system/version-check
+    const response = await fetch(`${API_BASE_URL}/system/version-check`);
 
     if (!response.ok) {
       throw new Error("Failed to check version");
@@ -1191,13 +1342,11 @@ export const checkVersion = async () => {
  */
 export const importCredentials = async (lockerCode) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/setup/import-credentials`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ locker_code: lockerCode }),
-    });
+    // API-FIX: Changed POST /setup/import-credentials with JSON body
+    //          → GET /qmail/import-credentials?locker_key= (query param, like locker download)
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/import-credentials?locker_key=${encodeURIComponent(lockerCode)}`
+    );
 
     const data = await response.json();
 
@@ -1207,7 +1356,7 @@ export const importCredentials = async (lockerCode) => {
       // Handles HTTP 400, 404, etc.
       return {
         success: false,
-        error: data.error || "Failed to import credentials",
+        error: data.message || "Failed to import credentials",
         status: response.status,
       };
     }
@@ -1222,7 +1371,8 @@ export const importCredentials = async (lockerCode) => {
  */
 export const healWallet = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallet/heal`, {
+    // API-FIX: Changed POST /api/wallet/heal → POST /api/qmail/heal-identity
+    const response = await fetch(`${API_BASE_URL}/qmail/heal-identity`, {
       method: "POST",
     });
     return await handleResponse(response);
@@ -1235,11 +1385,14 @@ export const healWallet = async () => {
 /**
  * Prepares the coin for change/denominations.
  */
-export const prepareChange = async () => {
+export const prepareChange = async (walletPath = null) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/wallet/prepare-change`, {
-      method: "POST",
-    });
+    // API-FIX: Changed POST /wallet/prepare-change → GET /coins/prepare-change with query params
+    let url = `${API_BASE_URL}/coins/prepare-change`;
+    if (walletPath) {
+      url += `?wallet_path=${encodeURIComponent(walletPath)}`;
+    }
+    const response = await fetch(url);
     return await handleResponse(response);
   } catch (error) {
     console.error("Prepare Change API failed:", error);
@@ -1253,10 +1406,13 @@ export const prepareChange = async () => {
  */
 export const getIdentity = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/account/identity`);
+    // API-FIX: Changed /api/account/identity → /api/qmail/identity
+    const response = await fetch(`${API_BASE_URL}/qmail/identity`);
     if (response.ok) {
       const data = await response.json();
-      return data;
+      // API-FIX: Backend returns { success, identity: { sn, denomination, email, ... } }
+      // API-FIX: Add configured flag: true if identity exists and sn > 0
+      return { ...data, configured: data.identity && data.identity.sn > 0 };
     }
     return null;
   } catch (error) {
@@ -1266,11 +1422,29 @@ export const getIdentity = async () => {
 };
 
 /**
+ * Checks if the Mail wallet has any ID coin files (Bank or Fracked).
+ * @returns {Promise<{has_id: boolean} | null>}
+ */
+export const hasId = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/qmail/has-id`);
+    if (response.ok) {
+      return await response.json();
+    }
+    return null;
+  } catch (error) {
+    console.error("has-id check failed:", error);
+    return null;
+  }
+};
+
+/**
  * Polls for new email notifications (returns guids and sender info)
  */
 export const getMailNotifications = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/notifications`);
+    // API-FIX: Changed /api/mail/notifications → /api/qmail/notifications
+    const response = await fetch(`${API_BASE_URL}/qmail/notifications`);
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {
@@ -1283,7 +1457,10 @@ export const getMailNotifications = async () => {
  */
 export const downloadEmailContent = async (guid) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/download/${guid}`);
+    // API-FIX: Changed GET /api/mail/download/{guid} → POST /api/qmail/download?file_guid={guid}
+    const response = await fetch(`${API_BASE_URL}/qmail/download?file_guid=${guid}`, {
+      method: "POST",
+    });
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {
@@ -1296,7 +1473,8 @@ export const downloadEmailContent = async (guid) => {
  */
 export const getMailAttachmentsList = async (guid) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${guid}/attachments`);
+    // API-FIX: Changed /api/mail/{guid}/attachments → /api/qmail/attachments?email_id={guid}
+    const response = await fetch(`${API_BASE_URL}/qmail/attachments?email_id=${guid}`);
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {
@@ -1313,8 +1491,9 @@ export const downloadMailAttachment = async (
   defaultFilename = "downloaded_file",
 ) => {
   try {
+    // API-FIX: Changed /api/mail/{guid}/attachment/{n} → /api/qmail/attachment/download?email_id={guid}&attachment_id={n}
     const response = await fetch(
-      `${API_BASE_URL}/mail/${guid}/attachment/${n}`,
+      `${API_BASE_URL}/qmail/attachment/download?email_id=${guid}&attachment_id=${n}`,
     );
 
     if (!response.ok) {
@@ -1348,8 +1527,11 @@ export const downloadMailAttachment = async (
     a.click();
 
     // 5. Clean up the DOM and memory
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+    // BUG-16 FIX: Delay revocation so the browser has time to read the blob
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    }, 200);
 
     return { success: true };
   } catch (error) {
@@ -1365,14 +1547,16 @@ export const downloadMailAttachment = async (
  */
 export const deleteEmailPermanent = async (emailId) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/mail/${emailId}/permanent`, {
+    // API-FIX: Changed DELETE /api/mail/{emailId}/permanent → DELETE /api/qmail/delete-permanent?email_id={emailId}
+    const response = await fetch(`${API_BASE_URL}/qmail/delete-permanent?email_id=${emailId}`, {
       method: "DELETE",
     });
     const data = await handleResponse(response);
 
-    console.log("Data received from DELETE /mail/{id}/permanent:", data);
+    console.log("Data received from DELETE /qmail/delete-permanent:", data);
 
-    if (data && data.status === "success") {
+    // API-FIX: Check data.success instead of data.status === "success"
+    if (data && data.success) {
       return {
         success: true,
         data: {

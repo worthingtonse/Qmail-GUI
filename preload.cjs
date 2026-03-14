@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Add CLI command support
   runCommand: (command) => ipcRenderer.invoke('run-command', command),
   // Add file reading support for EFF wordlist
-  readFile: (filename) => ipcRenderer.invoke('read-file', filename)
+  readFile: (filename) => ipcRenderer.invoke('read-file', filename),
+  // BUG-08 FIX: Get home directory for path expansion
+  getHomeDir: () => ipcRenderer.invoke('get-home-dir')
 });

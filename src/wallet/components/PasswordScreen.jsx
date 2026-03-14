@@ -22,7 +22,9 @@ const PasswordScreen = ({ onSuccess }) => {
 
   const hashPassword = async (password) => {
     const encoder = new TextEncoder();
-    const data = encoder.encode(password.toLowerCase().trim());
+    // BUG-17 FIX: Removed .toLowerCase() — unknown why it was there, and it
+    // makes passwords case-insensitive which reduces security significantly
+    const data = encoder.encode(password.trim());
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');

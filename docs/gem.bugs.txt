@@ -1,0 +1,64 @@
+BUG REPORT - Qmail-GUI
+Model: Gemini (gem)
+Date: 2026-03-10
+
+1. [CRITICAL] Windows-Specific Hardcoded Paths
+File: src/api/apiService.js (lines 35-71)
+Description: The `expandPath` function contains hardcoded Windows paths like `C:\\Users\\%USERNAME%\\Downloads`. It does not actually resolve the `%USERNAME%` environment variable in JavaScript, sending literal strings to the backend. This will fail on any non-Windows system and likely fail on Windows if the backend doesn't specifically handle `%USERNAME%` expansion.
+
+2. [HIGH] API Error Masking/Swallowing
+File: src/api/apiService.js
+Description: Multiple functions (`getWalletBalance`, `deleteWallet`, `runEncryptionHealthCheck`, `runEncryptionRepair`) explicitly return `{ success: true }` even when the server responds with an error (non-ok status) or when a network/CORS error occurs. This prevents the UI from correctly reporting failures to the user and can lead to data loss or state desync.
+- `deleteWallet` (line 373): "If fetch was blocked by CORS, assume success".
+- `getWalletBalance` (line 155): Returns empty data and success: true on error.
+
+3. [HIGH] Race Conditions in Dashboard State
+File: src/qmail/screens/QMailDashboard.jsx
+Description: 
+- `loadEmails` (line 201) lacks any cancellation or "last-request" tracking. If a user quickly switches between folders, multiple requests will be in flight, and the one that finishes last will determine the displayed list, regardless of the currently active folder.
+- `handleSelectEmail` (line 339) performs async calls to fetch body and attachments but does not verify if the email is still selected when the promises resolve. This can cause the "Reading Pane" to display data from a previously clicked email.
+- Multiple `setInterval` loops (10s, 60s, 120s) run independently and update shared state (`mailCounts`, `walletBalance`), potentially causing redundant re-renders or overwriting each other's updates.
+
+4. [MEDIUM] Inconsistent API Implementation
+Files: src/api/apiService.js, src/api/qmailApiServices.js
+Description: There are two separate `handleResponse` implementations with different error extraction logic. One throws errors while the other (in `apiService.js`) often swallows them. This makes the codebase brittle and unpredictable for developers.
+
+5. [MEDIUM] Hardcoded Configuration
+Files: src/api/apiService.js, src/api/qmailApiServices.js
+Description: `API_BASE_URL` is hardcoded as `http://localhost:8080/api` in both files. This makes it impossible to configure the application for different environments (e.g., production, different ports, or remote backends) without modifying the source code.
+
+6. [MEDIUM] Improper Use of HTTP Methods
+File: src/api/apiService.js
+Description: Several state-changing operations like `importCloudCoinFiles` (line 826) and `exportCloudCoins` (line 793) use `HTTP GET` instead of `POST` or `PUT`. This violates REST principles and can lead to issues with caching or unintended side-effects from pre-fetching browsers/proxies.
+
+7. [LOW] Inefficient Client-side Filtering
+File: src/api/qmailApiServices.js (lines 538-608)
+Description: `getContacts` fetches the entire contact list and performs search filtering in the frontend. This will result in significant performance degradation as the user's contact list grows.
+
+8. [LOW] Manual Path Normalization
+File: src/api/apiService.js
+Description: The `normalizePath` function is manually applied in various API calls with a boolean flag `isFilePath` to toggle between backslashes and forward slashes. This is error-prone as it relies on the developer remembering the specific requirements of each backend endpoint.
+
+9. [LOW] Side-Effects in State Updaters
+File: src/qmail/screens/QMailDashboard.jsx
+Description: `loadMailCounts` and `handleFolderChange` directly manipulate `document.title`. This is a side-effect that should ideally be handled via a `useEffect` hook to ensure the title always reflects the actual state and to avoid issues during concurrent updates.
+
+10. [LOW] Potential Memory Leaks
+File: src/qmail/screens/QMailDashboard.jsx
+Description: `handleSearch` creates a `setTimeout` but doesn't always clear it correctly if the component unmounts or if a new search is triggered (though it clears it on the next call, a rapid unmount could leave a timer running).
+
+11. [HIGH] Electron Backend Lifecycle Issue
+File: electron.cjs (line 130)
+Description: `startBackend()` is called inside the `did-finish-load` event. This causes a new backend process to be spawned every time the window is refreshed (e.g., via F5 or `location.reload()`), which will lead to port conflicts and orphaned processes.
+
+12. [MEDIUM] IPC Type Mismatch
+Files: electron.cjs (line 142), src/wallet/Wallet.jsx (line 35)
+Description: The `check-usb-drive` IPC handler returns an object `{ success: true }`, but the frontend `Wallet.jsx` expects a boolean value. This will cause `isUSBDrive` to always be truthy (as it's an object), potentially bypassing the USB check even if it failed.
+
+13. [MEDIUM] Brittle File Path Handling in Dev Mode
+File: electron.cjs (line 166)
+Description: `ipcMain.handle('read-file')` always uses `process.resourcesPath`. This will likely fail in development mode as resources are structured differently than in a bundled app.
+
+14. [LOW] Backend Cleanup
+File: electron.cjs
+Description: The backend process is killed only on `window-all-closed`. If the main process crashes or is terminated abruptly, the child `qmail-backend.exe` might become an orphaned zombie process.

@@ -4,6 +4,7 @@ import WelcomeScreen from './components/WelcomeScreen';
 import USBCheckScreen from './components/USBCheckScreen';
 import PasswordScreen from './components/PasswordScreen';
 import MainDashboard from './components/MainDashboard';
+import { checkUsbDrive } from '../api/apiService';
 
 const SCREENS = {
 WELCOME: 'welcome',
@@ -17,30 +18,22 @@ const [currentScreen, setCurrentScreen] = useState(SCREENS.WELCOME);
 const [isUSBDrive, setIsUSBDrive] = useState(false);
 const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+// BUG-10 FIX (review): Call REST API directly instead of IPC middleman
 useEffect(() => {
 const checkUSB = async () => {
-console.log('Starting USB check...');
-await new Promise(resolve => setTimeout(resolve, 100));
-
-  if (window.electronAPI) {
-    console.log('electronAPI is available');
-    try {
-      const result = await window.electronAPI.checkUSBDrive();
-      console.log('USB check result:', result);
-      setIsUSBDrive(result);
-    } catch (err) {
-      console.error('USB check error:', err);
-      setIsUSBDrive(false);
-    }
-  } else {
-    console.error('electronAPI not available - this might be running in browser');
-    setIsUSBDrive(true); // Default for browser testing
+  console.log('Starting USB check...');
+  try {
+    const result = await checkUsbDrive();
+    console.log('USB check result:', result);
+    // Pass if on USB, or if USB is not required
+    setIsUSBDrive(result.onUsb || !result.required);
+  } catch (err) {
+    console.error('USB check error:', err);
+    setIsUSBDrive(false);
   }
 };
 
 checkUSB();
-
-
 }, []);
 
 const handleWelcomeAgree = () => {

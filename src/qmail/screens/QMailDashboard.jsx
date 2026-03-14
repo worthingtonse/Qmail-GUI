@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import ComposeModal from "./ComposeModal";
 import ContactsPane from "./ContactsPane";
 import AccountPane from "./AccountPane";
@@ -14,7 +14,7 @@ import {
   getEmailById,
   getDrafts,
   getEmailAttachments,
-  getWalletBalance,
+  getQMailWalletBalance,
   syncData,
   markEmailRead,
   moveEmail,
@@ -23,7 +23,10 @@ import {
   getMailNotifications,
   downloadEmailContent,
   downloadMailAttachment,
+  starEmail,
+  convertSnToEmail,
 } from "../../api/qmailApiServices";
+import { formatTimestamp } from "./formatTimestamp";
 
 import "./QMailDashboard.css";
 
@@ -38,6 +41,7 @@ const QMailDashboard = ({ initValues }) => {
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalEmailCount, setTotalEmailCount] = useState(0);
+  const [sortMode, setSortMode] = useState("newest");
   const EMAILS_PER_PAGE = 50;
 
   const [mailCounts, setMailCounts] = useState({
@@ -59,7 +63,10 @@ const QMailDashboard = ({ initValues }) => {
   const [pendingMails, setPendingMails] = useState([]);
   const [isDownloadingItem, setIsDownloadingItem] = useState(null);
   const [emailAttachments, setEmailAttachments] = useState([]);
-  const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
+  // BUG-22 FIX: Use ref instead of state for debounce timer
+  const searchDebounceTimerRef = useRef(null);
+  // BUG-21 FIX: Track current folder load to prevent race conditions
+  const loadEmailsRequestRef = useRef(0);
 
   const [serverHealth, setServerHealth] = useState({
     status: "healthy",
@@ -84,7 +91,8 @@ const QMailDashboard = ({ initValues }) => {
       from: notif.sender_address || "",
       subject: "🔒 Encrypted Message (Tap to Download)",
       preview: "Encrypted payload waiting to be downloaded...",
-      timestamp: notif.timestamp || new Date().toISOString(),
+      rawTimestamp: Number(notif.timestamp) || 0,
+      timestamp: formatTimestamp(notif.timestamp) || new Date().toLocaleTimeString(),
       isPending: true,
       isDownloaded: false,
     }));
@@ -137,8 +145,8 @@ const QMailDashboard = ({ initValues }) => {
       clearInterval(mailCountInterval);
       clearInterval(walletInterval);
       window.removeEventListener("focus", handleFocus);
-      if (searchDebounceTimer) {
-        clearTimeout(searchDebounceTimer);
+      if (searchDebounceTimerRef.current) {
+        clearTimeout(searchDebounceTimerRef.current);
       }
     };
   }, []);
@@ -149,6 +157,14 @@ const QMailDashboard = ({ initValues }) => {
       return () => clearTimeout(timer);
     }
   }, [notification]);
+
+  // BUG-25 FIX: Sync document.title with state via useEffect
+  useEffect(() => {
+    const unread = mailCounts[currentFolder]?.unread || 0;
+    document.title = unread > 0
+      ? `(${unread}) QMail - ${currentFolder}`
+      : `QMail - ${currentFolder}`;
+  }, [currentFolder, mailCounts]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -171,7 +187,7 @@ const QMailDashboard = ({ initValues }) => {
 
   const loadWalletBalance = async () => {
     try {
-      const result = await getWalletBalance();
+      const result = await getQMailWalletBalance();
       if (result.success) {
         setWalletBalance(result.data);
       } else {
@@ -182,6 +198,7 @@ const QMailDashboard = ({ initValues }) => {
     }
   };
 
+  // BUG-03 FIX: Return the draft list so callers can use the fresh value
   const loadDrafts = async () => {
     try {
       const result = await getDrafts();
@@ -192,11 +209,14 @@ const QMailDashboard = ({ initValues }) => {
           ...prev,
           drafts: { total: draftsList.length, unread: 0 },
         }));
+        return draftsList;
       } else {
         setDrafts([]);
+        return [];
       }
     } catch (error) {
       setDrafts([]);
+      return [];
     }
   };
 
@@ -252,24 +272,23 @@ const QMailDashboard = ({ initValues }) => {
 
       if (newCounts.drafts) newCounts.drafts.unread = 0;
 
-      if (summary.total_unread > 0) {
-        document.title = `(${summary.total_unread}) QMail - ${currentFolder}`;
-      } else {
-        document.title = `QMail - ${currentFolder}`;
-      }
-
+      // BUG-25 FIX: document.title is now managed by useEffect
       setPreviousMailCounts(newCounts);
       setMailCounts(newCounts);
     }
   };
 
-  const loadEmails = async (folder) => {
+  // BUG-12 FIX: Accept optional page parameter to avoid stale currentPage
+  // BUG-21 FIX: Track request ID to discard stale responses
+  const loadEmails = async (folder, page = null) => {
+    const requestId = ++loadEmailsRequestRef.current;
     setLoading(true);
 
     try {
       if (folder === "drafts") {
-        await loadDrafts();
-        const transformedDrafts = drafts.map((draft) => ({
+        // BUG-03 FIX: Use returned value instead of stale closure
+        const freshDrafts = await loadDrafts();
+        const transformedDrafts = freshDrafts.map((draft) => ({
           id: draft.id || `draft_${Date.now()}_${Math.random()}`,
           sender: "You (Draft)",
           senderEmail: userAccount.email,
@@ -293,8 +312,13 @@ const QMailDashboard = ({ initValues }) => {
         return;
       }
 
-      const offset = currentPage * EMAILS_PER_PAGE;
-      const result = await getMailList(folder, EMAILS_PER_PAGE, offset);
+      const effectivePage = page !== null ? page : currentPage;
+      const offset = effectivePage * EMAILS_PER_PAGE;
+      const result = await getMailList(folder, EMAILS_PER_PAGE, offset, sortMode);
+
+      // BUG-21 FIX: Discard stale response if a newer request was started
+      if (requestId !== loadEmailsRequestRef.current) return;
+
       if (result.success) {
         setTotalEmailCount(result.data.totalCount);
 
@@ -310,10 +334,16 @@ const QMailDashboard = ({ initValues }) => {
             (email.body
               ? email.body.substring(0, 100)
               : "No preview available..."),
-          timestamp:
+          rawTimestamp: Number(
             email.ReceivedTimestamp ||
             email.receivedTimestamp ||
-            email.timestamp,
+            email.timestamp
+          ) || 0,
+          timestamp: formatTimestamp(
+            email.ReceivedTimestamp ||
+            email.receivedTimestamp ||
+            email.timestamp
+          ),
           // FIX: Force read status in trash to prevent "new email" bolding
           isRead: folder === 'trash' ? true : (email.is_read || email.isRead || false),
           // FIX: Force downloaded status in trash to bypass the download button UI
@@ -324,7 +354,7 @@ const QMailDashboard = ({ initValues }) => {
             email.isDownloaded === true
           ),
           tags: email.tags || [],
-          starred: email.isStarred || false,
+          starred: email.isStarred || email.starred || false,
           senderStatus: "none",
           // FIX: Attach the folder identity so ReadingPane knows to use "Delete Permanently"
           folder: folder,
@@ -338,8 +368,10 @@ const QMailDashboard = ({ initValues }) => {
       }
     } catch (error) {
       console.error("Email loading error:", error);
-      setEmails([]);
-      setNotification("Error loading emails");
+      if (requestId === loadEmailsRequestRef.current) {
+        setEmails([]);
+        setNotification("Error loading emails");
+      }
     } finally {
       setLoading(false);
     }
@@ -350,18 +382,48 @@ const QMailDashboard = ({ initValues }) => {
     setActiveView(folder);
     setSelectedEmail(null);
 
-    const unreadCount = mailCounts[folder]?.unread || 0;
-    if (unreadCount > 0) {
-      document.title = `(${unreadCount}) QMail - ${folder}`;
-    } else {
-      document.title = `QMail - ${folder}`;
-    }
-
+    // BUG-25 FIX: document.title is now managed by useEffect
     loadEmails(folder);
   };
 
+  const handleSortChange = (newSort) => {
+    // Toggle: if already active, switch back to newest; otherwise activate
+    const effectiveSort = sortMode === newSort ? "newest" : newSort;
+    setSortMode(effectiveSort);
+    // Reload with new sort — need to pass it directly since setState is async
+    const requestId = ++loadEmailsRequestRef.current;
+    setLoading(true);
+    getMailList(currentFolder, EMAILS_PER_PAGE, 0, effectiveSort).then((result) => {
+      if (requestId !== loadEmailsRequestRef.current) return;
+      if (result.success) {
+        setTotalEmailCount(result.data.totalCount);
+        const transformedEmails = result.data.emails.map((email) => ({
+          id: email.EmailID || email.id,
+          sender: email.sender || email.sender_address || email.from || "Unknown",
+          senderEmail: email.senderEmail || email.sender_address || "",
+          subject: email.Subject || email.subject || "No Subject",
+          body: email.body || "",
+          preview: email.preview || (email.body ? email.body.substring(0, 100) : "No preview available..."),
+          rawTimestamp: Number(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp) || 0,
+          timestamp: formatTimestamp(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp),
+          isRead: currentFolder === 'trash' ? true : (email.is_read || email.isRead || false),
+          isDownloaded: currentFolder === 'trash' ? true : (email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true),
+          tags: email.tags || [],
+          starred: email.isStarred || email.starred || false,
+          inboxFee: email.inboxFee || 0,
+          senderStatus: "none",
+          folder: currentFolder,
+          isTrashed: currentFolder === 'trash',
+        }));
+        setEmails(transformedEmails);
+      }
+      setLoading(false);
+    });
+    setCurrentPage(0);
+  };
+
   const handleSearch = async (query) => {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (searchDebounceTimerRef.current) clearTimeout(searchDebounceTimerRef.current);
     if (query.trim() === "") {
       loadEmails(currentFolder);
       return;
@@ -372,27 +434,30 @@ const QMailDashboard = ({ initValues }) => {
       const result = await searchEmails(query, 50, 0);
       if (result.success) {
         const transformedEmails = result.data.results.map((email) => ({
-          id: email.id || Date.now() + Math.random(),
+          id: email.email_id || email.id || Date.now() + Math.random(),
           sender:
-            email.sender || email.sender_address || email.from || "Unknown",
-          senderEmail: email.senderEmail || email.sender_address || "",
+            email.sender || email.sender_address || String(email.sender_sn || "Unknown"),
+          senderEmail: email.senderEmail || email.sender_address || String(email.sender_sn || ""),
           subject: email.subject || "No Subject",
           body: email.body || email.content || "",
           preview:
-            email.preview ||
+            email.preview || email.body_preview ||
             email.snippet ||
-            (email.body ? email.body.substring(0, 100) : ""),
-          timestamp:
-            email.timestamp || email.date || new Date().toLocaleTimeString(),
-          isRead: email.isRead || email.read || false,
+            (email.body ? email.body.substring(0, 100) : "No preview available..."),
+          timestamp: formatTimestamp(
+            email.received_timestamp || email.timestamp || email.date
+          ),
+          isRead: email.is_read || email.isRead || email.read || false,
           isDownloaded:
             email.downloaded === true ||
             email.downloaded === "true" ||
             email.downloaded === 1 ||
             email.isDownloaded === true,
           tags: email.tags || [],
-          starred: email.starred || false,
-          senderStatus: email.senderStatus || "none",
+          starred: email.is_starred || email.starred || false,
+          inboxFee: email.inbox_fee || email.inboxFee || 0,
+          senderStatus: "none",
+          folder: email.folder != null ? (typeof email.folder === "number" ? ["inbox","sent","drafts","trash","starred","archive"][email.folder] || "inbox" : email.folder) : currentFolder,
         }));
         setEmails(transformedEmails);
         setSelectedEmail(
@@ -402,14 +467,15 @@ const QMailDashboard = ({ initValues }) => {
       setLoading(false);
     }, 500);
 
-    setSearchDebounceTimer(timer);
+    searchDebounceTimerRef.current = timer;
   };
 
+  // BUG-02 FIX: Removed undefined checkForNewMail() call
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await checkForNewMail();
     await loadEmails(currentFolder);
     await loadDrafts();
+    await loadMailCounts();
     setIsRefreshing(false);
     setNotification("Refreshed successfully");
   };
@@ -420,6 +486,8 @@ const QMailDashboard = ({ initValues }) => {
     if (email.isPending || email.isDownloaded === false) {
       setSelectedEmail(email);
       setEmailAttachments([]);
+      // Auto-download the message
+      handleDownloadMail(email.guid || email.id);
       return;
     }
 
@@ -495,8 +563,18 @@ const QMailDashboard = ({ initValues }) => {
     setIsComposeOpen(true);
   };
 
-  const handleReply = (email) => {
-    setReplyToEmail(email);
+  const handleReply = async (email) => {
+    // Resolve sender's full email address from serial number if needed
+    let replyEmail = { ...email };
+    const senderEmail = email.senderEmail || email.from || "";
+    // If senderEmail looks like just a serial number, resolve it
+    if (senderEmail && /^\d+$/.test(senderEmail)) {
+      const result = await convertSnToEmail(parseInt(senderEmail, 10));
+      if (result.success) {
+        replyEmail.senderEmail = result.email;
+      }
+    }
+    setReplyToEmail(replyEmail);
     setIsComposeOpen(true);
   };
 
@@ -518,9 +596,10 @@ const QMailDashboard = ({ initValues }) => {
     setNotification(`Account upgraded to ${newAccountDetails.status}!`);
   };
 
+  // BUG-12 FIX: Pass the page number directly to avoid stale closure
   const handlePageChange = (newPage) => {
     setCurrentPage(newPage);
-    loadEmails(currentFolder);
+    loadEmails(currentFolder, newPage);
   };
 
   const handleMarkAsRead = async (emailId, isRead = true) => {
@@ -539,6 +618,37 @@ const QMailDashboard = ({ initValues }) => {
       }
     } catch (error) {
       console.error("Mark as read error:", error);
+    }
+  };
+
+  const handleToggleStar = async (emailId) => {
+    // Find current starred state
+    const email = emails.find((e) => String(e.id) === String(emailId));
+    const newStarred = !(email?.starred);
+
+    // Optimistic update
+    setEmails((prev) =>
+      prev.map((e) =>
+        String(e.id) === String(emailId) ? { ...e, starred: newStarred } : e
+      )
+    );
+    if (selectedEmail && String(selectedEmail.id) === String(emailId)) {
+      setSelectedEmail((prev) => ({ ...prev, starred: newStarred }));
+    }
+
+    // Persist to backend
+    try {
+      const result = await starEmail(emailId, newStarred);
+      if (!result.success) {
+        // Revert on failure
+        setEmails((prev) =>
+          prev.map((e) =>
+            String(e.id) === String(emailId) ? { ...e, starred: !newStarred } : e
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Star toggle error:", error);
     }
   };
 
@@ -564,18 +674,23 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     const forcePermanent = isPermanent || currentFolder === "trash";
 
     try {
-      const result = forcePermanent 
-        ? await deleteEmailPermanent(emailId) 
+      const result = forcePermanent
+        ? await deleteEmailPermanent(emailId)
         : await deleteEmail(emailId);
 
       if (result.success) {
-        setEmails((prevEmails) =>
-          prevEmails.filter((email) => email.id !== emailId),
-        );
+        setEmails((prevEmails) => {
+          const remaining = prevEmails.filter((email) => email.id !== emailId);
+          // If folder is now empty after delete, navigate to inbox
+          if (remaining.length === 0 && currentFolder !== "inbox") {
+            setTimeout(() => handleFolderChange("inbox"), 0);
+          }
+          return remaining;
+        });
         if (selectedEmail && selectedEmail.id === emailId) {
           setSelectedEmail(null);
         }
-        await loadMailCounts();
+        loadMailCounts();
       }
     } catch (error) {
       console.error("Delete email error:", error);
@@ -587,7 +702,19 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
   const handleDownloadMail = async (identifier) => {
     setIsDownloadingItem(identifier);
     try {
-      const contentRes = await downloadEmailContent(identifier);
+      // First try reading from local DB (already downloaded emails)
+      // identifier is 32-char hex email_id for DB emails, guid for pending
+      let contentRes;
+      if (identifier && identifier.length === 32 && !identifier.startsWith("pending-")) {
+        const localRes = await getEmailById(identifier);
+        if (localRes.success && localRes.data && localRes.data.body) {
+          contentRes = { success: true, data: localRes.data };
+        } else {
+          contentRes = await downloadEmailContent(identifier);
+        }
+      } else {
+        contentRes = await downloadEmailContent(identifier);
+      }
 
       const responseData = contentRes.data || contentRes;
 
@@ -698,7 +825,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       {(activeView === "inbox" ||
         activeView === "sent" ||
         activeView === "drafts" ||
-        activeView === "trash") && (
+        activeView === "trash" ||
+        activeView === "starred" ||
+        activeView === "archive") && (
         <>
           <EmailListPane
             emails={displayEmails}
@@ -712,6 +841,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
             onPageChange={handlePageChange}
             onMarkAsRead={handleMarkAsRead}
             onDeleteEmail={handleDeleteEmail}
+            onToggleStar={handleToggleStar}
+            sortMode={sortMode}
+            onSortChange={handleSortChange}
           />
           {!isComposeOpen && (
             <ReadingPane

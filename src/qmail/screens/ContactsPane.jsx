@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { UserPlus, Search, Trash2, RefreshCw, Users, TrendingUp } from "lucide-react";
+import { UserPlus, Search, Trash2, RefreshCw, Users, TrendingUp, Globe } from "lucide-react";
 import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
-import { getPopularContacts, getContacts } from "../../api/qmailApiServices";
+import { avatarColorFromString } from "./avatarColor";
+import { getPopularContacts, getContacts, addContact, deleteContact } from "../../api/qmailApiServices";
 
 const ContactsPane = () => {
   const [contacts, setContacts] = useState([]);
@@ -37,7 +38,8 @@ useEffect(() => {
   }, 300);
 
   return () => clearTimeout(debounceTimer);
-}, [searchTerm]);
+  // BUG-23 FIX: Added currentMode to dependency array
+}, [searchTerm, currentMode]);
 
 const loadContacts = async () => {
   // Never show loader when list is empty OR when searching
@@ -57,6 +59,7 @@ const loadContacts = async () => {
         email: contact.autoAddress,
         status: "none",
         description: contact.description,
+        source: "user",
       }));
       setContacts(transformedContacts);
     } else {
@@ -92,6 +95,7 @@ const loadContacts = async () => {
         description: contact.description,
         popularity: contact.popularity,
         contactCount: contact.contactCount,
+        source: "drd",
       }));
       setContacts(transformedContacts);
     } else {
@@ -116,26 +120,44 @@ const loadContacts = async () => {
     return "none";
   };
 
-  const handleAddContact = (newContact) => {
-    // Add new contact to local state
-    setContacts((prevContacts) => [
-      ...prevContacts,
-      {
-        ...newContact,
-        id: Date.now(),
-        status: "none",
-        popularity: 0,
-        contactCount: 0,
-      },
-    ]);
+  // BUG-14 FIX: Persist contacts to backend, then refresh from server
+  const handleAddContact = async (newContact) => {
+    try {
+      // Parse the name into first/last for the backend
+      const nameParts = (newContact.name || "").trim().split(" ");
+      const firstName = nameParts[0] || "";
+      const lastName = nameParts.slice(1).join(" ") || "";
+
+      const result = await addContact({
+        serial_number: newContact.serial_number || "0",
+        first_name: firstName,
+        last_name: lastName,
+        description: newContact.email || "",
+      });
+
+      if (result.success) {
+        await loadContacts(); // Refresh from server
+      } else {
+        setError(`Failed to add contact: ${result.error}`);
+      }
+    } catch (err) {
+      setError(`Error adding contact: ${err.message}`);
+    }
     setIsAddContactOpen(false);
   };
 
-  const handleDeleteContact = (contactId) => {
+  const handleDeleteContact = async (contactId) => {
     if (window.confirm("Are you sure you want to delete this contact?")) {
-      setContacts((prevContacts) =>
-        prevContacts.filter((c) => c.id !== contactId)
-      );
+      try {
+        const result = await deleteContact(contactId);
+        if (result.success) {
+          await loadContacts(); // Refresh from server
+        } else {
+          setError(`Failed to delete contact: ${result.error}`);
+        }
+      } catch (err) {
+        setError(`Error deleting contact: ${err.message}`);
+      }
     }
   };
 
@@ -236,12 +258,20 @@ const loadContacts = async () => {
         {error && (
           <div className="error-message">
             <p>Error loading contacts: {error}</p>
-            <button
-              className="retry-button secondary"
-              onClick={handleRefresh}
-            >
-              Retry
-            </button>
+            <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+              <button
+                className="retry-button secondary"
+                onClick={handleRefresh}
+              >
+                Retry
+              </button>
+              <button
+                className="retry-button secondary"
+                onClick={() => setError(null)}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 
@@ -291,12 +321,24 @@ const loadContacts = async () => {
                 </div>
               )}
               {contacts.map((contact) => (
-                <div key={contact.id} className="contact-item">
-                  <div className={`contact-avatar status-${contact.status}`}>
+                <div key={contact.id} className={`contact-item ${contact.source === "drd" ? "contact-drd" : "contact-user"}`}>
+                  <div
+                    className={`contact-avatar status-${contact.status}`}
+                    style={{ backgroundColor: avatarColorFromString(contact.email).bg }}
+                  >
                     <span>{contact.name.charAt(0).toUpperCase()}</span>
                   </div>
                   <div className="contact-details">
-                    <div className="contact-name">{contact.name}</div>
+                    <div className="contact-name-row">
+                      <span className="contact-name">{contact.name}</span>
+                      <span className={`contact-source-badge ${contact.source === "drd" ? "badge-drd" : "badge-user"}`}>
+                        {contact.source === "drd" ? (
+                          <><Globe size={10} /> DRD</>
+                        ) : (
+                          <><Users size={10} /> My Contact</>
+                        )}
+                      </span>
+                    </div>
                     <div className="contact-email">{contact.email}</div>
                     {contact.description && (
                       <div className="contact-description">
@@ -310,13 +352,15 @@ const loadContacts = async () => {
                       </div>
                     )}
                   </div>
-                  <button
-                    className="contact-action-btn danger"
-                    onClick={() => handleDeleteContact(contact.id)}
-                    title="Delete contact"
-                  >
-                    <Trash2 size={16} color="white" />
-                  </button>
+                  {contact.source === "user" && (
+                    <button
+                      className="contact-action-btn danger"
+                      onClick={() => handleDeleteContact(contact.id)}
+                      title="Delete contact"
+                    >
+                      <Trash2 size={16} color="white" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

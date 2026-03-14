@@ -47,11 +47,9 @@ const LockerUploadTab = () => {
     setStatusMessage(`New locker key generated: ${newKey}`);
     showInfo(`Generated new locker key: ${newKey}`);
     
-    // Clear status message after 3 seconds
+    // BUG-13 FIX: Use functional updater to avoid stale closure
     setTimeout(() => {
-      if (statusMessage.includes('generated')) {
-        setStatusMessage('');
-      }
+      setStatusMessage((prev) => prev.includes('generated') ? '' : prev);
       setIsGeneratingKey(false);
     }, 3000);
   };
