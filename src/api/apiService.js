@@ -5,19 +5,56 @@
 const API_PORT = import.meta.env.VITE_API_PORT || '8080';
 const API_BASE_URL = `http://localhost:${API_PORT}/api`;
 
+const extractApiErrorMessage = (data, fallback) => {
+  if (!data || typeof data !== 'object') {
+    return fallback;
+  }
+
+  if (typeof data.message === 'string' && data.message.trim()) {
+    return data.message;
+  }
+
+  if (typeof data.detail === 'string' && data.detail.trim()) {
+    return data.detail;
+  }
+
+  if (typeof data.details === 'string' && data.details.trim()) {
+    return data.details;
+  }
+
+  if (typeof data.error === 'string' && data.error.trim()) {
+    return data.error;
+  }
+
+  return fallback;
+};
+
 /**
  * A helper function to handle fetch responses.
  * It checks for network errors and non-ok responses.
  * @param {Response} response - The fetch Response object
  */
 const handleResponse = async (response) => {
-  if (!response.ok) {
-    // Handle HTTP errors (e.g., 404, 500)
-    throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+  let data = null;
+
+  try {
+    data = await response.json();
+  } catch (jsonError) {
+    if (!response.ok) {
+      throw new Error(`Server responded with ${response.status} ${response.statusText}`);
+    }
+    return null;
   }
-  
-  // Get the JSON response from the server
-  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      extractApiErrorMessage(
+        data,
+        `Server responded with ${response.status} ${response.statusText}`
+      )
+    );
+  }
+
   return data;
 };
 
@@ -361,10 +398,7 @@ export const createWallet = async (walletName, walletPath = null) => {
       throw new Error('Wallet name cannot be empty');
     }
 
-    // URL encode the wallet name to handle special characters
-    const encodedWalletName = encodeURIComponent(walletName.trim());
-    
-   const response = await fetch(`${API_BASE_URL}/wallets/create?wallet_path=${encodeURIComponent(normalizePath((walletPath || 'Data/Wallets') + '/' + walletName.trim(), false))}`);
+    const response = await fetch(`${API_BASE_URL}/wallets/create?wallet_path=${encodeURIComponent(normalizePath((walletPath || 'Data/Wallets') + '/' + walletName.trim(), false))}`);
     const data = await handleResponse(response);
     
     console.log('Data received from /wallets/create:', data);
@@ -828,7 +862,7 @@ export const pollTaskUntilComplete = async (taskId, pollInterval = 1000, onProgr
       }
 
       // Check if task is complete
-      if (taskData.status === 'success') {
+      if (taskData.status === 'success' || taskData.status === 'completed') {
         console.log('Task completed successfully:', taskData);
         return { success: true, data: taskData };
       } else if (taskData.status === 'error' || taskData.status === 'failed' ||
@@ -890,13 +924,7 @@ export const exportCloudCoins = async (amount, destination = 'Export', walletPat
 
     console.log('Export response status:', response.status, response.statusText);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Export response error:', errorText);
-      throw new Error(`Server responded with ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
+    const data = await handleResponse(response);
     console.log('Export response data:', data);
 
     // API-FIX: Export is synchronous — backend returns { status, command, files_created, coins_exported, value_exported, files[] }
@@ -917,7 +945,7 @@ export const exportCloudCoins = async (amount, destination = 'Export', walletPat
         }
       };
     } else {
-      throw new Error(data.error || data.message || 'Export operation failed');
+      throw new Error(extractApiErrorMessage(data, 'Export operation failed'));
     }
 
   } catch (error) {
@@ -1436,13 +1464,7 @@ export const downloadFromLocker = async (lockerKey, walletPath = "") => {
 
     console.log("Locker download response status:", response.status, response.statusText);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Locker download response error:", errorText);
-      throw new Error(`Server responded with ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
+    const data = await handleResponse(response);
     console.log("Locker download response data:", data);
 
     // API-FIX: Response is synchronous — backend returns { status, operation, coins_found, coins_saved, total_value, wallet_path, locker_key, task_id, message }
@@ -1464,7 +1486,7 @@ export const downloadFromLocker = async (lockerKey, walletPath = "") => {
         }
       };
     } else {
-      throw new Error(data.error || data.message || "Locker download operation failed");
+      throw new Error(extractApiErrorMessage(data, "Locker download operation failed"));
     }
 
   } catch (error) {
@@ -1520,13 +1542,7 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
 
     console.log("Locker upload response status:", response.status, response.statusText);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Locker upload response error:", errorText);
-      throw new Error(`Server responded with ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
+    const data = await handleResponse(response);
     console.log("Locker upload response data:", data);
 
     // API-FIX: Response is synchronous — backend returns { status, operation, amount_uploaded, coins_uploaded, locker_key, message, task_id }
@@ -1547,7 +1563,7 @@ export const uploadToLocker = async (lockerKey, amount, walletPath = "") => {
         }
       };
     } else {
-      throw new Error(data.error || data.message || "Locker upload operation failed");
+      throw new Error(extractApiErrorMessage(data, "Locker upload operation failed"));
     }
 
   } catch (error) {

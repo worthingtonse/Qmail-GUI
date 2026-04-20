@@ -13,107 +13,52 @@ function log(msg) {
   process.stdout.write(`[ELECTRON] ${msg}\n`);
 }
 
-function setupBackendData(backendDir) {
-  const dataDir = path.join(backendDir, 'Data');
-  const walletsDir = path.join(dataDir, 'Wallets');
-  const lockersDir = path.join(dataDir, 'lockers');
-  const attachmentsDir = path.join(dataDir, 'attachments');
-  
-  log('Setting up Data directories...');
-  
-  try {
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-      log('Created: Data/');
-    }
-    
-    if (!fs.existsSync(walletsDir)) {
-      fs.mkdirSync(walletsDir, { recursive: true });
-      log('Created: Data/Wallets/');
-    }
-    
-    if (!fs.existsSync(lockersDir)) {
-      fs.mkdirSync(lockersDir, { recursive: true });
-      log('Created: Data/lockers/');
-    }
-    
-    if (!fs.existsSync(attachmentsDir)) {
-      fs.mkdirSync(attachmentsDir, { recursive: true });
-      log('Created: Data/attachments/');
-    }
-    
-    const beaconPath = path.join(dataDir, 'beacon_state.json');
-    if (!fs.existsSync(beaconPath)) {
-      fs.writeFileSync(beaconPath, '{}');
-      log('Created: beacon_state.json');
-    }
-    
-    const logPath = path.join(dataDir, 'mail.mlog');
-    if (!fs.existsSync(logPath)) {
-      fs.writeFileSync(logPath, '');
-      log('Created: mail.mlog');
-    }
-    
-    log('Data setup complete');
-    return true;
-  } catch (error) {
-    log('Error setting up Data: ' + error.message);
-    return false;
-  }
-}
+// core.exe creates its own Client_Data/ directory next to itself — no setup needed
 
 function startBackend() {
   log('Starting backend...');
-  
+
   let backendDir, backendPath;
-  
+
   if (isDev) {
     backendDir = path.join(__dirname, 'backend');
-    backendPath = path.join(backendDir, 'qmail-backend.exe');
+    backendPath = path.join(backendDir, 'core.exe');
   } else {
     backendDir = path.join(process.resourcesPath, 'backend');
-    backendPath = path.join(backendDir, 'qmail-backend.exe');
+    backendPath = path.join(backendDir, 'core.exe');
   }
-  
+
   log('Backend dir: ' + backendDir);
   log('Backend path: ' + backendPath);
-  
+
   if (!fs.existsSync(backendPath)) {
-    log('ERROR: Backend not found!');
+    log('ERROR: Backend not found at ' + backendPath);
     return;
   }
-  
-  const configPath = path.join(backendDir, 'qmail.toml');
-  log('Config exists: ' + fs.existsSync(configPath));
-  
-  if (!setupBackendData(backendDir)) {
-    log('ERROR: Failed to setup Data folders');
-    return;
-  }
-  
+
   try {
-    backendProcess = spawn(backendPath, [], {
+    backendProcess = spawn(backendPath, ['-port', '8080'], {
       cwd: backendDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
       windowsHide: true
     });
-    
+
     log('Backend started PID: ' + backendProcess.pid);
-    
+
     backendProcess.stdout.on('data', (data) => {
       log('BACKEND: ' + data.toString().trim());
     });
-    
+
     backendProcess.stderr.on('data', (data) => {
       log('ERR: ' + data.toString().trim());
     });
-    
+
     backendProcess.on('exit', (code) => {
       log('Backend exit: ' + code);
       backendProcess = null;
     });
-    
+
   } catch (error) {
     log('Exception: ' + error.message);
   }

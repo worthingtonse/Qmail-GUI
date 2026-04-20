@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { pollTaskUntilComplete, uploadToLocker, generateLockerCode, getWalletBalance } from '../../../api/apiService';
+import { uploadToLocker, generateLockerCode, getWalletBalance } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
 import './LockerTab.css';
 
@@ -118,47 +118,24 @@ const LockerUploadTab = () => {
         throw new Error(apiError);
       }
 
-      // Use API message if available
-      const apiMessage = uploadResult.message || 
-                        uploadResult.data?.message || 
-                        `Upload started - Task ID: ${uploadResult.data.task_id}`;
-      setStatusMessage(apiMessage);
-      console.log('Upload started:', uploadResult);
-
-      // Poll for task completion
-      const pollResult = await pollTaskUntilComplete(
-        uploadResult.data.task_id,
-        1000,
-        (taskData) => {
-          // Update progress during polling
-          setProgress(taskData.progress || 0);
-          // Use API status message if available
-          const pollMessage = taskData.message || taskData.status || 'Processing...';
-          setStatusMessage(pollMessage);
-          console.log('Task progress:', taskData);
-        }
-      );
-
-      if (!pollResult.success) {
-        const pollError = pollResult.error || pollResult.message || 'Upload polling failed';
-        showError(pollError);
-        throw new Error(pollError);
-      }
-
-      // Task completed successfully
       setProgress(100);
-      
-      // Use API completion message
-      const completionMessage = pollResult.message || 
-                               pollResult.data?.message || 
-                               'Upload completed successfully!';
+      const completionMessage =
+        uploadResult.data?.message || 'Upload completed successfully!';
+      const normalizedResult = {
+        data: {
+          total_processed: uploadResult.data?.coins_uploaded,
+          total_value: uploadResult.data?.amount_uploaded,
+          receipt_id: uploadResult.data?.task_id || null,
+          locker_key: uploadResult.data?.locker_key,
+        },
+      };
+
       setStatusMessage(completionMessage);
-      setTaskResult(pollResult.data);
+      setTaskResult(normalizedResult);
       setShowResults(true);
 
-      // Show success notification with API message
-      if (pollResult.data?.data?.total_processed !== undefined) {
-        const totalUploaded = pollResult.data.data.total_processed;
+      if (normalizedResult.data.total_processed !== undefined) {
+        const totalUploaded = normalizedResult.data.total_processed;
         showSuccess(`${completionMessage} - Uploaded ${totalUploaded} coins successfully!`);
       } else {
         showSuccess(completionMessage);

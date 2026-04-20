@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { pollTaskUntilComplete, downloadFromLocker } from '../../../api/apiService';
+import { downloadFromLocker } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
 import './LockerTab.css';
 
@@ -50,47 +50,31 @@ const LockerDownloadTab = () => {
         throw new Error(apiError);
       }
 
-      // Use API message if available
-      const apiMessage = downloadResult.message || 
-                        downloadResult.data?.message || 
-                        `Download started - Task ID: ${downloadResult.data.task_id}`;
-      setStatusMessage(apiMessage);
-      console.log('Download started:', downloadResult);
-
-      // Poll for task completion
-      const pollResult = await pollTaskUntilComplete(
-        downloadResult.data.task_id,
-        1000,
-        (taskData) => {
-          // Update progress during polling
-          setProgress(taskData.progress || 0);
-          // Use API status message if available
-          const pollMessage = taskData.message || taskData.status || 'Processing...';
-          setStatusMessage(pollMessage);
-          console.log('Task progress:', taskData);
-        }
-      );
-
-      if (!pollResult.success) {
-        const pollError = pollResult.error || pollResult.message || 'Download polling failed';
-        showError(pollError);
-        throw new Error(pollError);
-      }
-
-      // Task completed successfully
       setProgress(100);
-      
-      // Use API completion message
-      const completionMessage = pollResult.message || 
-                               pollResult.data?.message || 
-                               'Download completed successfully!';
+      const completionMessage =
+        downloadResult.data?.message || 'Download completed successfully!';
+      const normalizedResult = {
+        data: {
+          total_processed: downloadResult.data?.coins_saved,
+          total_value: downloadResult.data?.total_value,
+          pown_results: {
+            bank: downloadResult.data?.graded_to_bank || 0,
+            fracked: downloadResult.data?.graded_to_fracked || 0,
+            counterfeit: downloadResult.data?.graded_to_counterfeit || 0,
+            limbo: 0,
+          },
+          receipt_id: downloadResult.data?.task_id || null,
+          coins_found: downloadResult.data?.coins_found,
+          raida_success: downloadResult.data?.raida_success,
+        },
+      };
+
       setStatusMessage(completionMessage);
-      setTaskResult(pollResult.data);
+      setTaskResult(normalizedResult);
       setShowResults(true);
 
-      // Show success notification with API message
-      if (pollResult.data?.data?.total_processed !== undefined) {
-        const totalDownloaded = pollResult.data.data.total_processed;
+      if (normalizedResult.data.total_processed !== undefined) {
+        const totalDownloaded = normalizedResult.data.total_processed;
         showSuccess(`${completionMessage} - Downloaded ${totalDownloaded} coins successfully!`);
       } else {
         showSuccess(completionMessage);

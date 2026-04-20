@@ -36,12 +36,8 @@
         "to": "eff_large_wordlist.txt"
       },
       {
-        "from": "backend/qmail-backend.exe",
-        "to": "backend/qmail-backend.exe"
-      },
-      {
-        "from": "backend/config",
-        "to": "backend/config"
+        "from": "backend/core.exe",
+        "to": "backend/core.exe"
       }
     ],
     "portable": {

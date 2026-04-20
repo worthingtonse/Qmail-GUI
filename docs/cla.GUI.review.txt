@@ -1,0 +1,225 @@
+QMail GUI Review - Stubs, Missing APIs, and Phase 2 Candidates
+================================================================
+Reviewer: Claude Opus 4.6
+Date: 2026-03-25
+Codebase: D:\Code\ByLanguage\JavaScript\Qmail-GUI\
+
+Tech Stack: React 18 + Electron 25 + Vite
+Backend: Embedded core.exe REST API on localhost:8080
+
+
+========================================================================
+1. STUB COMPONENTS (UI exists, no backend logic)
+========================================================================
+
+1.1  PayoutTab.jsx  [COMPLETE STUB]
+     - Three buttons: "Transfer to Bank", "Send to Another Wallet",
+       "Export CloudCoins"
+     - All three do nothing but console.log()
+     - Lines 5, 10, 15 have TODO comments
+     - No API calls, no endpoint exists
+     - Likely Phase 2 feature for wallet-to-wallet transfers
+
+1.2  SettingsTab.jsx - Change Password  [STUB]
+     - "Change Password" button visible in UI
+     - Line 40: "TODO: Implement change password logic"
+     - Only calls console.log('Change password clicked')
+     - No /api/settings/change-password endpoint exists
+
+1.3  SettingsTab.jsx - Preferences  [LOCAL STATE ONLY]
+     - "Auto-backup" checkbox (line 84)
+     - "Notification preferences" dropdown (line 94)
+     - Both are local React state, never saved to backend
+     - No API to persist user preferences exists
+
+1.4  AccountPane.jsx - Settings Toggles  [LOCAL STATE ONLY]
+     - Notifications, Dark Mode, Auto-Sync, Biometric toggles
+     - handleSettingToggle() just flips local state (line 257-262)
+     - No API saves these preferences
+
+1.5  AccountPane.jsx - Security Actions  [STUB]
+     - handleSecurityAction() only calls console.log (line 264-266)
+     - No backend security management endpoints
+
+
+========================================================================
+2. DISABLED / COMMENTED-OUT FEATURES
+========================================================================
+
+2.1  TransactionsTab  [HIDDEN FROM MAIN NAV]
+     - File: wallet/components/tabs/TransactionsTab.jsx (186 lines)
+     - Fully implemented with transaction list, receipts, pagination
+     - Commented out in MainDashboard.jsx line 12 and line 108-109
+     - Still accessible via StoreTab wallet card click (functional)
+     - Reason for hiding unclear -- possibly UI space issue
+
+2.2  AccountPane - Health Status API  [REMOVED, HARDCODED]
+     - getHealthStatus() import removed (line 27)
+     - Server health initialized with static data (line 41-47):
+       { status: "healthy", version: "1.0.0" }
+     - loadHealthStatus function entirely removed (line 138)
+     - Likely removed because /api/qmail/health endpoint was dropped
+
+2.3  QMailDashboard - checkForNewMail  [COMMENTED OUT]
+     - Lines 222-235: checkForNewMail() function commented out
+     - Line 178: await checkForNewMail() call commented out
+     - Ping-based new mail detection disabled
+     - Notification polling (getMailNotifications) still works as replacement
+
+2.4  qmailApiServices.js - Old API Functions  [COMMENTED OUT]
+     - getHealthStatus() (lines 62-68) -- old health check
+     - pollTaskStatus() (lines 510-543) -- old polling helper
+     - downloadLockerCoins() (lines 1177-1217) -- old locker download
+     - createMailbox() (lines 1220-1256) -- mailbox creation after provisioning
+
+2.5  USBCheckScreen.jsx - Recheck Button  [COMMENTED OUT]
+     - Lines 81-87: Recheck USB button commented out
+     - Development bypass forces USB check to true (lines 17-18)
+
+
+========================================================================
+3. API CALLS TO ENDPOINTS THAT DON'T EXIST (or may not exist)
+========================================================================
+
+3.1  GET /api/qmail/sync  (syncData in qmailApiServices.js)
+     - Called from AccountPane to sync data across wallets
+     - Unclear if this endpoint exists in rest_core
+     - May need verification
+
+3.2  GET /api/wallets/active/balance  (getActiveWalletBalance in apiService.js)
+     - Referenced but has "API-FIX" comment about migration
+     - May have been replaced by /api/wallets/balance
+
+3.3  GET /api/system/dropdown  (getDropdownData, saveExportLocation)
+     - Used for export location history in ExportTab
+     - Non-standard pattern -- may be a file-based pseudo-API
+
+3.4  GET /api/coins/prepare-change  (prepareChange in qmailApiServices.js)
+     - Called to prepare change before sending
+     - Should verify this exists in rest_core
+
+
+========================================================================
+4. FEATURES WITH NO GUI (Backend exists, no UI)
+========================================================================
+
+4.1  Locker Pool Status  [NEW - NO GUI]
+     - Backend: GET /api/qmail/locker-pool (just implemented)
+     - Returns: upload_available, inbox_fee_available, wallet_balance,
+       low_balance
+     - No GUI component displays pool status
+     - No warning shown when low_balance_warning=true
+     - Phase 2 candidate: Add pool status indicator to ComposeModal
+       or AccountPane
+
+4.2  Send Response Warnings  [NEW - NOT CONSUMED BY GUI]
+     - Backend returns used_sync_fallback and low_balance_warning
+       in send response JSON
+     - GUI does not read or display these fields
+     - User won't know if their sends are slow (sync fallback) or
+       if they're running low on coins
+     - Phase 2: Show warning toast after send if low_balance_warning
+
+4.3  Inbox Fee Lookup  [NEW - NO GUI]
+     - Backend: GET /api/qmail/inbox-fee?sn=<serial_number>
+     - Created for beacon server use
+     - GUI could show a contact's inbox fee in ContactsPane or
+       ComposeModal (e.g., "Sending to @alice costs 5 CC")
+     - Phase 2 candidate
+
+4.4  Payment Claim  [EXISTS IN BACKEND, NO GUI]
+     - Backend: GET /api/qmail/payment?email_id=<hex>
+     - Backend: POST /api/qmail/payment/claim?email_id=<hex>
+     - When user receives email with payment locker, they can
+       claim the coins
+     - No GUI button or flow exists to claim payment
+     - Phase 2 candidate: Add "Claim Payment" button in ReadingPane
+       when inboxFee > 0
+
+4.5  Inbox Fee Display  [DATA STORED, NOT SHOWN]
+     - inboxFee field is extracted from API responses:
+       qmailApiServices.js:175, QMailDashboard.jsx:458
+     - Stored in email objects but never rendered in ReadingPane
+       or EmailListItem
+     - Phase 2: Show fee badge on emails with payment
+
+4.6  Email Heal Identity  [API EXISTS, MINIMAL GUI]
+     - Backend: POST /api/qmail/heal-identity
+     - Called from qmailApiServices.js healWallet()
+     - No prominent UI trigger -- may only be in WalletSetupScreen
+
+4.7  Prepare Change  [API CALL EXISTS, UNCLEAR INTEGRATION]
+     - prepareChange() in qmailApiServices.js
+     - Calls GET /api/coins/prepare-change
+     - Used in ComposeModal send flow but actual integration unclear
+
+
+========================================================================
+5. MISSING FEATURES / PHASE 2 CANDIDATES
+========================================================================
+
+5.1  Attachment Upload in Compose
+     - ComposeModal sends attachments: [] (hardcoded empty, line 482)
+     - Comment on line 403: "No attachments support yet"
+     - Backend send2.c supports attachments (file_type 0x0A+)
+     - Phase 2: Add file picker to ComposeModal, send as multipart
+
+5.2  Contact Inbox Fee Display
+     - contacts have inbox_fee field in database
+     - ContactsPane and AddContactModal don't show fees
+     - Phase 2: Show fee next to contact name, warn before send
+
+5.3  Wallet-to-Wallet Transfer
+     - PayoutTab has buttons but no implementation
+     - Backend may need new endpoints or existing export could suffice
+     - Phase 2: Implement transfer flow
+
+5.4  Per-Email Payment Display and Claim
+     - Received emails may have funded locker codes as payment
+     - No UI to see payment amount or claim coins
+     - Phase 2: ReadingPane "Claim X CC Payment" button
+
+5.5  Locker Pool Management UI
+     - Pool runs silently in background
+     - No visibility into pool health
+     - Phase 2: Dashboard widget or AccountPane section showing:
+       "Upload lockers: 42/50, Inbox fee lockers: 8/10"
+       with manual replenish button
+
+5.6  Low Balance Alert
+     - Backend can detect low balance during send
+     - No GUI toast/banner for low balance warning
+     - Phase 2: Persistent banner when balance < threshold
+
+
+========================================================================
+6. OBSERVATIONS
+========================================================================
+
+6.1  API Migration History
+     Many "API-FIX" comments show endpoints were recently migrated:
+     - /api/mail/* -> /api/qmail/*
+     - /api/wallets/active/balance -> /api/wallets/balance
+     - /api/task/status -> /api/system/tasks
+     Some old patterns may linger.
+
+6.2  Sound System
+     - soundService.js and useGlassSounds.js exist
+     - Glass click/tap sounds integrated into wallet MainDashboard
+     - Only one sound file: public/sounds/ding-80828.mp3
+     - Unclear if new mail notification sound is implemented
+
+6.3  Electron IPC vs REST
+     - Some operations use Electron IPC (file reads, USB check)
+     - Most use REST API calls to localhost:8080
+     - BUG-10 FIX shows migration from IPC to REST for some calls
+
+6.4  Error Handling Pattern
+     - Consistent {success, data, error} response structure
+     - handleResponse() in apiService.js for standard error handling
+     - Notification system (NotificationContext) for user-facing errors
+
+6.5  Async Task Polling
+     - Long operations return task_id, GUI polls via getTaskStatus()
+     - pollTaskUntilComplete() with configurable interval and callback
+     - Used for: send, import, export, locker operations, health checks

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd D:/Code/byLanguage/javascript/Qmail-GUI && npm run build 2>&1 | tail -20)",
+      "Bash(cd D:/Code/byLanguage/javascript/Qmail-GUI && npm install 2>&1 | tail -5)",
+      "Bash(cd D:/Code/byLanguage/javascript/Qmail-GUI && npm run build 2>&1 | tail -15)",
+      "Bash(ls -la \"D:\\\\Code\\\\ByLanguage\\\\C\\\\rest_core\\\\api_src\\\\\" 2>/dev/null || ls -la \"D:/Code/ByLanguage/C/rest_core/api_src/\" 2>/dev/null || find /d -name \"api_src\" -type d 2>/dev/null | head -5)",
+      "Bash(cd \"D:\\\\Code\\\\byLanguage\\\\javascript\\\\Qmail-GUI\" && node -c src/api/apiService.js 2>&1)",
+      "Bash(cd \"D:\\\\Code\\\\byLanguage\\\\javascript\\\\Qmail-GUI\" && node -c src/api/qmailApiServices.js 2>&1)",
+      "Bash(cd \"D:\\\\Code\\\\byLanguage\\\\javascript\\\\Qmail-GUI\" && npm run build 2>&1 | tail -10)",
+      "Bash(cd \"D:/Code/ByLanguage/C/rest_core/build\" && cmake --build . --config Release 2>&1 | tail -10)"
+    ]
+  }
+}

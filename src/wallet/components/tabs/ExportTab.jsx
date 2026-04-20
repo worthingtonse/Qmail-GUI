@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, Wrench, X, Info } from 'lucide-react';
-import { exportCloudCoins, pollTaskUntilComplete, getWalletBalance, fixFrackedCoins, getDropdownData, saveExportLocation, listWallets } from '../../../api/apiService';
+import { exportCloudCoins, getWalletBalance, fixFrackedCoins, getDropdownData, saveExportLocation, listWallets } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
 import './ExportTab.css';
 
@@ -259,47 +259,29 @@ const ExportTab = () => {
         throw new Error(apiError);
       }
 
-      // Use API message if available
-      const apiMessage = exportResult.message || 
-                        exportResult.data?.message || 
-                        `Export started - Task ID: ${exportResult.data.task_id}`;
-      setStatusMessage(apiMessage);
-      console.log('Export started:', exportResult);
-
-      // Step 2: Poll for task completion
-      const pollResult = await pollTaskUntilComplete(
-        exportResult.data.task_id,
-        1000,
-        (taskData) => {
-          // Update progress during polling
-          setProgress(taskData.progress || 0);
-          // Use API status message if available
-          const pollMessage = taskData.message || taskData.status || 'Processing...';
-          setStatusMessage(pollMessage);
-          console.log('Task progress:', taskData);
-        }
-      );
-
-      if (!pollResult.success) {
-        const pollError = pollResult.error || pollResult.message || 'Export polling failed';
-        showError(pollError);
-        throw new Error(pollError);
-      }
-
-      // Task completed successfully
       setProgress(100);
-      
-      // Use API completion message
-      const completionMessage = pollResult.message || 
-                               pollResult.data?.message || 
-                               'Export completed successfully!';
+      const completionMessage =
+        exportResult.data?.message || 'Export completed successfully!';
+      const normalizedResult = {
+        data: {
+          amount: exportResult.data?.amount,
+          exported: exportResult.data?.coins_exported,
+          exported_value: exportResult.data?.amount,
+          filename: exportResult.data?.files?.[0] || null,
+          file_path: exportResult.data?.files?.[0] || null,
+          destination: exportResult.data?.destination,
+          transaction_id: exportResult.data?.task_id || null,
+          files_created: exportResult.data?.files_created,
+          files: exportResult.data?.files || [],
+        },
+      };
+
       setStatusMessage(completionMessage);
-      setTaskResult(pollResult.data);
+      setTaskResult(normalizedResult);
       setShowResults(true);
 
-      // Show success notification with API message
-      if (pollResult.data?.data?.exported !== undefined) {
-        const exported = pollResult.data.data.exported;
+      if (normalizedResult.data.exported !== undefined) {
+        const exported = normalizedResult.data.exported;
         showSuccess(`${completionMessage} - Exported ${exported} coins successfully!`);
       } else {
         showSuccess(completionMessage);
