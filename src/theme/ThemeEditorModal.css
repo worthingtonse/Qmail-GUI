@@ -236,9 +236,22 @@
   background: var(--tertiary-bg);
 }
 
+.theme-editor__footer-left,
 .theme-editor__footer-right {
   display: flex;
   gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.theme-editor__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .theme-editor__button {

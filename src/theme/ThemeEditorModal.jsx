@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useMemo, useState } from "react";
-import { X, RotateCcw, Save } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { X, RotateCcw, Save, Download, Upload } from "lucide-react";
+import { validateThemePayload } from "../api/themeService";
 import { STANDARD_THEMES } from "./themeContext";
 import { useTheme } from "./useTheme";
 import "./ThemeEditorModal.css";
@@ -73,6 +74,48 @@ function readDraftFromDocument() {
   return draft;
 }
 
+// Build a draft from a parsed theme payload's tokens map. Missing
+// editable tokens fall back to the current document value (so the
+// editor still has a sensible starting point per control even if
+// the imported file only overrode a subset).
+function draftFromTokens(tokensMap) {
+  const draft = {};
+  for (const token of EDITABLE) {
+    const raw = tokensMap?.[token.key];
+    if (raw === undefined) {
+      draft[token.key] = normaliseForInput(
+        token,
+        readCurrentValue(token.key, token.fallback)
+      );
+    } else {
+      draft[token.key] = normaliseForInput(token, String(raw));
+    }
+  }
+  return draft;
+}
+
+function safeFilename(name) {
+  return (name || "qmail-theme")
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "qmail-theme";
+}
+
+function triggerDownload(filename, jsonText) {
+  if (typeof document === "undefined") return;
+  const blob = new Blob([jsonText], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Defer revoke so Chromium has time to start the download.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function draftToTokens(draft) {
   const tokens = {};
   for (const token of EDITABLE) {
@@ -125,6 +168,7 @@ export function ThemeEditorModal({ open, onClose }) {
     large_print: Boolean(customTheme?.a11y?.large_print),
   });
   const [error, setError] = useState(null);
+  const fileInputRef = useRef(null);
 
   // When the modal re-opens, re-read the current document state so the
   // editor matches what the user is looking at. (Closing + reopening is
@@ -169,6 +213,61 @@ export function ThemeEditorModal({ open, onClose }) {
       return;
     }
     onClose();
+  };
+
+  const handleExport = () => {
+    setError(null);
+    const payload = buildThemePayload({ draft, base, a11y, name });
+    const check = validateThemePayload(payload);
+    if (!check.valid) {
+      setError(`Cannot export: ${check.error}`);
+      return;
+    }
+    triggerDownload(
+      `qmail-theme-${safeFilename(name)}.json`,
+      JSON.stringify(payload, null, 2)
+    );
+  };
+
+  const handleImportClick = () => {
+    setError(null);
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    // Reset the input so the same file can be re-imported after a fix.
+    event.target.value = "";
+    if (!file) return;
+
+    setError(null);
+
+    try {
+      const text = await file.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        setError(`Imported file is not valid JSON: ${parseErr.message}`);
+        return;
+      }
+      const check = validateThemePayload(parsed);
+      if (!check.valid) {
+        setError(`Imported theme failed validation: ${check.error}`);
+        return;
+      }
+      setDraft(draftFromTokens(parsed.tokens));
+      setBase(parsed.base);
+      if (typeof parsed.name === "string") {
+        setName(parsed.name.slice(0, 64));
+      }
+      setA11y({
+        reduced_motion: Boolean(parsed.a11y?.reduced_motion),
+        large_print: Boolean(parsed.a11y?.large_print),
+      });
+    } catch (err) {
+      setError(`Import failed: ${err.message}`);
+    }
   };
 
   const handleReset = async () => {
@@ -338,16 +437,47 @@ export function ThemeEditorModal({ open, onClose }) {
         </div>
 
         <footer className="theme-editor__footer">
-          <button
-            type="button"
-            className="theme-editor__button theme-editor__button--ghost"
-            onClick={handleReset}
-            disabled={isSaving || isClearing}
-            title="Delete the saved custom theme"
-          >
-            <RotateCcw size={16} aria-hidden />
-            Reset
-          </button>
+          <div className="theme-editor__footer-left">
+            <button
+              type="button"
+              className="theme-editor__button theme-editor__button--ghost"
+              onClick={handleImportClick}
+              disabled={isSaving || isClearing}
+              title="Load a theme from a .json file"
+            >
+              <Upload size={16} aria-hidden />
+              Import
+            </button>
+            <button
+              type="button"
+              className="theme-editor__button theme-editor__button--ghost"
+              onClick={handleExport}
+              disabled={isSaving || isClearing}
+              title="Download this theme as a .json file"
+            >
+              <Download size={16} aria-hidden />
+              Export
+            </button>
+            <button
+              type="button"
+              className="theme-editor__button theme-editor__button--ghost"
+              onClick={handleReset}
+              disabled={isSaving || isClearing}
+              title="Delete the saved custom theme"
+            >
+              <RotateCcw size={16} aria-hidden />
+              Reset
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="theme-editor__file-input"
+              onChange={handleImportFile}
+              tabIndex={-1}
+              aria-hidden
+            />
+          </div>
           <div className="theme-editor__footer-right">
             <button
               type="button"
