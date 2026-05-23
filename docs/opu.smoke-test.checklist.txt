@@ -1,0 +1,469 @@
+QMail-GUI smoke-test checklists (hybrid auto + manual)
+=======================================================
+From: Claude Opus 4.7 (next-session executor)
+Date: 2026-05-23
+Based on: docs/opu.smoke-test.handoff.txt (this doc's prerequisites,
+          rationale, and what-to-do-on-failure all live there)
+
+How this is split
+-----------------
+The handoff asked for one manual checklist. After confirming with Sean
+the split is:
+
+  AUTO  Claude (this session) runs against the live backends via
+        curl/HTTP — no UI involved. Verifies the C1<->C2 mail flow,
+        attachments, drafts persistence, contacts CRUD, search,
+        folder counts, RAIDA health, etc. Produces a results file.
+
+  MANUAL Sean walks the visual / UX items the handoff explicitly
+         called out as needing a human eye: toast-vs-modal routing,
+         italic preview weight, unified Refresh spinner sync,
+         hover states, etc. These cannot be verified by API alone
+         because they assert about what the React UI rendered.
+
+  KNOWN  Items listed in the handoff as "Known broken until backend
+         ticket" (CORE-A/E/F/H/J/K) are NOT in either checklist.
+         Don't re-test them. See handoff lines 378-396.
+         Additional known gaps surfaced by the parallel plans
+         (Gemini, GPT) — also do NOT file as bugs:
+           CORE-L  Draft recipient detail may be incomplete.
+           CORE-M  Attachment paths containing ',' or ';' are
+                   rejected by the GUI. Pick paths without them.
+           CORE-N  Draft attachment persistence may be incomplete.
+
+Diff vs parallel plans
+----------------------
+Gemini: docs/gemini.manual-gui-smoke-checklist.md
+GPT:    docs/gpt.manual-gui-smoke-checklist.md
+
+Adopted:
+  - CORE-L / CORE-M / CORE-N caveats (above) — Gemini surfaced
+    CORE-M, GPT surfaced CORE-L and CORE-N.
+  - Attachment variety in A3 (text + binary + spaces-in-filename)
+    — Gemini.
+  - Bidirectional attachment send, new step A3b — Gemini.
+  - To-field autocomplete visual check, M-Autocomplete — Gemini
+    & GPT both wanted it.
+  - Results-file template with Date / Tester / Build / portable
+    exe path — GPT. See A12 below.
+  - Server count sanity check ("25 servers or absent", not just
+    'a list') folded into M-Setup — GPT.
+
+Deliberately kept different:
+  - Hybrid split (Claude auto + Sean visual) instead of fully
+    manual. Sean confirmed this.
+  - Reuse existing E:\Client1\ and E:\Client2\ rig instead of
+    building a fresh dated rig under E:\QMail-Smoke\. The handoff
+    says the rig is already set up and funded; rebuilding is
+    busywork and risks bootstrap bugs unrelated to the smoke
+    test. Both Gemini and GPT proposed fresh rigs.
+  - FIX-NN / BUG-NN tags kept on every check so failures can be
+    filed against the specific shipped fix that regressed —
+    important context for a CSS-refactor regression hunt.
+  - Visual checks Gemini and GPT both omitted but the handoff
+    specifically called out are kept: toast-vs-modal routing
+    (BUG-43), Move-to dropdown content (BUG-40), Mark Unread
+    visibility rule (BUG-39), page-snap on sort change (FIX-38),
+    pending-decrypt weight (FIX-46), server card class colors
+    (FIX-45), advanced-options persistence (FIX-40), popular-
+    contact checkmark persistence (BUG-44), undo-toast 10s
+    expiration. These are the regression surface a CSS refactor
+    is most likely to hit, and the value of the smoke test is
+    exactly to catch them.
+  - Skipping GPT's "Stop Conditions" preamble — useful for a
+    human running blind, but Claude can just check at A0 and
+    fail-stop on the same conditions inline.
+  - Skipping GPT's optional dangerous-attachment / zero-byte /
+    oversize tests as out-of-scope for this regression pass.
+
+The MANUAL list assumes the AUTO list ran first and seeded state
+(messages in inboxes, contacts saved, a draft sitting in Drafts) —
+that lets the visual checks be done by clicking around existing data
+rather than re-creating it. Run AUTO first.
+
+
+===========================================================
+PART 1 — AUTO (Claude runs this; you don't need to do anything)
+===========================================================
+
+These steps must run top-to-bottom; later checks depend on earlier
+state. Setup at the very top.
+
+[A0] Preflight
+    - Confirm no stray core.exe is running (kill if any).
+    - Start E:\Client1\core.exe; wait for /raida/echo on :8081 to
+      respond with array_usable=true.
+    - Start E:\Client2\core.exe; wait for /raida/echo on :8082.
+    - GET /qmail/local/identity/get on both. Confirm:
+        :8081 -> SN 55076, address @chariot.pyramid.byte
+        :8082 -> SN 55077, address @chariot.harbor.byte
+    - GET /wallets/balance on both. Confirm total_value > 0 on each
+      (need funded coins to send). Fail-stop if either is zero.
+    - Stage extra attachment files in E:\Client1\ if missing
+      (filenames chosen to avoid the CORE-M ',' / ';' rejection):
+        qmail_test_attachment.txt        (already present, 2228 B)
+        qmail_test_attachment_binary.bin (write 256 bytes 0x00..0xFF)
+        qmail_test_attachment_spaces.txt (filename with spaces; small)
+      Skip creation if the files already exist with non-zero size.
+
+[A1] Health baseline
+    - /raida/echo on both: record total_available, total_error,
+      total_timeout. Expect >= 6 reachable per Setup verification.
+    - /qmail/local/status on both: confirm topology returns a server
+      list. Snapshot for the results file.
+
+[A2] C1 -> C2 plain send (covers FIX-01 backend half)
+    - POST /qmail/net/messages/upload_and_tell on :8081 with
+      to=@chariot.harbor.byte, subject="AUTO-A2 plain", body="hello".
+    - Poll /system/tasks for the returned task_id until status=done
+      or 30s timeout.
+    - On :8082, POST /qmail/net/beacon/ping then GET
+      /qmail/net/beacon/peek. Expect new_mail_count >= 1.
+    - GET /qmail/db/notifications/list on :8082; find the
+      file_guid for the AUTO-A2 send.
+    - POST /qmail/net/messages/download?file_guid=... on :8082;
+      wait for decrypt.
+    - GET /qmail/db/messages/list?folder=0 on :8082; find a row whose
+      subject is "AUTO-A2 plain" and body matches "hello". Record the
+      email_id as C2_AUTO_A2.
+
+[A3] C1 -> C2 with attachments (FIX-02 / FIX-19 backend half)
+    - POST upload_and_tell on :8081 with the same recipient,
+      subject="AUTO-A3 attach", body="see attached",
+      and three attachment_file_path[] entries:
+        E:\Client1\qmail_test_attachment.txt
+        E:\Client1\qmail_test_attachment_binary.bin
+        E:\Client1\qmail_test_attachment_spaces.txt
+      (Per Gemini's plan: testing one text, one binary, one
+      spaces-in-name. Adopted because attachment encoding is the
+      kind of thing that quietly breaks on edge inputs.)
+    - Repeat the beacon/notification/download dance on :8082.
+    - GET /qmail/db/messages/list to find the new email_id; call
+      /qmail/db/attachments/list?email_id=...; confirm all three
+      attachments are listed with the right filenames.
+    - GET each /qmail/db/attachments/get?email_id=...&attachment_id=N;
+      compare bytes to the local file. Pass only if all three match.
+
+[A3b] C2 -> C1 with attachment (bidirectional verification)
+    - On :8082, send to=@chariot.pyramid.byte, subject="AUTO-A3b
+      reverse attach", body="reverse direction",
+      attachment_file_path[]=<one small file copied to E:\Client2\
+      first, since :8082's core.exe reads from its own working
+      directory>.
+    - Beacon/download on :8081; confirm the attachment arrived and
+      bytes match. (Gemini-suggested addition: catches direction-
+      specific encoding bugs that a one-way send misses.)
+
+[A4] C2 -> C1 reply round-trip (covers Phase 2 "Reply" backend half
+     and proves the mutual flow)
+    - On :8082, send to=@chariot.pyramid.byte, subject="Re: AUTO-A2
+      plain", body="ack". (Claude isn't using the GUI's Reply
+      builder; just sending a fresh message with the right shape.)
+    - Beacon/download on :8081; confirm "Re: AUTO-A2 plain" appears
+      in C1's inbox. Record email_id as C1_AUTO_A4.
+
+[A5] Drafts CRUD (FIX-04 backend half; CORE-H not tested)
+    - POST /qmail/db/drafts/create on :8081 with subject="AUTO-A5
+      draft", body="wip", to=@chariot.harbor.byte.
+    - GET /qmail/db/drafts/list; confirm it appears.
+    - POST /qmail/db/drafts/update?email_id=... changing body to
+      "wip updated"; list again; confirm the update is visible.
+    - Leave the draft in place — MANUAL M-Drafts step will re-open
+      it and look at the field hydration.
+
+[A6] Mark read / unread (BUG-39 backend half)
+    - POST /qmail/db/messages/set-read?email_id=C2_AUTO_A2&is_read=true
+      on :8082. GET the message; confirm is_read=true.
+    - Same with is_read=false; confirm flipped back.
+
+[A7] Move to folder + trash + permanent delete
+    - On :8082, send a throwaway from :8081 first (subject "AUTO-A7
+      trashable") so we don't delete the A2 message.
+    - DELETE /qmail/db/messages/trash?email_id=... on the throwaway.
+    - GET /qmail/db/messages/list?folder=3 (trash); confirm it's
+      there.
+    - DELETE /qmail/db/messages/delete?email_id=...; list trash
+      again; confirm it's gone.
+
+[A8] Folder list + counts (FIX-47 backend half; iconName not tested
+     unless backend ships one)
+    - GET /qmail/db/folders/list on :8081. Expect at least
+      inbox/sent/drafts/trash/starred/archive (handoff says six).
+    - GET /qmail/db/folders/counts on :8081 and :8082. Sanity-check
+      that inbox unread count matches what /messages/list returns.
+
+[A9] Contacts CRUD (FIX-28 / FIX-29 / FIX-42 backend half)
+    - On :8081, POST /qmail/db/contacts/create for Client2's SN
+      (55077, first_name="Client", last_name="Two"). Confirm via
+      /qmail/db/contacts/list.
+    - GET /qmail/db/contacts/list-popular?limit=10; if it returns
+      anything, pick a non-Client2 entry and POST /create for it.
+    - DELETE the Client2 contact; confirm it's gone from list.
+    - Re-add Client2 (MANUAL M-Contacts re-uses this).
+
+[A10] Search (FIX-43 backend half; CORE-K excluded)
+    - GET /qmail/db/messages/search?query=AUTO on :8082. Expect at
+      least the AUTO-A2 and AUTO-A3 messages in results.
+    - GET ?query=zzznomatchzzz; expect count=0.
+
+[A11] Sign-out / sign-in (FIX-15 backend half)
+    - There's no explicit sign-out endpoint via REST — sign-out is
+      a GUI-state action. Skip auto verification; MANUAL handles it.
+
+[A12] Results write-up
+    - Tally pass/fail per step. For each fail, capture: which step,
+      HTTP status, response body excerpt, expected vs actual.
+    - Save as docs/opu.smoke-test.results-2026-05-23.txt per
+      handoff lines 414-418. File header (GPT-suggested template):
+
+        Date: 2026-05-23
+        Tester: Claude Opus 4.7 (auto) + Sean (manual)
+        Build / HEAD: <git rev-parse --short HEAD>
+        Backend binaries: E:\Client1\core.exe, E:\Client2\core.exe
+        Identities: SN 55076 (@chariot.pyramid.byte),
+                    SN 55077 (@chariot.harbor.byte)
+        Ports: 8081 (C1), 8082 (C2)
+        Result summary: <N passed> / <M total>; <K failures filed
+                        as BUG-51..BUG-NN>
+
+    For each failure, follow GPT's record shape:
+        Failure ID:
+        Client: C1 / C2 / both
+        Step ID (e.g. A3, M-Drafts):
+        Steps to reproduce:
+        Expected:
+        Actual:
+        HTTP status / response excerpt (if API):
+        Backend-blocked: yes / no / unknown
+        Filed as: BUG-NN in docs/cla.bugs.txt
+
+
+===========================================================
+PART 2 — MANUAL (Sean walks this in two browsers)
+===========================================================
+
+Open:
+  http://localhost:5173/?backendPort=8081   (Client1)
+  http://localhost:5174/?backendPort=8082   (Client2)
+
+The AUTO run above will have already seeded:
+  - At least 3 messages in C2's inbox (AUTO-A2, AUTO-A3, AUTO-A4-target)
+  - 1 message in C1's inbox (AUTO-A4 reply)
+  - 1 draft in C1's Drafts (AUTO-A5)
+  - Client2 entry in C1's contacts
+  - Possibly 1 popular contact added on C1
+
+If anything below depends on state that AUTO didn't leave, the step
+says so explicitly.
+
+[M-Setup] Visual identity sanity (handoff lines 214-227)
+    [C1] AccountPane > Profile: shows @chariot.pyramid.byte, SN 55076.
+         NavigationPane shows all six folders.
+         RAIDA health dots: mostly green (>= 6 reachable).
+         Wallet card: shows the non-zero CC balance (any positive
+         number; we already confirmed > 0 by API).
+         AccountPane > Server Details: either shows all 25 servers,
+         or is absent entirely (GPT-suggested addition — partial
+         lists like "showing 12 of 25" would be a regression).
+         No raw CSS class names or broken styling visible anywhere
+         on the pane (relevant once CSS refactor lands).
+    [C2] Same at 5174; identity @chariot.harbor.byte, SN 55077.
+
+    Fail-stop if either is wrong — port resolution / identity issue.
+
+[M-Phase1] Visual checks for already-shipped fixes
+    [C2] The AUTO-A2 row in inbox: lock icon + "Encrypted message"
+         subject was its pending state. After AUTO ran, it should
+         be fully decrypted now, showing subject "AUTO-A2 plain"
+         and body "hello" in the reading pane (FIX-01).
+    [C2] AccountPane > Profile: NO occurrence of "John Doe" anywhere
+         in the pane (FIX-03 / FIX-30).
+    [C2] AccountPane shows RAIDA server count + per-server health
+         row, not just an aggregate dot (FIX-05).
+    [C2] Open the AUTO-A3 row. Click the attachment in the reading
+         pane. A download/save dialog appears; the file downloads
+         and opens in Notepad without corruption (FIX-02 / FIX-19
+         GUI side; bytes already verified by AUTO).
+
+[M-Send-routing] Toast vs inline modal error (BUG-43 / FIX-33)
+    [C1] Compose. To = "," (just commas). Click Send.
+         EXPECT: inline error inside the modal (red text, near the
+         To field). NO toast on the dashboard behind the modal.
+         FAIL if a toast appears.
+
+[M-Send-warning] RAIDA warning banner + Retry spinner (BUG-38 / FIX-22)
+    REQUIRES: temporarily kill E:\Client1\core.exe in a separate
+              terminal, then re-launch after the check.
+    [C1] After killing core.exe: the network-warning banner appears
+         at the top of the GUI within ~10s.
+    [C1] The Retry button shows a spinning RefreshCw icon while
+         re-checking (animation, not static).
+    [C1] After re-launching core.exe and clicking Retry: banner
+         clears.
+    [C1] During the warning state, Compose still allows "Send
+         anyway" (the override).
+
+[M-Send-progress] Raw printf in send progress (CORE-E)
+    [C1] Send anything. Watch the progress copy in the Compose
+         modal.
+    EXPECTED-AS-IS: raw printf strings ("Uploading file 1/3 ...").
+    Do NOT file this — CORE-E is known-broken-until-backend.
+
+[M-Reply] Reply / Reply All / Forward (FIX-06 / FIX-07)
+    [C2] On the AUTO-A2 row, click Reply.
+         EXPECT: ComposeModal opens, To = @chariot.pyramid.byte,
+         subject = "Re: AUTO-A2 plain", body contains the original
+         quoted ("> hello" or similar).
+    [C2] Close that modal. Click Forward on the same row.
+         EXPECT: To = empty, subject = "Fwd: AUTO-A2 plain", body
+         has full quoted block with From/Date/Subject headers.
+    [C2] If any of the AUTO messages has multiple recipients (the
+         ones we sent didn't, so this might require an extra send
+         from C1 with both C2 and a cc to verify) — Reply All
+         populates CC with original recipients minus self.
+         If you can't easily set this up, skip and note "needs
+         multi-recipient setup."
+
+[M-Drafts] Draft hydration + autosave + advanced toggle
+    [C1] Open Drafts. The AUTO-A5 draft is there. Click it.
+         EXPECT: subject "AUTO-A5 draft", body "wip updated"
+         (AUTO-A5 updated it), To populated with Client2.
+         All three fields hydrated, not blank (FIX-04).
+    [C1] In the open draft, type a few characters. Wait 5+ seconds.
+         EXPECT: "Saved" indicator flashes (FIX-39).
+    [C1] Click Advanced Options to expand. Close Compose. Re-open
+         the same draft (or any Compose). EXPECT: Advanced still
+         expanded (FIX-40).
+    [C1] Use the contacts picker on To, Cc, Bcc. Selecting a
+         contact preserves existing comma-separated recipients —
+         does NOT clobber them (FIX-41).
+    [C1] Send the draft. After completion, switch to Drafts.
+         EXPECTED-AS-IS: draft still there (CORE-H known gap).
+
+[M-Refresh] Unified Refresh + aggregate notification (FIX-20 / FIX-34)
+    [C1] Click the unified Refresh button in NavigationPane.
+         EXPECT: single spinner running through all four steps
+         (RAIDA echo, mail notifications, mail counts, message
+         list). Single success toast at end. Spinner does NOT
+         flicker between steps.
+    [C1] Kill E:\Client1\core.exe again. Click Refresh.
+         EXPECT: ONE aggregate warning toast "Refresh completed
+         with some service errors." NOT multiple per-step toasts.
+         Re-launch core.exe afterwards.
+
+[M-Notify] New-mail toast + click-to-focus (FIX-17)
+    Setup: from another terminal, have AUTO send a fresh message
+    from :8081 to :8082 with subject "AUTO-M-Notify". Or send via
+    Compose on C1 instead.
+    [C2] EXPECT: "New mail from @chariot.pyramid.byte" toast.
+         Click it — the new row in inbox gets focused/highlighted.
+
+[M-Read] Mark Unread visibility (BUG-39 / FIX-24)
+    [C2] Open any read message. EXPECT: Mark Unread button visible
+         in the action row. Click it. Row returns to unread state
+         in the list.
+    [C2] Open an unread message. EXPECT: Mark Unread button NOT
+         visible.
+
+[M-Move] Move-to dropdown (BUG-40 / FIX-18)
+    [C2] In inbox: Archive button is in the action row. The
+         Move-to... dropdown does NOT also list "Archive" (no
+         duplication).
+    [C2] Move-to... dropdown lists Inbox / Archive / Trash but
+         NOT Starred. The star icon is the only star action.
+
+[M-Trash] Delete-confirm modal + count message (FIX-29 / FIX-14)
+    [C2] Click trash icon on any received message (not AUTO-A2 —
+         keep that for re-use). It moves to Trash.
+    [C2] Go to Trash. If multiple messages are visible, click
+         "Delete these N messages permanently."
+         EXPECT: confirm modal appears. Cancel works (no deletion).
+         Confirm works (page reduces; if other Trash pages exist,
+         the count message acknowledges them).
+
+[M-Autocomplete] To-field autocomplete (Gemini-suggested addition)
+    [C1] Open Compose. In the To field, start typing "Client" (the
+         name AUTO-A9 saved). EXPECT: dropdown suggests the saved
+         contact; selecting it inserts the full address.
+    [C1] Clear To. Type Client2's SN ("55077"). EXPECT: same
+         dropdown resolves it. (If neither typeahead path triggers,
+         the autocomplete component may have regressed under the
+         CSS refactor — note as a finding.)
+
+[M-Contacts] Add / delete / undo / popular / lookup
+    [C1] Contacts tab > Add Contact. Try adding a NEW contact (not
+         Client2 — that's already saved by AUTO). Save. Appears in
+         My Contacts.
+    [C1] Click trash icon on it.
+         EXPECT: in-app modal (NOT browser confirm) (FIX-28).
+    [C1] Delete. EXPECT: "deleted, click to undo" toast. Click
+         within 10s. Contact restores.
+    [C1] Re-delete the same contact. Wait 10+ seconds. Toast
+         expires; contact stays deleted.
+    [C1] Open Popular contacts (TrendingUp icon). DRD list loads.
+         If AUTO-A9 already added one popular contact, that row
+         shows a checkmark (not a +). Close ContactsPane and
+         reopen — checkmark persists (BUG-44 / FIX-29).
+    [C1] Click the Lookup icon button (Search). Type Client2's
+         serial number (55077). Local QMail service resolves it
+         to the address (FIX-42).
+    [C1] Same panel, type "Client" (a saved contact's name). It
+         matches the local contact.
+    [C1] Same panel, type "unknown@nowhere.byte". Copy reads
+         "Address-to-serial lookup is not available yet."
+
+[M-Search-UI] "Top 50" notice
+    [C2] Use the GUI search bar for "AUTO". Expect 3-4 results
+         (no "top 50" notice).
+    [C2] If you can produce > 50 actual matches (probably not in
+         this test rig), the "Showing top 50 results" notice
+         appears. Otherwise skip. (BUG-46 / CORE-K caveat.)
+
+[M-Signout] Sign-out / sign-in (FIX-15 / FIX-15b)
+    [C1] AccountPane > Sign Out. Confirm. Welcome screen appears.
+         Sign back in. Identity hydrates (@chariot.pyramid.byte).
+
+[M-Sort] Page-snap on sort change (FIX-38)
+    [C1] In inbox, navigate to page 2 (if AUTO produced enough
+         messages; if not, skip — handoff says this needs
+         pagination state).
+    [C1] Change sort mode (Newest -> Unread). EXPECT: pagination
+         snaps to page 1 BEFORE the new sort completes loading.
+         No flash of "Page 2 of N" with page-1 content.
+
+[M-Preview] Empty body italics + pending decrypt weight (FIX-46)
+    [C1] Find any received message with body = "" (you may need
+         to send one specifically — send from C2 with empty body
+         if so). Inbox preview reads "(no message body)" in
+         ITALICS.
+    [C1] During the pending-decrypt window of a fresh send, the
+         pending row preview shows "Waiting to decrypt..." in
+         NORMAL weight (not italic). (Catch this while AUTO is
+         sending, or send one manually.)
+
+[M-Servers] Server card class names (FIX-45)
+    [C1] AccountPane > server cards: each shows network-online
+         (green) / network-offline (red) / network-unknown
+         (amber) coloring. Wallet cards still have their own
+         classes (Bank/Fracked/Limbo). No two distinct concepts
+         share a color in the same pane.
+
+[M-Folders-icon] Custom folder iconName (FIX-47)
+    Only testable if the backend ships a folder with a custom
+    iconName. Skip if you can't trigger it.
+
+
+===========================================================
+PART 3 — Closure
+===========================================================
+
+When AUTO + MANUAL are both done:
+  - I (Claude) write docs/opu.smoke-test.results-2026-05-23.txt
+    with the AUTO pass/fail tally + any errors from your MANUAL
+    pass that you relay.
+  - For failures, file BUG-NN entries per handoff lines 401-409
+    (next number is BUG-51).
+  - If everything passes: short closure note, hand back to CSS
+    refactor.
+
+End of checklists.
