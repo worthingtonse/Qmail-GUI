@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (P3 complete; custom theme runtime live)
+Last updated: 2026-05-23 by opu (P2 (a) functional pass complete; E20 by gpt; (b) still waits on Track B)
 
 ================================================================================
 RUNTIME TRACKS (sequential — Opu owns these)
@@ -32,11 +32,22 @@ P1     DONE          opu     P0          Phase 1 complete. ThemeProvider +
                                          shows the live picker. Dark / Light /
                                          High Contrast all switch and persist
                                          to localStorage. Build + lint clean.
-P2     OPEN          -       P1          Phase 2: WCAG verification of light +
-                                         high-contrast palettes; refine the
-                                         high-contrast theme (focus rings,
-                                         scrollbar visibility, etc.) once
-                                         Track B's research lands.
+P2 (a) DONE       opu     P1          Phase 2 functional pass complete.
+                                         themes.css gained: yellow focus
+                                         rings under [data-theme=
+                                         "high-contrast"] (overrides
+                                         component-level rgba glows);
+                                         universal animation/transition
+                                         collapse to catch unmigrated
+                                         component CSS; body::after
+                                         particle-overlay suppression;
+                                         status-*-bg overrides; yellow
+                                         caret colour. Scrollbars
+                                         already worked (token-driven).
+                                         Build + tests clean.
+P2 (b) BLOCKED    opu     P1, B       PALETTE pass — WCAG-verified
+                                         token values for light + high-
+                                         contrast. Waits on Track B.
 P3     DONE          opu     P1, D       Phase 3 complete. ThemeProvider now
                                          fetches /api/system/theme on entry
                                          into "custom", injects overrides
@@ -101,8 +112,8 @@ E16    OPEN     -       components/common/notifications/NotificationContainer.cs
 E17    OPEN     -       wallet/components/USBCheckScreen.css                  310
 E18    OPEN     -       qmail/screens/AddContactModal.css                     299
 E19    OPEN     -       wallet/components/tabs/ReceiptModal.css               248
-E20    OPEN     -       wallet/components/WelcomeScreen.css                   204
-E21    OPEN     -       qmail/screens/WalletSetupScreen.css                    77
+E20    IN PROGRESS gpt     wallet/components/WelcomeScreen.css                   204
+E21    IN REVIEW   gpt     qmail/screens/WalletSetupScreen.css                    77
 E22    OPEN     -       index.css cleanup pass (remove relocated tokens)      208
 
 ================================================================================
