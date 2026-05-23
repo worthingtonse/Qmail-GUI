@@ -76,19 +76,21 @@
   --card-bg:      #ffffff;
   --card-hover:   #f1f5f9;
 
-  /* Accents (deeper variants to meet contrast on white) */
-  --accent-primary:   #6d28d9;
-  --accent-secondary: #0284c7;
-  --accent-tertiary:  #d97706;
-  --accent-success:   #059669;
-  --accent-error:     #dc2626;
-  --accent-warning:   #d97706;
+  /* Accents — Track B / P2 (b): WCAG AAA on #ffffff.
+     Each value is one Tailwind shade deeper than the original
+     Phase 1 placeholder; see docs/theme.wcag-values.md for ratios. */
+  --accent-primary:   #5b21b6;   /* was #6d28d9 — 7.10:1 → 8.98:1 */
+  --accent-secondary: #075985;   /* was #0284c7 — 4.10:1 → 7.56:1 (AAA recovery) */
+  --accent-tertiary:  #92400e;   /* was #d97706 — 3.19:1 → 7.09:1 */
+  --accent-success:   #065f46;   /* was #059669 — 3.77:1 → 7.68:1 */
+  --accent-error:     #991b1b;   /* was #dc2626 — 4.83:1 → 8.31:1 */
+  --accent-warning:   #92400e;   /* was #d97706 — 3.19:1 → 7.09:1 */
 
   /* Text */
   --text-primary:   #0f172a;
   --text-secondary: #334155;
-  --text-tertiary:  #64748b;
-  --text-muted:     rgba(51, 65, 85, 0.6);
+  --text-tertiary:  #475569;     /* was #64748b — fixed AA at darker gradient stop */
+  --text-muted:     rgba(51, 65, 85, 0.8);  /* was alpha 0.6 — look-wins: AA only, AAA loses muted cue */
 
   /* Borders */
   --border-subtle: rgba(15, 20, 25, 0.08);
@@ -101,10 +103,10 @@
   --glass-bg-strong:   rgba(255, 255, 255, 0.85);
   --glass-border:      1px solid rgba(15, 20, 25, 0.08);
 
-  /* Glow — softer, deeper purple */
-  --glow-primary:   0 0 20px rgba(109, 40, 217, 0.25);
-  --glow-secondary: 0 0 20px rgba(2, 132, 199, 0.25);
-  --glow-success:   0 0 20px rgba(5, 150, 105, 0.25);
+  /* Glow — recoloured to match the new AAA-compliant accents */
+  --glow-primary:   0 0 20px rgba(91, 33, 182, 0.25);   /* was rgba(109, 40, 217, ...) */
+  --glow-secondary: 0 0 20px rgba(7,  89, 133, 0.25);   /* was rgba(2,  132, 199, ...) */
+  --glow-success:   0 0 20px rgba(6,  95,  70, 0.25);   /* was rgba(5,  150, 105, ...) */
 
   /* Lighter shadows for paper-on-paper feel */
   --shadow-sm: 0 1px 3px rgba(15, 20, 25, 0.04), 0 1px 2px rgba(15, 20, 25, 0.06);
@@ -134,7 +136,7 @@
   --accent-secondary: #00ffff;
   --accent-tertiary:  #ffff00;
   --accent-success:   #00ff00;
-  --accent-error:     #ff5555;
+  --accent-error:     #ff6666;   /* was #ff5555 — 6.68:1 → 7.34:1 (closes AAA gap) */
   --accent-warning:   #ffff00;
 
   /* Text */

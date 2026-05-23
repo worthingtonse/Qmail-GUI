@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (Track B complete; P2 (b) now unblocked; E17/E18/E19 ready for visual smoke; E20/E21 with gpt)
+Last updated: 2026-05-23 by opu (P2 (b) complete; E15/E17/E18/E19 ready for visual smoke; E20/E21 with gpt)
 
 ================================================================================
 RUNTIME TRACKS (sequential — Opu owns these)
@@ -45,11 +45,19 @@ P2 (a) DONE       opu     P1          Phase 2 functional pass complete.
                                          caret colour. Scrollbars
                                          already worked (token-driven).
                                          Build + tests clean.
-P2 (b) OPEN       opu     P1, B       PALETTE pass — WCAG-verified
-                                         token values. UNBLOCKED:
-                                         docs/theme.wcag-values.md
-                                         (Track B) has the proposed
-                                         swaps. Ready to apply.
+P2 (b) DONE       opu     P1, B       Phase 2 palette pass complete.
+                                         themes.css now clears AAA on
+                                         every accent + accent button
+                                         label in the light theme (was
+                                         10 AA fails); text-tertiary
+                                         clears AAA on solid surfaces
+                                         and AA at the darker gradient
+                                         stop; text-muted at alpha 0.8
+                                         clears AA-normal (look-wins
+                                         on AAA). HC --accent-error
+                                         #ff5555 → #ff6666 closes the
+                                         remaining AAA gap (7.34:1).
+                                         Audit re-verified post-swap.
 P3     DONE          opu     P1, D       Phase 3 complete. ThemeProvider now
                                          fetches /api/system/theme on entry
                                          into "custom", injects overrides
@@ -124,7 +132,7 @@ E11    OPEN     -       qmail/screens/ContactsPane.css                        58
 E12    OPEN     -       qmail/screens/QMailDashboard.css                      565
 E13    OPEN     -       qmail/screens/ReadingPane.css                         516
 E14    OPEN     -       qmail/screens/NavigationPane.css                      368
-E15    OPEN     -       wallet/components/PasswordScreen.css                  369
+E15    IN REVIEW   gpt     wallet/components/PasswordScreen.css                  369
 E16    OPEN     -       components/common/notifications/NotificationContainer.css 334
 E17    IN REVIEW   gpt     wallet/components/USBCheckScreen.css                  310
 E18    IN REVIEW   gpt     qmail/screens/AddContactModal.css                     299
