@@ -1,6 +1,8 @@
 /* eslint-disable react/prop-types */
-import { Moon, Sun, Contrast } from "lucide-react";
+import { useState } from "react";
+import { Moon, Sun, Contrast, Sparkles, Edit3 } from "lucide-react";
 import { useTheme } from "./useTheme";
+import { ThemeEditorModal } from "./ThemeEditorModal";
 import "./ThemePicker.css";
 
 const OPTIONS = [
@@ -22,13 +24,32 @@ const OPTIONS = [
     description: "Yellow on black, larger text, no motion.",
     Icon: Contrast,
   },
+  {
+    id: "custom",
+    label: "Custom",
+    description: "Build your own — accent colors, sizing, motion.",
+    Icon: Sparkles,
+  },
 ];
 
 /* Theme picker for AccountPane's Application Settings section.
- * Replaces the "Dark Mode" ComingSoonToggle placeholder. Custom
- * theme support arrives in Phase 3. */
+ * Replaces the "Dark Mode" ComingSoonToggle placeholder. Phase 3 adds
+ * the Custom option with an inline Edit button that opens the
+ * ThemeEditorModal.
+ */
 export function ThemePicker() {
-  const { themeId, setTheme } = useTheme();
+  const { themeId, setTheme, customStatus, customTheme } = useTheme();
+  const [editorOpen, setEditorOpen] = useState(false);
+
+  const handleSelect = (id) => {
+    if (id === "custom" && !customTheme) {
+      // No saved custom theme yet — open the editor instead of switching
+      // to an empty custom slot the user can't visually distinguish.
+      setEditorOpen(true);
+      return;
+    }
+    setTheme(id);
+  };
 
   return (
     <fieldset className="theme-picker">
@@ -39,6 +60,7 @@ export function ThemePicker() {
       <ul className="theme-picker__list">
         {OPTIONS.map(({ id, label, description, Icon }) => {
           const checked = themeId === id;
+          const isCustom = id === "custom";
           return (
             <li key={id} className="theme-picker__item">
               <label
@@ -52,19 +74,44 @@ export function ThemePicker() {
                   name="qmail-theme"
                   value={id}
                   checked={checked}
-                  onChange={() => setTheme(id)}
+                  onChange={() => handleSelect(id)}
                   className="theme-picker__input"
                 />
                 <Icon size={20} className="theme-picker__icon" aria-hidden />
                 <span className="theme-picker__text">
                   <span className="theme-picker__label">{label}</span>
-                  <span className="theme-picker__hint">{description}</span>
+                  <span className="theme-picker__hint">
+                    {isCustom && customStatus === "loading"
+                      ? "Loading your saved theme…"
+                      : isCustom && !customTheme
+                        ? "Not saved yet — opens the editor."
+                        : description}
+                  </span>
                 </span>
+                {isCustom ? (
+                  <button
+                    type="button"
+                    className="theme-picker__edit"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setEditorOpen(true);
+                    }}
+                    aria-label="Edit custom theme"
+                  >
+                    <Edit3 size={14} aria-hidden />
+                    Edit
+                  </button>
+                ) : null}
               </label>
             </li>
           );
         })}
       </ul>
+
+      <ThemeEditorModal
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+      />
     </fieldset>
   );
 }

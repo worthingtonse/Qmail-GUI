@@ -1,0 +1,282 @@
+/* ThemeEditorModal — fully token-driven so it renders correctly under
+ * the very theme it's editing. The scrim covers the viewport; the
+ * dialog itself is a centered card with a header / body / footer.
+ *
+ * Markup-hygiene preferences (plan §13):
+ *   - semantic header / section / footer
+ *   - BEM names
+ *   - no inline styles
+ */
+
+.theme-editor__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-lg);
+  backdrop-filter: blur(4px);
+}
+
+.theme-editor {
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - var(--space-2xl));
+  background: var(--secondary-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.theme-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.theme-editor__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.theme-editor__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all calc(150ms * var(--motion-scale)) ease;
+}
+
+.theme-editor__close:hover {
+  background: var(--card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+.theme-editor__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.theme-editor__field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.theme-editor__group-title {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.theme-editor__label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.theme-editor__input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-md);
+  transition: border-color calc(150ms * var(--motion-scale)) ease;
+}
+
+.theme-editor__input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.theme-editor__hint {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.theme-editor__tokens {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.theme-editor__token {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.theme-editor__token .theme-editor__label {
+  grid-column: 1 / -1;
+}
+
+.theme-editor__color-row,
+.theme-editor__slider-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.theme-editor__color {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 56px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.theme-editor__color::-webkit-color-swatch-wrapper { padding: 2px; }
+.theme-editor__color::-webkit-color-swatch { border: none; border-radius: 4px; }
+
+.theme-editor__slider {
+  flex: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  background: var(--card-hover);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.theme-editor__slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 2px solid var(--secondary-bg);
+  cursor: pointer;
+}
+
+.theme-editor__slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  border: 2px solid var(--secondary-bg);
+  cursor: pointer;
+}
+
+.theme-editor__value {
+  min-width: 64px;
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+.theme-editor__checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.theme-editor__checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.theme-editor__error {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--status-error-bg);
+  border: 1px solid var(--accent-error);
+  border-radius: var(--radius-md);
+  color: var(--accent-error);
+  font-size: var(--font-size-sm);
+}
+
+.theme-editor__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--tertiary-bg);
+}
+
+.theme-editor__footer-right {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.theme-editor__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all calc(150ms * var(--motion-scale)) ease;
+}
+
+.theme-editor__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.theme-editor__button--ghost {
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
+}
+
+.theme-editor__button--ghost:hover:not(:disabled) {
+  background: var(--card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.theme-editor__button--primary {
+  background: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  color: var(--secondary-bg);
+}
+
+.theme-editor__button--primary:hover:not(:disabled) {
+  box-shadow: var(--glow-primary);
+}

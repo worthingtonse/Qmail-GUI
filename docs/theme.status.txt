@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (Track D complete; vitest harness added)
+Last updated: 2026-05-23 by opu (P3 complete; custom theme runtime live)
 
 ================================================================================
 RUNTIME TRACKS (sequential — Opu owns these)
@@ -37,9 +37,19 @@ P2     OPEN          -       P1          Phase 2: WCAG verification of light +
                                          high-contrast theme (focus rings,
                                          scrollbar visibility, etc.) once
                                          Track B's research lands.
-P3     BLOCKED       opu     P1, D       Phase 3: custom theme via /api/system/
-                                         theme. Pulls in Track D's
-                                         themeService.js.
+P3     DONE          opu     P1, D       Phase 3 complete. ThemeProvider now
+                                         fetches /api/system/theme on entry
+                                         into "custom", injects overrides
+                                         into <style id="qmail-user-theme">,
+                                         and exposes saveCustom/clearCustom
+                                         via useTheme(). New
+                                         src/theme/ThemeEditorModal.{jsx,css}
+                                         surfaces the 8-token editable
+                                         subset (§2.5). Picker grew a 4th
+                                         "Custom" option + inline Edit.
+                                         Build + lint + tests clean.
+                                         Visual smoke-test pending (Opu
+                                         cannot drive the browser).
 P5     BLOCKED       opu     P3          Phase 5: export/import + docs polish.
 
 ================================================================================

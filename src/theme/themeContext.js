@@ -16,4 +16,8 @@ export const STANDARD_THEMES = ["dark", "light", "high-contrast"];
 export const ThemeContext = createContext({
   themeId: "dark",
   setTheme: () => {},
+  customTheme: null,
+  customStatus: "idle",
+  saveCustom: async () => ({ success: false }),
+  clearCustom: async () => ({ success: false }),
 });
