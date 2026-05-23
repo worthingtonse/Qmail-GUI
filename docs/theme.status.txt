@@ -13,7 +13,9 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (P2 (b) complete; E15/E17/E18/E19 ready for visual smoke; E20/E21 with gpt)
+Last updated: 2026-05-23 by opu (smoke-test tracker added at docs/theme.smoke-test.md; E14/E15/E16/E17/E18/E19 ready for visual smoke; E20/E21 with gpt)
+
+Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 
 ================================================================================
 RUNTIME TRACKS (sequential — Opu owns these)
@@ -69,8 +71,8 @@ P3     DONE          opu     P1, D       Phase 3 complete. ThemeProvider now
                                          subset (§2.5). Picker grew a 4th
                                          "Custom" option + inline Edit.
                                          Build + lint + tests clean.
-                                         Visual smoke-test pending (Opu
-                                         cannot drive the browser).
+                                         Smoke checklist: P3.1–P3.9 in
+                                         docs/theme.smoke-test.md.
 P5     DONE          opu     P3          Phase 5 complete. ThemeEditorModal
                                          gained Import + Export buttons
                                          (Blob-download for export,
@@ -80,8 +82,8 @@ P5     DONE          opu     P3          Phase 5 complete. ThemeEditorModal
                                          docs/theme.custom-format.md is
                                          the power-user reference for
                                          hand-editing the JSON. Build +
-                                         lint + tests clean. Visual
-                                         smoke-test pending.
+                                         lint + tests clean. Smoke
+                                         checklist: P5.1–P5.6.
 
 ================================================================================
 PARALLEL TRACKS — can start immediately (no dependency on P0)
@@ -131,9 +133,9 @@ E10    OPEN     -       wallet/components/DicewarePasswordCreator.css         65
 E11    OPEN     -       qmail/screens/ContactsPane.css                        582
 E12    OPEN     -       qmail/screens/QMailDashboard.css                      565
 E13    OPEN     -       qmail/screens/ReadingPane.css                         516
-E14    OPEN     -       qmail/screens/NavigationPane.css                      368
+E14    IN REVIEW   gpt     qmail/screens/NavigationPane.css                      368
 E15    IN REVIEW   gpt     wallet/components/PasswordScreen.css                  369
-E16    OPEN     -       components/common/notifications/NotificationContainer.css 334
+E16    IN REVIEW   gpt     components/common/notifications/NotificationContainer.css 334
 E17    IN REVIEW   gpt     wallet/components/USBCheckScreen.css                  310
 E18    IN REVIEW   gpt     qmail/screens/AddContactModal.css                     299
 E19    IN REVIEW   gpt     wallet/components/tabs/ReceiptModal.css               248
