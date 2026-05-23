@@ -1,0 +1,224 @@
+Delegation handoff for GPT — QMail-GUI theme system
+Date: 2026-05-22
+Author: Opu 4.7 (1M)
+Prepared for: GPT
+
+Purpose
+-------
+The QMail-GUI theme system has parallel work-streams designed to be picked
+up by other models. Opu owns the React/runtime tracks; GPT is being
+asked to take TWO tracks that can run in parallel with Opu's code work:
+
+  Track C — C-core ticket draft               (~1 hour)
+  Track F — BEM class rename mapping document (~1 day)
+
+Both are documentation tracks. No code changes. Take C first (it's the
+shortest and unblocks the C-team's backlog); F is the queued follow-up
+and is the largest doc track in the project.
+
+Project root:  D:\Code\src\JavaScript\Qmail-GUI\
+Master plan:   docs\opu.theme.plan.txt          (1,425 lines, revision 6)
+Status board:  docs\theme.status.txt            (claim tracks here)
+Handoff:       docs\opu.theme.handoff.txt       (what shipped + gotchas)
+
+Read the handoff first (~320 lines), then the relevant plan sections
+listed under each track below. Do NOT re-read the whole plan unless you
+need to.
+
+
+How to claim a track
+--------------------
+1. Open docs/theme.status.txt.
+2. Find the track row (C and F are under "PARALLEL TRACKS").
+3. Edit the row: set Owner=gpt, Status=IN PROGRESS.
+4. Update the "Last updated:" line at the top.
+5. One track at a time. Finish (or release) before claiming the next.
+
+
+Track C — C-core ticket draft
+=============================
+
+Required reading from the plan:
+  §8  C IMPLEMENTATION vs PUBLIC SPEC (lines 719–783, all five D1–D5
+      discrepancies are listed there)
+  §1.4 Backend endpoint canonical spec (lines 159–215, for context on
+       what the spec promises)
+  Handoff "Gotchas G8 and G9" (the two that matter for ticket scoping)
+
+Source files to compare in your analysis:
+  PHP spec (canonical):
+    D:\Code\src\PHP\cloudcoin.org-main\commands\system-theme.php
+    (the human-readable reference contract; the spec is the doc itself,
+     not the PHP execution — read it as a spec document)
+
+  C implementation (current):
+    D:\Code\src\C\rest_core\api_src\api_handlers_system.c
+    The relevant handler is around lines 964–1048. Look at
+    json_success_response calls and the GET/POST/DELETE branches.
+
+  GUI's parser (will be written by Opu in Track D — context only):
+    src/api/themeService.js (does not exist yet at the time you read this,
+    but the spec shapes you're writing about are what it'll consume)
+
+What to deliver:
+  File: docs/theme.c-core-ticket.md
+  Contents: a backlog ticket ready for the C-core team to triage. Five
+  linked sub-tasks (one per D1–D5). Each sub-task contains:
+
+      Title:             (e.g. "Theme handler — GET creates file on miss")
+      Severity:          (info / minor / major / blocker — see below)
+      What the spec says: (one short paragraph, quote the PHP doc)
+      What the C code does today: (one short paragraph + file:line cite)
+      Exact change required:      (the lines to add/remove/replace,
+                                   in patch-style pseudocode is fine —
+                                   you do NOT need to write compilable C)
+      Rationale:                  (one paragraph, why this matters and
+                                   what GUI/client behaviour depends on it)
+      Test plan:                  (what curl call + expected response
+                                   shape proves the fix works)
+
+  Severity ladder for these five:
+      D1 storage path       — minor (cosmetic; affects logs only)
+      D2 GET creates stub   — major (GUI semantics depend on it)
+      D3 response field name — major (error extraction degrades without it)
+      D4 oversize HTTP status — minor (GUI can read either code)
+      D5 DELETE 404          — already matches spec; close as "no action"
+
+  Then a short "Sequencing recommendation" section: which order should
+  the C-team tackle these in, and which can ship in one commit vs. need
+  to be separate. (Hint: D2 and D3 should ship together — both touch
+  the GET path; D1 and D4 are isolated; D5 is a no-op acknowledgment.)
+
+Why this matters: P3 (custom theme) is being implemented by Opu against
+the spec. Without C-team alignment, the GUI's themeService.js will need
+permanent compatibility shims for the legacy {status} response shape.
+Filing this ticket starts the cleanup path.
+
+
+Track F — BEM class rename mapping
+==================================
+
+Required reading from the plan:
+  §3.7  BEM rename rules            (lines 449–478)
+  §13.4 semantic-landmark biases    (lines 1314–1338; affects which
+        blocks should be promoted)
+
+What to deliver:
+  File: docs/theme.bem-mapping.md
+  Contents: a complete mapping table of EVERY class currently used
+  across the 22 CSS files listed in §12.4 (the E1–E22 file list), to
+  its target BEM name.
+
+  Suggested table format:
+
+      Source file          Current class                    Target BEM class
+      -------------------  -------------------------------  --------------------------------
+      App.css              .update-modal                    .update-modal           (block, no change)
+      App.css              .update-modal-header             .update-modal__header
+      App.css              .update-modal-close              .update-modal__close
+      App.css              .nav-tab                         .nav-tab                (block)
+      App.css              .nav-tab.active                  .nav-tab--active        (modifier; combinator → modifier)
+      ...
+      MainDashboard.css    .glass-pane                      .glass-pane             (utility — keep)
+      MainDashboard.css    .glass-sound-btn                 .glass-sound-btn        (utility variant — keep, document)
+      MainDashboard.css    .account-confirm-overlay         .account-pane__confirm-overlay
+      ...
+
+  How to enumerate the classes:
+    ripgrep on each file:
+        rg '^\.[a-zA-Z0-9_-]+|,\s*\.[a-zA-Z0-9_-]+' --only-matching --no-filename <file>.css
+
+    Then dedupe per file. You should expect roughly 30–80 unique class
+    names per file (heaviest in MainDashboard.css ~250).
+
+  Rules to apply (from §3.7):
+    1. Block name = component name (e.g. .account-pane, .compose-modal,
+       .nav-tab). Pick the smallest one already in use.
+    2. Element = .block__element (single underscore replaced with double).
+    3. Modifier = .block--modifier OR .block__element--modifier.
+       Convert ".block.modifier-class" combinator selectors to .block--modifier.
+    4. Utility classes (.glass-pane, .btn, .surface) — keep as-is; mark
+       them in the "Utility / keep" column.
+    5. Same-name collisions across files — namespace by file's component
+       (.compose-modal__row vs .reading-pane__row). The block prefix
+       prevents the collision.
+    6. Don't rename classes that JSX uses dynamically (className={`foo-${variant}`}).
+       Flag these in a separate "Dynamic className — manual review" section.
+
+  Then a "Cross-file collision report" section: classes that appear in
+  multiple CSS files with the SAME name but different styling. These
+  need explicit block prefixes.
+
+  And a "Heading-tag implications" note: if a renamed class is currently
+  applied to a <div class="some-title"> that should be a heading per
+  §13.3, flag it for the E-track agent to handle. You're not making the
+  JSX change — just noting it so the agent doesn't miss it.
+
+CSS files to enumerate (full E1–E22 list):
+  E1  src/wallet/components/MainDashboard.css                       (2296 lines)
+  E2  src/wallet/components/tabs/ExportTab.css                      (1023)
+  E3  src/wallet/components/tabs/AuthenticateTab.css                 (987)
+  E4  src/wallet/components/tabs/LockerTab.css                       (971)
+  E5  src/qmail/screens/AccountPane.css                              (935)
+  E6  src/App.css                                                    (803)
+  E7  src/screens/ServiceSelectionScreen.css                         (679)
+  E8  src/qmail/screens/ComposeModal.css                             (662)
+  E9  src/qmail/screens/EmailListPane.css                            (654)
+  E10 src/wallet/components/DicewarePasswordCreator.css              (654)
+  E11 src/qmail/screens/ContactsPane.css                             (582)
+  E12 src/qmail/screens/QMailDashboard.css                           (565)
+  E13 src/qmail/screens/ReadingPane.css                              (516)
+  E14 src/qmail/screens/NavigationPane.css                           (368)
+  E15 src/wallet/components/PasswordScreen.css                       (369)
+  E16 src/components/common/notifications/NotificationContainer.css  (334)
+  E17 src/wallet/components/USBCheckScreen.css                       (310)
+  E18 src/qmail/screens/AddContactModal.css                          (299)
+  E19 src/wallet/components/tabs/ReceiptModal.css                    (248)
+  E20 src/wallet/components/WelcomeScreen.css                        (204)
+  E21 src/qmail/screens/WalletSetupScreen.css                         (77)
+  E22 src/index.css                                                  (208)
+
+Why this matters: feeds the 22 E-track agents that will execute Phase 4
+(one per CSS file). Without this mapping, each E-track agent will make
+independent (inconsistent) naming choices, and the rename loses its
+value as a consistency play. Doing it once, centrally, saves 22x the
+naming-decision work.
+
+
+Verification (both tracks)
+--------------------------
+  * Output file is referenced from opu.theme.plan.txt §12.3 — drop the
+    link in your final status-file update so reviewers can find it.
+  * No code changes. Pure docs.
+  * When done, set the track's Status to DONE in theme.status.txt and
+    add a one-line note (e.g. "C: 5 sub-tasks drafted, severity assigned"
+    or "F: 547 classes mapped across 22 files, 8 cross-file collisions
+    flagged").
+
+
+Things to AVOID
+---------------
+  * Do NOT touch any .css, .jsx, .js, or .c files. The plan explicitly
+    separates research tracks (A/B/C/D/F) from code tracks (P*/E*).
+    Track F PRODUCES the rename map; the E-tracks CONSUME it.
+  * Do NOT commit. The repo has ~35 unrelated dirty files; the user
+    decides commit scope.
+  * Do NOT re-debate decisions locked in handoff §"Decisions resolved
+    during this session (do NOT re-debate)". JSON format, runtime-first
+    order, parallel C-core work, BEM mid-Phase-4, themes-in-both-files,
+    3 standard + 1 custom — all settled.
+  * Do NOT claim Track D — Opu has it.
+
+
+Open question GPT can weigh in on (optional)
+--------------------------------------------
+The BEM mapping is a 1-day track and is the largest unclaimed doc work.
+If after enumerating one or two of the heavier files (MainDashboard.css,
+ExportTab.css) you conclude the per-file BEM decisions are too
+context-dependent to centralise (e.g. the same class name means
+different things in different files because the components share
+markup), flag it. The plan's premise is that central mapping saves
+work; if your evidence says otherwise, the E-track agents can do
+naming case-by-case and you can ship a shorter "naming convention
+rules" doc instead of an exhaustive map. The user's principle is
+"look wins over guidelines" — same applies to process here.

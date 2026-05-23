@@ -1,0 +1,320 @@
+Opus QMail-GUI theme system handoff
+Date: 2026-05-22
+Author: Claude Opus 4.7 (1M context)
+Scope: Theme system planning + Phase 0 + Phase 1 implementation.
+
+
+Purpose
+-------
+This handoff is for the next session (any model) that picks up the
+theme work. Phase 0 and Phase 1 have shipped; Phase 2, Phase 3, and
+Phase 5 are still owned by Opu; Phase 4 has 22 parallel tracks
+(E1–E22) that any model can claim. Several non-Phase tracks
+(A/B/C/D/F) can also run in parallel.
+
+Project root: D:\Code\src\JavaScript\Qmail-GUI\
+Master plan:  docs\opu.theme.plan.txt   (~1,100 lines, revision 6)
+Status board: docs\theme.status.txt     (authoritative claim file)
+
+Read those two files FIRST. This handoff is the short summary and
+the gotchas — not a replacement for the plan.
+
+
+Status snapshot
+---------------
+DONE     P0   Phase 0: token + theme CSS files; FOUC script; restored
+              --glow-* tokens.
+DONE     P1   Phase 1: ThemeProvider + useTheme + ThemePicker; main.jsx
+              wraps <App>; AccountPane shows the live picker. Dark /
+              Light / High-Contrast switch and persist.
+OPEN     P2   High-contrast refinement (WCAG verify, focus rings, etc.)
+              — owned by Opu but waiting on Track B research.
+OPEN     P3   Custom theme via /api/system/theme — owned by Opu, depends
+              on Track D (themeService.js).
+OPEN     P5   Export/import + final docs — owned by Opu, depends on P3.
+
+OPEN     A    docs/theme.editable-tokens.md  — any model.
+OPEN     B    docs/theme.wcag-values.md      — any model with WCAG calc.
+OPEN     C    docs/theme.c-core-ticket.md    — any model.
+OPEN     D    src/api/themeService.js +tests — any model.
+OPEN     F    docs/theme.bem-mapping.md      — any model with patience.
+
+OPEN     E1   wallet/components/MainDashboard.css (2296 lines)
+OPEN     E2   wallet/components/tabs/ExportTab.css (1023)
+OPEN     E3   wallet/components/tabs/AuthenticateTab.css (987)
+OPEN     E4   wallet/components/tabs/LockerTab.css (971)
+OPEN     E5   qmail/screens/AccountPane.css (935)
+OPEN     E6   App.css (incl. update-modal extract) (803)
+OPEN     E7   screens/ServiceSelectionScreen.css (679)
+OPEN     E8   qmail/screens/ComposeModal.css (662)
+OPEN     E9   qmail/screens/EmailListPane.css (654)
+OPEN     E10  wallet/components/DicewarePasswordCreator.css (654)
+OPEN     E11  qmail/screens/ContactsPane.css (582)
+OPEN     E12  qmail/screens/QMailDashboard.css (565)
+OPEN     E13  qmail/screens/ReadingPane.css (516)
+OPEN     E14  qmail/screens/NavigationPane.css (368)
+OPEN     E15  wallet/components/PasswordScreen.css (369)
+OPEN     E16  components/common/notifications/NotificationContainer.css (334)
+OPEN     E17  wallet/components/USBCheckScreen.css (310)
+OPEN     E18  qmail/screens/AddContactModal.css (299)
+OPEN     E19  wallet/components/tabs/ReceiptModal.css (248)
+OPEN     E20  wallet/components/WelcomeScreen.css (204)
+OPEN     E21  qmail/screens/WalletSetupScreen.css (77)  ← good warm-up
+OPEN     E22  index.css cleanup pass (208)              ← do last
+
+The status file is the source of truth. Claim a track by editing
+its line. One track per agent at a time.
+
+
+What was shipped (file inventory)
+---------------------------------
+NEW files:
+  src/styles/tokens.css                       Token vocabulary + scales.
+  src/styles/themes.css                       Dark / light / high-contrast.
+  src/theme/themeContext.js                   React context + constants.
+  src/theme/ThemeProvider.jsx                 Applies data-theme to <html>.
+  src/theme/useTheme.js                       Hook.
+  src/theme/ThemePicker.jsx                   Settings UI radio group.
+  src/theme/ThemePicker.css                   Token-driven styles.
+  docs/opu.theme.plan.txt                     The 1,100-line plan.
+  docs/theme.status.txt                       Parallel-work claim file.
+  docs/opu.theme.handoff.txt                  THIS FILE.
+
+MODIFIED files:
+  index.html                                  FOUC script in <head>.
+  src/index.css                               :root removed; imports added.
+  src/main.jsx                                Wraps <App> in <ThemeProvider>.
+  src/qmail/screens/AccountPane.jsx           Picker replaces Dark Mode toggle.
+
+NOTHING was committed. The user explicitly approves before commits.
+Use git status to see the uncommitted state — note that the repo
+already had ~35 unrelated dirty files when I started, so be careful
+to scope any future commit to only the theme files listed above.
+
+
+Decisions resolved during this session (do NOT re-debate)
+---------------------------------------------------------
+The user resolved these on 2026-05-22. They are locked.
+
+  1. JSON format for custom_theme.txt. NOT YAML. The PHP spec at
+     D:\Code\src\PHP\cloudcoin.org-main\commands\system-theme.php
+     lists JSON as a documented option (line 446). Schema is in
+     plan §2.4. Includes validation rules to prevent CSS injection
+     through the <style> tag (regex on token keys; ban on ;/}//* in
+     values).
+  2. Runtime-first ship order. NOT tokens-first. Phase 0–3 ship the
+     runtime; Phase 4 does the giant consolidation. See §5 preamble
+     for why (and Gemini's plan now also agrees).
+  3. C-core spec discrepancies (§8) are a PARALLEL work-stream, not
+     blocking. The GUI's themeService.js (Track D) must accept BOTH
+     response shapes and log a one-time warning if it sees the old
+     C shape.
+  4. CSS consolidation is PHASED + BUNDLED (Phase 4). One file per
+     PR. BEM rename happens in the same touch.
+  5. Themes live in BOTH the high-contrast theme definition AND the
+     custom-theme JSON's "a11y" object. Editor exposes them via UI.
+  6. Three standard themes + one custom slot. NOT a preset library.
+     Matches the single-file backend constraint.
+
+User PREFERENCES (not gates — look wins over guidelines):
+  - Use h1–h6 for headings; do not introduce more levels.
+  - Bias toward semantic landmarks (nav, section, header, main,
+    footer, article, aside) when promoting from <div>.
+  - Spans stay where they are; they're semantic.
+  - No new inline style={{...}}; use CSS classes or CSS custom
+    properties for dynamic values.
+  - Flexbox/grid over nested divs where it doesn't change the look.
+  - Reduce raw colour literals; cap total tokens at ~80.
+  - **The app must look excellent. Any guideline that visibly
+    degrades a screen yields.**
+
+Full rules in plan §13.
+
+
+What changed in the file structure (so you know where things live)
+------------------------------------------------------------------
+src/styles/
+  tokens.css      — every CSS variable name + default value.
+                    Includes calc()-driven type scale.
+                    @media (prefers-reduced-motion) auto-applies
+                    --motion-scale: 0 at this level.
+  themes.css      — [data-theme="dark"], [data-theme="light"],
+                    [data-theme="high-contrast"],
+                    [data-theme="custom"] (empty slot).
+
+src/theme/
+  themeContext.js     — context + storage keys + STANDARD_THEMES list.
+  ThemeProvider.jsx   — provider component. Apply via main.jsx wrap.
+  useTheme.js         — { themeId, setTheme } hook.
+  ThemePicker.jsx     — radio group with three options.
+  ThemePicker.css     — fully token-driven; demonstrates §13
+                        markup-hygiene conventions for new code.
+
+src/index.css         — slimmed: now imports tokens.css + themes.css
+                        and keeps the global resets, body, scrollbar,
+                        headings. The :root block is GONE.
+
+index.html            — added FOUC-prevention script in <head>.
+
+src/main.jsx          — wraps <App> in <ThemeProvider>.
+
+
+Known gotchas / things future-you will trip on
+----------------------------------------------
+
+G1. The dark theme is defined in BOTH tokens.css :root AND in
+    themes.css [data-theme="dark"]. They contain identical values
+    on purpose: :root is the "no attribute set" fallback; the
+    [data-theme="dark"] rule is what the FOUC script and
+    ThemeProvider explicitly select. Keeping both lets the cascade
+    behave consistently even if data-theme is briefly absent. If
+    you change a dark value, change BOTH or the dark theme will
+    look different from "no attribute set."
+
+G2. The --glow-* tokens were COMMENTED OUT in the old index.css
+    (lines 44–47 of the original). Six component files reference
+    them. They are now restored to the dark theme's actual values.
+    THIS MEANS Phase 0 is NOT a zero-visual-diff change — glow
+    effects that were previously invisible are now visible on
+    primary/success buttons and active nav tabs. This is the
+    intended fix per plan §1.3b / §3.2. If a screenshot regression
+    is reported and the diff shows new glow halos, that is
+    correct, not a bug.
+
+G3. The new --motion-scale: 0 @media rule in tokens.css does
+    nothing for the current codebase — component CSS uses raw
+    durations like `transition: all 250ms ease`. Phase 4 will
+    rewrite those to `transition: all calc(250ms *
+    var(--motion-scale)) ease`. Until Phase 4 lands on a given
+    file, that file's animations still play even with OS-level
+    reduced-motion ON. The !important block at App.css :549–560
+    still works as a fallback for the un-migrated files; do NOT
+    delete it before Phase 4 finishes ALL files.
+
+G4. ThemePicker uses `appearance: none` on the radio input to
+    hide it visually while keeping it focusable. The custom
+    pseudo-radio dot is drawn with ::after. This pattern works
+    in Chromium (Electron) but if you ever need Firefox, double
+    check.
+
+G5. The localStorage keys are `qmail.theme` (active theme id) and
+    `qmail.theme.base` (base for custom themes; not used in P1 —
+    will be set by P3 when the user saves a custom theme). The
+    FOUC script reads both already, so P3 only needs to write the
+    base key when saving.
+
+G6. The light theme placeholder values in themes.css (plan §4.2)
+    were not WCAG-verified. Track B is the work item to do that.
+    If a user picks "Light" right now, some text/background
+    contrast pairs may fail WCAG AAA — flag this in any Track B
+    report, but do not block Phase 1 over it.
+
+G7. Phase 0 deliberately did NOT touch the 22 component CSS files.
+    All raw colour literals, font-sizes, and px spacing in those
+    files are still there. They will keep rendering correctly
+    against the dark theme (the values they hard-code happen to
+    match the dark theme), but switching to light or high-contrast
+    will show "incomplete theming" on un-migrated screens. This
+    is BY DESIGN — see §5 preamble. The screens that DO update
+    correctly under all three themes today are: anything driven
+    solely by global tokens (the body background, scrollbar, h1–h6
+    typography) and the new ThemePicker itself.
+
+G8. The C backend deviates from the PHP spec in five places (§8 of
+    the plan). The Phase 3 themeService.js must defensively accept
+    BOTH shapes. Do not assume the C-team will fix the spec mismatch
+    before P3 ships. Track C is the work item to file the C-team
+    backlog ticket; not blocking.
+
+G9. The PHP spec says GET creates the file with a default stub
+    when it does not exist. The C code returns empty content. The
+    GUI must treat `exists:false` as either "newly-created stub"
+    OR "permanent absence" depending on which server it talks to.
+    Plan §8 D2.
+
+
+Verification gates (run before any P-track or E-track PR)
+---------------------------------------------------------
+  PASS  npm run build               (vite, ~2.2s, dist ~390 KB)
+  PASS  npx eslint <touched-files>  (--max-warnings 0)
+  PASS  npm run dev                 (smoke-test: open AccountPane,
+                                     toggle dark → light → high-contrast,
+                                     confirm no console errors)
+
+For Phase 4 (E-tracks) additionally:
+  PASS  rg '#[0-9a-fA-F]+|rgba\(' <file>.css            → empty
+  PASS  rg 'font-size:\s*[0-9.]+(px|rem|em)' <file>.css → empty
+  PASS  rg 'style=\{\{' <file>.jsx                      → empty (or only
+                                                          --custom-property
+                                                          dynamic-value
+                                                          pattern from §13.6)
+  PR description includes: "div: X → Y, landmarks: A → B,
+                            inline styles: M → N, new tokens: <list>"
+
+
+First steps for the next session
+--------------------------------
+If continuing as Opu:
+  1. Read this file, then docs/theme.status.txt, then plan §5 and §12.
+  2. Decide: start P2 (high-contrast refinement) OR start P3 (custom
+     theme + themeService.js). P3 unlocks the most value but needs
+     Track D done first. P2 is smaller and reads cleanly from §4.3.
+  3. Either way: claim the track in docs/theme.status.txt before
+     starting.
+
+If continuing as a different model:
+  1. Read this file, then docs/theme.status.txt.
+  2. Pick a Track A/B/C/D/F (docs/research/parser, no CSS) or a Track
+     E1–E22 (one CSS file at a time, with JSX rename).
+  3. Claim the track in docs/theme.status.txt by editing its line.
+  4. The plan section relevant to your track:
+       Track A → §2.5 + §13.6 (editable subset definition)
+       Track B → §4.2 + §4.3 (palettes to verify)
+       Track C → §8 (the five discrepancies to file)
+       Track D → §2.6 + §1.4 (service module + API shapes)
+       Track F → §3.7 + §13 (BEM mapping rules)
+       Track E*→ §12.4 per-file checklist + §13 markup hygiene.
+  5. Do NOT commit unless the user asks.
+
+
+Things I deliberately did NOT do
+--------------------------------
+  - Did NOT commit. Repo has ~35 unrelated dirty files; user must
+    scope the eventual commit.
+  - Did NOT touch any of the 22 component CSS files. Phase 4 owns
+    that and it would conflict with E-track agents.
+  - Did NOT remove the App.css :549–560 prefers-reduced-motion
+    !important block (still needed for un-migrated files — see G3).
+  - Did NOT WCAG-verify the light/high-contrast palettes. Track B.
+  - Did NOT write themeService.js. Track D.
+  - Did NOT extend the C backend. Track C drafts the ticket; the
+    C-team owns the fix.
+  - Did NOT add any new colour tokens beyond what was already in
+    index.css. Phase 4 is where new tokens get added carefully
+    (cap target: ~80 total — see §13.7).
+
+
+Open architectural questions (for the user, not for you to decide)
+------------------------------------------------------------------
+  Q1. Should the "active theme" round-trip through the backend so
+      a user signing into QMail on a second machine inherits their
+      theme? Currently no — localStorage only. User said no last
+      turn but worth revisiting if multi-device usage becomes a
+      story.
+  Q2. Should Phase 5 export emit one JSON file per theme, or a
+      bundle? Plan says single file (qmail-theme-<name>.json).
+      Revisit if users start sharing collections.
+  Q3. After Phase 4 ships, should the dark/light/high-contrast
+      themes themselves move out of themes.css into separate
+      files (themes/dark.css, themes/light.css, …)? Currently
+      one file because they're small. May want to split if
+      Track B research adds 100+ lines per theme.
+
+These aren't blockers — flag them at the end of Phase 5 sign-off.
+
+
+Sign-off
+--------
+Phase 0 + Phase 1 verified clean (build + lint + dev server).
+Plan revision 6. Status file is authoritative for parallel work.
+No commits. Ready for context clear.

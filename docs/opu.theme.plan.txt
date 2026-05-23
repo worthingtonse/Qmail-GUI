@@ -1,0 +1,1425 @@
+# QMail GUI — Theme System Plan (Opus)
+
+Author: opu  |  Date: 2026-05-22  |  Revision: 6
+
+Revision 6 changes (user direction on HTML semantics and complexity):
+  * Added §13 "Markup hygiene during Phase 4" covering the user's
+    preferences for semantic HTML over div-soup, heading restriction
+    to h1–h6, no inline styles, palette reduction, and a flexbox/grid
+    bias.
+  * Codified these as PREFERENCES, not gates — the over-arching rule is
+    "the app must look excellent" (user direction). When a guideline
+    would visibly degrade a screen, the guideline yields.
+  * Updated Phase 4 (§5) and the E1–E22 per-file checklist (§12.4) to
+    include the markup-hygiene pass as part of the same touch.
+  * Added the measured baseline (529 div, 9 semantic landmarks, 152
+    span, 85 h*, 58 inline-style usages) so future agents can compare
+    progress.
+
+Revision 5 changes:
+  * Added §12 covering parallel work-streams. Phase 4 is the obvious
+    place to fan out (22 CSS files, mechanical conversion, each file
+    independent) but several other tracks can run in parallel with
+    Opu's Phase 0–3 implementation too.
+  * Adopted the "one agent per file, sequential merges" coordination
+    model (user direction). A shared status file lives at
+    docs/theme.status.txt where tracks are claimed and progress is
+    tracked.
+  * Phase 0 ships first (small, ~1–2 hours of work) and unblocks all
+    parallel CSS work. Non-CSS tracks (docs, research, C-core ticket
+    drafting) can start immediately.
+
+Revision 4 changes (after re-reading peers and gathering user direction):
+  * Switched the on-disk format from YAML back to JSON (Gemini's
+    position). The PHP spec lists YAML as "recommended" but also lists
+    JSON as a valid option (Option 2). JSON eliminates a 30-line custom
+    parser, has native browser support, and unblocks the editor. §1.4
+    notes the divergence from the spec's recommendation.
+  * Added §10 covering responsive design — breakpoint tokens
+    (--bp-sm/md/lg), the rem-everywhere convention so --font-scale
+    resizes layouts (not just type), and a documented audit of the
+    current ad-hoc clamp() usage.
+  * Auto-apply --motion-scale: 0 when the OS says prefers-reduced-motion
+    (§2.1, §6 R6) so accessibility doesn't depend on the user picking
+    high-contrast.
+  * Expanded Phase 4 to include BEM-style CSS class renaming during the
+    same token sweep (§3.7, §5). Doubles Phase 4's effort but does the
+    repo-wide naming refactor in one pass against a stable runtime.
+  * Added §11 explicitly listing the four points of substantive
+    disagreement between the three plans and which side this plan takes.
+
+Revision 3 changes (after re-reading peers' updated plans):
+  * Defended the runtime-first ship order against GPT's critique (§5
+    preamble). Both peers order tokenisation before React; this plan
+    deliberately inverts that — the §5 preamble now explains why.
+  * Adopted Gemini's calc(--font-scale) mechanism for the type scale
+    so accessibility "large print" works without touching component CSS
+    (§2.1, §3.3).
+  * Confirmed product-scope choices with the user: 3 standard themes +
+    1 custom slot (matches the single-file backend), export/import in
+    Phase 5, and §8 discrepancies tracked as a parallel C-team item
+    while the GUI ships defensively.
+  * Updated §9 to reflect peer plans' own revisions (both now include
+    critique sections; their feedback on this plan is summarised back).
+
+Revision 2 changes:
+  * Reconciled the API contract against the canonical spec at
+    D:/Code/src/PHP/cloudcoin.org-main/commands/system-theme.php
+    (recommended format is YAML, GET auto-creates the file with a default
+    stub, POST returns bytes_written + 413 on oversize). The §1.4 summary
+    has been corrected and §8 lists the C-vs-spec discrepancies the team
+    will need to resolve.
+  * Switched the on-disk format from JSON to the spec's recommended YAML
+    shape, with a documented "schema-on-top" convention.
+  * Added §9: critique of docs/gem.theme.plan.txt and docs/gpt.theme.plan.txt.
+
+Sibling docs:
+  docs/gem.theme.plan.txt   — Gemini's earlier pass. Strong on the
+                              [data-theme] attribute pattern.
+  docs/gpt.theme.plan.txt   — GPT's short pass. Strong on naming the
+                              "theme contract" and treating custom themes as
+                              first-class registry entries.
+
+
+===============================================================================
+1.  EXISTING SITUATION — WHAT IS ACTUALLY IN THE TREE TODAY
+===============================================================================
+
+1.1  CSS surface
+----------------
+Twenty-two CSS files, ~13,744 lines total, split across three feature areas:
+
+    src/index.css                        208   global vars + body + scrollbar
+    src/App.css                          803   buttons, inputs, cards, modal
+    src/screens/ServiceSelectionScreen   679
+    src/qmail/screens/*.css            3,759   QMail UI (8 files)
+    src/wallet/components/*.css        4,366   Wallet/Diceware/USB (5 files)
+    src/wallet/components/tabs/*.css   3,229   Authenticate/Export/Locker tabs
+    src/components/common/.../Notif...   334
+
+The single biggest file is wallet/components/MainDashboard.css at 2,296 lines.
+AccountPane.css (935), ExportTab.css (1,023), AuthenticateTab.css (987), and
+LockerTab.css (971) round out the heavy hitters.
+
+1.2  Variables already in place
+-------------------------------
+src/index.css :5–83 defines a usable design-token set under :root :
+
+    --primary-bg, --secondary-bg, --tertiary-bg, --card-bg, --card-hover
+    --accent-primary/secondary/tertiary, --accent-success/error/warning
+    --text-primary/secondary/tertiary/muted
+    --border-subtle/medium/strong
+    --glass-bg, --glass-bg-strong, --glass-blur, --glass-border
+    --shadow-sm/md/lg/xl
+    --font-primary, --font-display
+    --space-xs..2xl, --radius-sm..2xl
+    --transition-fast/base/slow/smooth
+    --status-success/error/warning/info  (+ matching -bg pairs)
+
+So the *token vocabulary* is already good — most colours, radii, spacings, and
+transitions are named. The real problems are below.
+
+1.3  Concrete problems (counted, not guessed)
+---------------------------------------------
+(a)  Heavy use of raw colours alongside the tokens. Across the 22 CSS files:
+       253 hex literals  (#aabbcc / #aabbccdd)
+       294 rgba() literals
+     Even App.css itself — which lives one directory away from index.css —
+     contains 9 hex literals and 33 rgba() literals (e.g. the linear-gradient
+     button styles hard-code  #8b5cf6 / #ef4444 / #10b981 / #2563eb), bypassing
+     the very tokens defined two files away.
+
+(b)  Glow tokens are referenced but undefined. App.css uses --glow-primary and
+     --glow-success in eight places, but the matching :root definitions in
+     index.css :44–47 are *commented out*. Those calls currently resolve to
+     nothing, so the design's intended glow is silently missing in production.
+
+(c)  Hardcoded font sizes. 282 font-size declarations across 18 files, only one
+     of which is in index.css. The rest use raw px / rem / em values, so a
+     "Large Fonts" accessibility theme cannot be implemented by changing one
+     variable.
+
+(d)  Hardcoded backdrop-filter / blur. 61 backdrop-filter usages across 17
+     files. Most pass the --glass-blur variable, but several call blur(...)
+     directly — those won't disable when a high-contrast theme needs to turn
+     glass effects off for clarity.
+
+(e)  Two redundant @keyframes fadeIn / slideIn definitions (one set in
+     App.css :249–281, a second set in App.css :771–789 for the update-modal).
+     The update-modal block (App.css :598–804) also hard-codes #1a1f2e,
+     #3b82f6, #2563eb, #f59e0b and #10b981 — a chunk that pre-dates the
+     variables system and never got migrated.
+
+(f)  No theme infrastructure in React. grep -i theme across src/ finds five
+     hits, all of which are doc-strings or comments. There is no
+     ThemeContext, no <html data-theme=...>, no theme picker UI. The
+     AccountPane "Dark Mode" toggle (AccountPane.jsx :582–585) is a
+     <ComingSoonToggle> placeholder.
+
+1.4  Backend endpoint — canonical spec
+--------------------------------------
+The endpoint contract is defined in:
+    D:/Code/src/PHP/cloudcoin.org-main/commands/system-theme.php
+
+Summary of the contract the GUI must satisfy:
+    GET    /api/system/theme
+           If the file does not exist yet, the server *creates* it with a
+           default stub (a "# Custom Theme Configuration" header) and
+           returns exists:false to indicate "newly created with defaults."
+           Returns:
+             { success:true, command:"get-theme",
+               file:"custom_theme.txt",
+               path:"Data/Themes/custom_theme.txt",
+               content:string, size:int, exists:bool }
+    POST   /api/system/theme
+           Body: raw text (Content-Type may be text/plain or
+           application/json — the server treats it as an opaque blob).
+           413 Payload Too Large if body > 8192 bytes.
+           400 Empty request body if body is empty.
+           Returns:
+             { success:true, command:"update-theme",
+               file:"custom_theme.txt",
+               path:"Data/Themes/custom_theme.txt",
+               bytes_written:int,
+               message:"Theme configuration updated successfully" }
+    DELETE /api/system/theme
+           Clears the file in place (keeps zero-byte file).
+           404 if the file never existed.
+           Returns:
+             { success:true, command:"theme",
+               action:"cleared",
+               message:"Theme file cleared successfully" }
+
+Important constraints flowing from the contract:
+  * Only one custom theme slot exists on disk (custom_theme.txt). The
+    plan below uses *one* slot — we do not need to extend the backend.
+  * 8192-byte cap is enforced server-side. Our serialisation has to fit
+    (the editor must show a live byte count and disable Save above the
+    limit; surface a 413 toast if a save sneaks past).
+  * The file is opaque to the server (no parsing, no execution). The
+    GUI owns the schema. The PHP spec lists YAML as "Recommended" but
+    also explicitly lists JSON (Option 2 at system-theme.php :446) as
+    valid. This plan uses **JSON** — see §2.4 for the reasoning. Note
+    in the project README that the file is JSON not YAML, so users
+    hand-editing don't follow the spec's first example by mistake.
+  * Path is "Data/Themes/custom_theme.txt" in the spec (in the C
+    implementation this becomes Client_Data/Themes/custom_theme.txt
+    relative to g_config.client_data_path — see §8 about the discrepancy).
+  * No theme service exists in src/api/. apiService.js (pattern at
+    src/api/apiService.js:1–80) is the existing convention: a small helper
+    module exporting async fns that call fetch against `${API_BASE_URL}/...`.
+    The new module (themeService.js) belongs here and uses the same
+    handleResponse() helper for error extraction.
+
+
+===============================================================================
+2.  TARGET ARCHITECTURE
+===============================================================================
+
+2.1  Token layer (file: src/styles/tokens.css — new)
+----------------------------------------------------
+Move the :root block out of index.css into its own file. Add the tokens that
+are currently missing or commented-out:
+
+    --glow-primary, --glow-secondary, --glow-success    (re-enable)
+    --font-scale        : 1          (multiplier; large-print theme = 1.25)
+    --font-size-base    : calc(16px * var(--font-scale))
+    --font-size-xs      : calc(12px * var(--font-scale))
+    --font-size-sm      : calc(14px * var(--font-scale))
+    --font-size-md      : calc(16px * var(--font-scale))
+    --font-size-lg      : calc(20px * var(--font-scale))
+    --font-size-xl      : calc(24px * var(--font-scale))
+    --font-size-2xl     : calc(32px * var(--font-scale))
+    --glass-blur-amount : 16px       (so themes can set it to 0 to flatten)
+    --glass-blur        : blur(var(--glass-blur-amount))
+    --motion-scale      : 1          (animation/transition multiplier;
+                                     see auto-apply rule below)
+
+Auto-apply rule for --motion-scale: an OS-level reduced-motion
+preference must override the active theme's --motion-scale, so users
+get the accessibility behaviour without picking the high-contrast
+theme. Add this once in tokens.css:
+
+    @media (prefers-reduced-motion: reduce) {
+      :root { --motion-scale: 0; }
+    }
+
+This means: dark/light themes set --motion-scale: 1; the high-contrast
+theme sets it to 0; and the @media rule above forces it to 0 anywhere
+the OS asks, regardless of theme. Folds the !important block currently
+at App.css :549–560 into the token, so we have one source of truth.
+
+The calc() pattern (borrowed from Gemini's plan) is the key trick: every
+component CSS file references `var(--font-size-md)` etc., never a raw px
+value. Changing --font-scale at the theme level scales the entire type
+ramp without any per-component code change. Same trick is used for
+--motion-scale by writing transitions as
+    transition: all calc(var(--transition-base-ms) * var(--motion-scale)) ease;
+so the high-contrast theme's `--motion-scale: 0` collapses every transition
+to zero duration in one place.
+
+Every existing token from index.css :5–83 stays, with names unchanged, so the
+22 component CSS files keep working without edits during phase 1.
+
+2.2  Theme layer (file: src/styles/themes.css — new)
+----------------------------------------------------
+One file holding the three standard themes plus the slot the user theme
+attaches to. Themes scope via data-attribute on <html>:
+
+    :root          { /* tokens only — values come from active theme */ }
+
+    [data-theme="dark"]            { /* current values from index.css */ }
+    [data-theme="light"]           { /* light palette */ }
+    [data-theme="high-contrast"]   { /* black/yellow, --glass-blur-amount:0,
+                                       --motion-scale:0, --font-scale:1.25,
+                                       --border-medium:2px solid #fff      */ }
+
+    [data-theme="custom"]          { /* empty; populated at runtime by the
+                                       <style id="qmail-user-theme"> tag    */ }
+
+Theme switch is one DOM write:
+    document.documentElement.setAttribute('data-theme', 'dark')
+
+2.3  Runtime — src/theme/ThemeProvider.jsx + src/theme/themeContext.js (new)
+---------------------------------------------------------------------------
+Responsibilities:
+  * On mount: read localStorage.qmail.theme (one of dark | light |
+    high-contrast | custom).
+  * Apply data-theme to <html> *synchronously* before first paint (do this
+    from a small inline script in index.html so there is no FOUC flash).
+  * If the active theme is "custom", call GET /api/system/theme; parse the
+    returned JSON; inject the overrides into a <style id="qmail-user-theme">
+    element appended to <head>.
+  * Expose useTheme() returning:
+        { themeId, setTheme(id), customTheme, saveCustom(obj), clearCustom() }
+
+Wiring point:  src/main.jsx :6–10 currently wraps <App/> in <StrictMode>; add
+<ThemeProvider> around <App/> there.
+
+2.4  Custom theme file format (what we POST to /api/system/theme)
+-----------------------------------------------------------------
+Keep it small — 8192-byte cap. The PHP spec lists JSON as a valid
+format (system-theme.php :446, "Option 2: JSON Format"). This plan
+chooses JSON over the spec's "Recommended" YAML because:
+
+  * Native browser support — JSON.parse / JSON.stringify avoid pulling
+    in (or writing) a YAML parser, and JSON's tighter grammar means we
+    won't accept ambiguous user input.
+  * Stricter validation — invalid YAML fails in subtle ways (whitespace
+    significance, type coercion); invalid JSON fails immediately at the
+    quote level, surfacing errors earlier.
+  * The same editor that produces the file can also pretty-print it,
+    keeping the human-readable surface YAML offers without the parser.
+
+A theme file is a JSON document with metadata + a flat "tokens" map
+keyed on CSS custom-property names:
+
+    {
+      "schema":  "qmail-theme/1",
+      "name":    "My Theme",
+      "author":  "sean",
+      "base":    "dark",          // one of: dark, light, high-contrast
+      "a11y": {
+        "reduced_motion": false,
+        "large_print":    false
+      },
+      "tokens": {
+        "--accent-primary": "#22c55e",
+        "--secondary-bg":   "#0a0a0a",
+        "--font-scale":     "1.1",
+        "--radius-md":      "6px"
+      }
+    }
+
+(JSON itself does not support comments — the "// one of: dark, ..."
+inline is illustrative for this doc only. The editor will surface allowed
+values via UI dropdowns and a separate help panel, not via file
+comments.)
+
+Why this shape:
+  * `base` lets a user start from light/dark/high-contrast and only
+    override a few things — keeps the payload tiny and forward-
+    compatible if we add new tokens later.
+  * `tokens` is a flat map of CSS custom-property name to literal
+    value, so serialising it to a <style> block is one line per entry:
+        :root[data-theme="custom"] { --accent-primary: #22c55e; ... }
+  * `schema: "qmail-theme/1"` is our version marker. Unknown schemas →
+    fall back to the named `base` theme; never throw.
+  * `a11y` flags are first-class so users can tick "reduced motion" or
+    "large print" without knowing the underlying token names. The
+    ThemeProvider translates these into the corresponding token
+    overrides (--motion-scale, --font-scale) before injecting the
+    <style> tag.
+
+The 8192-byte cap is generous: at ~40 bytes per override, the user
+can override ~150 tokens after the JSON header — far more than the
+editable subset (§2.5) ever exposes.
+
+Validation rules (enforced before POST and before injecting overrides):
+  * Token keys must match /^--[a-z0-9-]+$/.
+  * Token values must be string scalars containing no semicolon (;),
+    no closing brace (}), and no slash-asterisk (/*). This prevents
+    CSS injection through the <style> tag.
+  * `base` must be one of dark, light, high-contrast.
+  * Unknown top-level fields are ignored (forward compatibility).
+
+2.5  Settings UI — replace the AccountPane "Dark Mode" placeholder
+------------------------------------------------------------------
+AccountPane.jsx :577–594 currently has four <ComingSoonToggle> rows. Replace
+the Dark Mode row with a real <ThemePicker> that renders:
+
+    ( ) Dark            (default)
+    ( ) Light
+    ( ) High contrast / large print
+    ( ) Custom          [Edit...]   [Reset]
+
+The [Edit...] button opens a <ThemeEditorModal> that:
+  * Loads the standard theme picked as the base into a working copy.
+  * Shows colour pickers + sliders for the practical subset of tokens
+    (accent-primary, accent-secondary, secondary-bg, text-primary,
+    radius-md, font-scale, glass-blur-amount, motion-scale).
+  * "Save" -> POST /api/system/theme with the JSON above, switch active
+    theme to "custom", inject the <style> tag, reload.
+  * "Reset" -> DELETE /api/system/theme, switch active theme back to "dark".
+
+2.6  Service layer — src/api/themeService.js (new)
+--------------------------------------------------
+Three thin functions, in the apiService.js style:
+
+    export async function fetchUserTheme()         // GET   -> {exists,content}
+    export async function saveUserTheme(obj)       // POST  body = JSON.stringify(obj)
+    export async function clearUserTheme()         // DELETE
+
+fetchUserTheme parses content (which is the raw file the server returned) as
+JSON and validates {version, base, tokens}. On parse failure it returns a
+neutral { exists:false } and logs — a corrupted theme file must never break
+the GUI.
+
+
+===============================================================================
+3.  CONSOLIDATION PLAN  (the "easier to change" part of the request)
+===============================================================================
+
+This is mechanical work, mostly done file-by-file. Each step is independent
+and reviewable on its own.
+
+Step 3.1 — Inventory hex / rgba literals per file
+  Tool:  ripgrep '#[0-9a-fA-F]{3,8}\b|rgba\(' per file.
+  Already counted (§1.3a) — totals 547 raw colour literals across 22 files.
+  For each unique literal, decide: (a) maps to an existing token? rename.
+  (b) is a one-off accent for a specific component? leave it, but add a
+  per-component token like --compose-attachment-pill-bg into themes.css and
+  reference *that* from the component CSS.
+
+Step 3.2 — Restore the commented-out glow tokens (index.css :44–47)
+  Required before phase 4 — App.css already references them.
+
+Step 3.3 — Drive the type scale through one variable
+  Tokens are already defined (§2.1) as
+    --font-size-* : calc(<base-px> * var(--font-scale))
+  so per-file work is purely substitution: replace each raw font-size with
+  the closest --font-size-* token. The 282 declarations break down roughly
+  as: 91 in MainDashboard.css, 34 AuthenticateTab, 31 LockerTab, 29 each
+  in DicewarePasswordCreator/ExportTab — heavy files first.
+  pass A: top-level layouts (App.css, index.css, ServiceSelection)
+  pass B: QMail screens
+  pass C: Wallet screens (MainDashboard is the big one)
+  pass D: tabs and modals
+  After each pass, toggle high-contrast at 1.25x and confirm no per-component
+  CSS still hard-codes a px value that fails to scale.
+
+Step 3.4 — De-duplicate the update-modal block in App.css
+  App.css :598–804 is a self-contained chunk that uses raw hex (#1a1f2e,
+  #3b82f6, #2563eb, #f59e0b, #10b981). Move to src/components/UpdateModal.css,
+  swap literals for tokens (--secondary-bg, --accent-secondary, etc.), and
+  drop the second fadeIn/slideIn @keyframes copies (App.css :771–789).
+
+Step 3.5 — Extract glass-morphism utility classes
+  .glass-pane, .glass-card, and .glass-overlay are reimplemented at least
+  half a dozen times across the heavy CSS files (search for `backdrop-filter`
+  combined with `rgba(255, 255, 255` / `var(--glass-bg)`). Move the canonical
+  versions into tokens.css and have the per-component files compose them via
+  `@extend`-style class composition in JSX (className="glass-pane email-row").
+
+Step 3.6 — Sweep the dead code
+  MainDashboard.css and AccountPane.css both contain commented-out blocks
+  from earlier iterations. Delete those before phase 1 finishes; they're
+  noise that makes the cross-file audit harder.
+
+Step 3.7 — Rename classes to BEM convention (done during Phase 4)
+  Current naming is ad-hoc and inconsistent — `.account-confirm-overlay`,
+  `.update-modal-header`, `.nav-tab.active`, `.glass-sound-btn`. Three
+  different patterns (kebab-case-with-context, no-context kebab, modifier-
+  via-second-class) appear within ten lines in App.css alone.
+
+  Adopt BEM (Block__Element--Modifier) as we touch each file in Phase 4:
+      .account-pane                       (block)
+      .account-pane__confirm-overlay      (element)
+      .account-pane__confirm-overlay--open (modifier)
+      .nav-tab                            (block)
+      .nav-tab--active                    (modifier; was .nav-tab.active)
+      .btn                                (block)
+      .btn--primary, .btn--ghost          (modifiers; were .primary etc.)
+
+  Rules of engagement for the rename:
+  * Each renamed class must be searched-and-replaced across both the CSS
+    file *and* every JSX that references it. ripgrep both before merging.
+  * Keep the old class name as a comment in the CSS for one release cycle
+    (e.g. `/* was: .account-confirm-overlay */`) so reviewers can map
+    PRs back to git history. Remove these comments in the release after.
+  * Don't bulk-rename across files — do one file's classes + their JSX
+    references in one PR, so each rename is reviewable in isolation.
+  * Component-namespaced blocks (.account-pane, .compose-modal) prevent
+    the cross-file collision risk of bare element names.
+
+  This is bundled into Phase 4 deliberately: we're already touching every
+  CSS file to tokenise, and JSX files only need to be touched if we also
+  rename classes — so doing both at once halves the file churn.
+
+
+===============================================================================
+4.  STANDARD THEMES — DEFINITIONS
+===============================================================================
+
+4.1  dark  (default; equivalent to today's look)
+    Inherit current :root values from src/index.css :5–83 verbatim. The user
+    sees no visible change after the refactor.
+
+4.2  light
+    --primary-bg            : linear-gradient(135deg, #f8fafc 0%, #eef2f7 100%)
+    --secondary-bg          : #ffffff
+    --tertiary-bg           : rgba(15, 20, 25, 0.04)
+    --card-bg               : #ffffff
+    --card-hover            : #f1f5f9
+    --text-primary          : #0f172a
+    --text-secondary        : #334155
+    --text-tertiary         : #64748b
+    --text-muted            : rgba(51, 65, 85, 0.6)
+    --border-subtle         : rgba(15, 20, 25, 0.08)
+    --border-medium         : rgba(15, 20, 25, 0.12)
+    --border-strong         : rgba(15, 20, 25, 0.2)
+    --accent-primary        : #6d28d9   (deeper purple — meets contrast on white)
+    --accent-secondary      : #0284c7
+    --accent-success        : #059669
+    --accent-error          : #dc2626
+    --glass-bg              : rgba(255, 255, 255, 0.7)
+    --glass-bg-strong       : rgba(255, 255, 255, 0.85)
+    --shadow-*              : same shape, lighter alphas (0.04..0.12)
+    --glow-primary          : 0 0 20px rgba(109, 40, 217, 0.25)
+
+4.3  high-contrast  (combined high-contrast + large-print accessibility theme)
+    --primary-bg            : #000000
+    --secondary-bg          : #000000
+    --tertiary-bg           : #000000
+    --card-bg               : #000000
+    --card-hover            : #1a1a00
+    --text-primary          : #ffffff
+    --text-secondary        : #ffff00      (yellow — high readability on black)
+    --text-tertiary         : #ffff00
+    --accent-primary        : #ffff00
+    --accent-success        : #00ff00
+    --accent-error          : #ff5555
+    --border-subtle         : 1px solid #ffffff
+    --border-medium         : 2px solid #ffffff
+    --border-strong         : 3px solid #ffffff
+    --glass-blur-amount     : 0px           (kills frost — backgrounds become flat)
+    --glass-bg              : #000000       (kills translucency)
+    --motion-scale          : 0             (animations off — wraps existing
+                                              transition tokens; see §2.1)
+    --font-scale            : 1.25          (multiplies the type scale)
+    --radius-sm/md/lg/...   : keep, but optionally reduce for sharper edges
+
+Acceptance: all text/background pairs above clear WCAG AAA (7:1).
+
+
+===============================================================================
+5.  PHASING (deliverable per phase — each is mergeable on its own)
+===============================================================================
+
+Note on ship order
+------------------
+Both peer plans (Gemini, GPT) put the tokenisation sweep *before* React
+plumbing — Gemini's Phase 1 is "Tokenization and Cleanup," GPT explicitly
+calls this plan out for "leaning too quickly into a specific React
+architecture before the CSS token cleanup is fully mapped." That is a fair
+critique and we take it seriously, but we are deliberately going the other
+way for one reason:
+
+  * Tokenisation is mechanical and large (~547 raw colours + ~282 font-
+    sizes). It will take weeks. During those weeks no user can see a
+    different theme, because there is no runtime. Risk: the work stalls
+    and ships in a giant unreviewable PR.
+  * The React runtime is small (a Provider, a `<style>` tag, an inline
+    bootstrap script in index.html) and *doesn't depend on the tokenisation
+    being complete*. Whatever is already token-driven (which is most of
+    the layout, all of the spacing, most of the borders) will react to a
+    theme change today. Hardcoded values stay frozen at their dark-theme
+    values until phase 4 mops them up.
+
+So phases 0–3 land the runtime and a real picker first, and phase 4 does
+the long tokenisation sweep against a stable runtime that is already in
+production. This makes the per-file token migration small and reviewable
+("convert AccountPane.css → click switch → confirm light theme looks
+right") instead of a single mega-PR.
+
+Acceptance criterion for this choice: at the end of phase 3, switching
+to "light" should leave roughly the App-shell and the picker itself
+looking right; per-screen visual debt is acknowledged and tracked in
+phase 4 tickets. If that's not acceptable to product, fall back to
+Gemini's ordering.
+
+
+Phase 0 — Plumbing (no visible change)
+  * Create src/styles/tokens.css; move :root block from index.css into it;
+    import it from index.css so the existing import order is preserved.
+  * Create src/styles/themes.css with one rule:
+       [data-theme="dark"] { /* re-applies the same values */ }
+    so the cascade is consistent once we attach data-theme on <html>.
+  * Add the FOUC-prevention inline script to index.html that reads
+    localStorage.qmail.theme and sets <html data-theme=...> before React
+    mounts.
+  * Restore the --glow-* tokens (§3.2).
+  * Verify zero visual diff against main.
+
+Phase 1 — ThemeProvider + light theme
+  * Add src/theme/{ThemeProvider.jsx, themeContext.js, themes/light.css,
+    themes/dark.css}.
+  * Wrap <App/> in <ThemeProvider> in main.jsx.
+  * Ship the radio-button picker in AccountPane (replace the Dark Mode
+    placeholder). At this point the user can toggle between dark and light.
+
+Phase 2 — High-contrast / large-print
+  * Add themes/high-contrast.css with values from §4.3.
+  * Add the --motion-scale wiring so animations actually disable
+    (search-and-replace any hard-coded transition durations to use the token
+    or multiply by --motion-scale via calc()).
+  * Run a WCAG check on every screen.
+
+Phase 3 — Custom theme + backend
+  * Add src/api/themeService.js (§2.6).
+  * On startup, if active theme === "custom", fetch and inject overrides
+    (§2.3).
+  * Build ThemeEditorModal: pickers for the subset of editable tokens in §2.5,
+    Save / Reset.
+  * Show the user the raw JSON in an "Advanced" disclosure (pretty-
+    printed with 2-space indent) so power users can hand-edit beyond
+    the picker subset (still bounded by the 8192-byte cap — surface
+    that 413 error if a save exceeds it).
+
+Phase 4 — Consolidation sweep
+  * Steps 3.1, 3.4, 3.5, 3.6 from §3 — token-ise the 547 raw colour
+    literals and 282 raw font-sizes across the heavy CSS files; delete
+    dead code.
+  * Step 3.7 — rename classes to BEM in the same pass, since we're
+    already touching every file. JSX references update in lockstep.
+  * Apply §13 markup-hygiene guidelines on the JSX side of the same
+    touch: promote semantic landmarks where they fit, restrict heading
+    levels to h1–h6, extract inline styles to CSS.
+  * Largest phase by volume but safe to do *after* the runtime is
+    shipping because variable names don't change for the migrated
+    declarations — only literal→var substitution, BEM rename, and
+    semantic-tag promotion.
+  * One file at a time, one PR each. Reviewers can verify each rename
+    in isolation by toggling the theme picker and visually scanning
+    the touched screen.
+
+Phase 5 — Polish
+  * Add a "Share this theme" button that downloads the file as
+    qmail-theme-<name>.json (pretty-printed); "Import" that uploads a
+    .json file (validates schema-version + token whitelist, then POSTs).
+  * Document the editable-token subset in docs/ — so users hand-editing
+    the JSON know which tokens are supported and what the value formats
+    are.
+
+
+===============================================================================
+6.  RISKS & WATCHPOINTS
+===============================================================================
+
+R1  FOUC on first paint.
+    The data-theme attribute must be on <html> before React mounts.  Solve
+    with an inline script in index.html (no module, no import) that reads
+    localStorage synchronously. The "custom" theme can't avoid an async
+    /api/system/theme fetch, so on first paint we render the *base* theme
+    from the JSON's "base" field — we duplicate that field into localStorage
+    on every save for exactly this reason.
+
+R2  Tokens used inside linear-gradient() and box-shadow stops.
+    var() works in those positions in all current Electron / Chromium builds,
+    but @keyframes interpolation does not animate var() changes smoothly.
+    Currently we only animate transform/opacity in keyframes, so no
+    regression — but the theme audit (Phase 4) should flag any future
+    keyframe colour interpolation.
+
+R3  Backwards compatibility of the on-disk theme file.
+    custom_theme.txt is opaque to the server. The "schema: qmail-theme/1"
+    line in §2.4 gives us forward compatibility. fetchUserTheme() must
+    treat an unknown schema as "ignore, fall back to base" and surface a
+    one-time toast — never throw, never block startup.
+
+R4  8192-byte cap.
+    Generous for our token surface, but the editor must show a live byte
+    count and disable Save above the limit (don't rely on the server 400 —
+    surface it earlier).
+
+R5  Custom theme corrupted on disk.
+    If JSON.parse fails or the schema is unrecognised, fetchUserTheme
+    returns { exists:false } so the GUI silently falls back to dark. We
+    also surface a *non-blocking* toast on the next settings open:
+    "Your custom theme could not be loaded; falling back to the dark
+    theme. [View raw] [Reset]". The token-validation rules in §2.4
+    must run on every token before the override <style> is injected —
+    a malformed value containing "; }" could break out and inject
+    arbitrary CSS.
+
+R6  prefers-reduced-motion vs. high-contrast.
+    The OS-level @media (prefers-reduced-motion: reduce) block in App.css
+    :549–560 currently sets all animation durations to 0.01ms via !important.
+    Resolved by §2.1's auto-apply rule: a single @media block in tokens.css
+    drives --motion-scale to 0, the rest of the codebase reads the token,
+    and the !important block is deleted as part of Phase 4. One source of
+    truth, no scattered overrides.
+
+R7  Touch-cursor block in App.css :565–582 changes background and transform
+    on button:active. Verify the high-contrast theme still has visible focus
+    rings on touch — the outline-only fallback in App.css :585–595 should be
+    sufficient but worth a screen check.
+
+
+===============================================================================
+7.  ONE-PAGE SUMMARY FOR HANDOFF
+===============================================================================
+
+What exists now:
+  * Solid CSS-variable vocabulary in src/index.css, but ~547 raw colour
+    literals and ~282 raw font-sizes still bypass it.
+  * No React-side theme switching. AccountPane has a placeholder toggle.
+  * Backend /api/system/theme is already implemented (GET/POST/DELETE,
+    8192-byte cap, single file Client_Data/Themes/custom_theme.txt).
+
+What we build:
+  * Split tokens into src/styles/tokens.css; standard themes
+    (dark/light/high-contrast) in src/styles/themes.css gated by
+    [data-theme=...] on <html>.
+  * src/theme/ThemeProvider applies data-theme synchronously and, for the
+    "custom" theme, fetches the user's JSON from /api/system/theme and
+    injects overrides into <style id="qmail-user-theme">.
+  * Settings UI: real radio picker replacing the Dark-Mode placeholder,
+    plus a ThemeEditorModal that POSTs a small JSON doc (schema/name/
+    base/a11y/tokens) back to the same endpoint.
+  * Token-ise the remaining 547 colour literals + 282 font-sizes so future
+    themes only edit src/styles/themes.css.
+
+Ship order: §5 phases 0 → 5. Each phase is independently mergeable; the
+consolidation sweep (phase 4) is the longest but is safe to do last because
+nothing else depends on it.
+
+
+===============================================================================
+8.  C IMPLEMENTATION vs. PUBLIC SPEC — DISCREPANCIES TO RESOLVE
+===============================================================================
+
+The canonical contract is the PHP reference page
+(D:/Code/src/PHP/cloudcoin.org-main/commands/system-theme.php). The current
+C implementation in
+(D:/Code/src/C/rest_core/api_src/api_handlers_system.c :964–1048)
+does not match the spec in five places. None of these blocks Phase 0–2 work,
+but they need to be picked up before Phase 3 ships, because the GUI's
+themeService.js will be coded against the spec.
+
+D1  Storage path.
+    Spec  : Data/Themes/custom_theme.txt
+    Code  : g_config.client_data_path + "/Themes/custom_theme.txt"
+            (the prefix depends on runtime config)
+    Action: confirm with whoever owns the C core whether the spec means
+            "wherever Data/ resolves to" or whether the C code should be
+            renaming the root from Client_Data to Data. The GUI doesn't
+            care which path the server uses (it never sees the absolute
+            path beyond logging) — but the spec's `path` field in the
+            response should match reality.
+
+D2  GET when file is missing.
+    Spec  : server creates the file with a default stub
+            ("# Custom Theme Configuration\n# Add your theme settings here\n",
+             68 bytes) and returns exists:false.
+    Code  : returns content:"", size:0, exists:false; does NOT create.
+    Action: make the C handler create-on-GET, with the same default stub
+            as the spec. The GUI assumes the file always exists after the
+            first GET (it relies on exists:false to mean "newly created,
+            show first-run defaults," not "permanent absence").
+
+D3  Response field names.
+    Spec  : { success, command, file, path, content, size, exists }   on GET
+            { success, command, file, path, bytes_written, message } on POST
+            { success, command, action, message }                     on DELETE
+    Code  : { status, exists, size, content }                          on GET
+            { status, action:"saved", size }                           on POST
+            { status, action:"cleared", message }                      on DELETE
+    Action: rename the C json_success_response keys to match the spec.
+            The GUI's handleResponse() in apiService.js looks for `success`,
+            `message`, `error`, `detail`, `details` — `status` is not in
+            that list, so without this fix error extraction degrades to the
+            HTTP-status fallback. Until D3 is fixed, themeService.js will
+            be defensive (accept either `success` or `status === "success"`)
+            and log a one-time warning if it sees the old shape, so we know
+            when the server upgrade lands.
+
+D4  Oversize POST.
+    Spec  : 413 Payload Too Large
+    Code  : 400 (json_error_response_from_string "Theme too large (max 8192
+            bytes)")
+    Action: change the HTTP status to 413. The GUI surfaces the error
+            message either way, but matching the spec lets us write
+            `if (response.status === 413) showOversizeToast()` cleanly.
+
+D5  DELETE of a never-existed file.
+    Spec  : 404 with message "Theme file does not exist"
+    Code  : matches (good).
+
+These are server-side fixes, listed here so they're scoped together when the
+C core gets touched. The GUI plan does not depend on any of them being
+resolved before Phase 0 starts — it depends on D2 and D3 being resolved
+before Phase 3 ships.
+
+
+===============================================================================
+9.  CRITIQUE OF THE OTHER PLANS  (positive — what to borrow / what to add)
+===============================================================================
+
+Both peer plans have themselves been revised since their first publication.
+This section is calibrated to the *current* state of each as of 2026-05-22.
+
+9.1  docs/gem.theme.plan.txt  (Gemini, ~63 lines)
+-------------------------------------------------
+After revision, Gemini's plan is now well-aligned with this one — it
+imports the 547/282 counts, the `[data-theme]` primitive, and a Phase 3
+inline-script bootstrap to avoid FOUC. It also published its own §4
+critique with three strong observations on this plan, summarised below.
+
+Strong points worth borrowing (or already borrowed):
+  * §2.1's `[data-theme]` attribute approach — adopted independently here.
+  * §2.1's "redefine `--border-strong` to a full border shorthand
+    (2px solid #fff)" trick for high-contrast — adopted in §4.3.
+  * **§2.1 (Phase 2): the `calc()` mechanism for font scaling.** Gemini
+    writes "Introduce a `--font-scale` variable used in a calc() for all
+    font-size definitions to support global scaling." This is the
+    cleanest expression of how the per-component CSS stays untouched
+    when --font-scale changes. This revision adopts the explicit
+    `calc(<base-px> * var(--font-scale))` form in §2.1 and §3.3.
+  * The `<style id="custom-theme-overrides">` injection mechanism —
+    same approach this plan uses (renamed to `qmail-user-theme`).
+  * Gemini's §3 phase order (tokenisation Phase 1, runtime Phase 3) is
+    the *opposite* of this plan's. This plan now defends its choice
+    explicitly in the preamble to §5 — Gemini's order is also defensible
+    and is the fallback if "incomplete light theme on day one" isn't
+    acceptable to product.
+
+What this plan adds on top of Gemini:
+  * The exact 8KB backend contract is read out of the spec rather than
+    referenced generically.
+  * §8 lists five C-vs-spec discrepancies Gemini's plan doesn't surface.
+  * The `--glow-primary/--glow-success` commented-out tokens (§1.3b) —
+    a buried one-line bug Gemini doesn't mention.
+  * Concrete heavy-file breakdown for font-size consolidation in §3.3
+    (91 in MainDashboard, etc.).
+
+Gemini's three-bullet feedback on this plan (gem.theme.plan.txt §4):
+  * "Specific counts of raw literals provide a clear quantifiable
+    roadmap." — Validated; counts retained.
+  * "Base Inheritance strategy respects the 8KB limit." — Validated;
+    the `base:` field stays in §2.4.
+  * "Proposing `--motion-scale` shows deep consideration for modern
+    accessibility." — Validated; --motion-scale stays in §2.1.
+
+No corrections from Gemini that aren't already addressed.
+
+9.2  docs/gpt.theme.plan.txt  (GPT, ~46 lines)
+----------------------------------------------
+GPT's plan was also revised; it now has a "Backend facts" section that
+captures the endpoint shape, a "CSS consolidation" section, and a
+critique section. GPT's plan remains the most strategic and least
+prescriptive of the three.
+
+Strong points worth borrowing (or already borrowed):
+  * The "theme contract" framing — adopt in the Phase 5 docs.
+  * The "custom themes register the same way as built-in ones" principle
+    (§29) — reflected in this plan's `[data-theme="custom"]` design.
+  * The metadata fields (name, author, version, a11y flags) — adopted
+    into the JSON schema in §2.4.
+  * GPT's §40 synthesis line — "gem's product intent, opu's backend
+    precision, this plan's focus on gradual CSS consolidation" — is a
+    fair triangulation. This plan attempts to combine all three.
+
+GPT's substantive critique of this plan (gpt.theme.plan.txt §39):
+
+    "Its weak spot is that it leans too quickly into a specific React
+     architecture before the CSS token cleanup is fully mapped."
+
+Response: this is a real critique, not a misunderstanding. Both peer
+plans order tokens-first; this plan deliberately inverts that. The §5
+preamble (added in revision 3) lays out the trade-off:
+  * Token-cleanup first means a perfect first-paint of every theme but
+    weeks of invisible work, risk of stall, and a giant unreviewable
+    PR at the end.
+  * Runtime-first means an "incomplete light theme" lands in week one
+    and tokenisation becomes 22 small per-file PRs against a stable
+    runtime, each visually verifiable.
+This plan chooses runtime-first while documenting the trade-off so the
+team can fall back to tokens-first if "incomplete light on day one" is
+unacceptable to product.
+
+What this plan adds on top of GPT:
+  * File paths, line numbers, ripgrep counts.
+  * Concrete token additions (--font-scale, --motion-scale,
+    --glass-blur-amount) that turn GPT's abstract "accessibility flags"
+    into actual variables a stylesheet can use.
+  * The JSON schema is fully specified (with validation rules), not
+    just sketched.
+  * §8's C-vs-spec discrepancies are surfaced and assigned to a
+    parallel work-stream so the GUI is not blocked on C-team turnaround.
+
+9.3  Synthesis — what was added to this plan because of the others
+------------------------------------------------------------------
+From Gemini:
+  * The `--border-strong = 2px solid #fff` shorthand redefinition
+    trick for high-contrast (§4.3).
+  * The explicit `calc(<base-px> * var(--font-scale))` form for the
+    type scale (§2.1) — the mechanical heart of how large-print works
+    without touching component CSS.
+
+From GPT:
+  * `name` / `author` metadata + `a11y:` section as first-class
+    structure in the schema (§2.4).
+  * The "theme contract" framing for the Phase 5 docs.
+  * Architectural critique → §5 preamble defending runtime-first
+    ordering and naming the conditions under which the team should
+    fall back to tokens-first.
+
+From the PHP spec (the highest-authority source, found while reviewing
+the other plans):
+  * Discovered the spec offers JSON as Option 2 alongside YAML —
+    eventually chose JSON over YAML for the parser-and-validation
+    reasons in §2.4.
+  * Corrected the API contract throughout §1.4.
+  * Added §8 listing the C-vs-spec discrepancies that need to be
+    reconciled in parallel with the GUI work.
+
+From the user (clarifying questions answered 2026-05-22):
+  * Confirmed scope is three standard themes + one custom slot (no
+    bundled preset library) — this matches the backend's single-file
+    constraint and avoids expanding the C endpoint.
+  * Confirmed Phase 5 ships export/import as files for shareability.
+  * Confirmed the §8 server discrepancies become a C-team backlog
+    item but do not block GUI work — themeService.js codes defensively
+    for both response shapes.
+  * Resolved disputes in favour of JSON format (Gemini's position
+    rather than YAML), runtime-first ordering, and parallel C-team
+    work. See §11.
+  * Confirmed responsive design and BEM naming are in scope (added
+    §10 and §3.7 respectively); auto-apply of prefers-reduced-motion
+    is in scope (added to §2.1).
+
+
+===============================================================================
+10. RESPONSIVE DESIGN & SIZING  (currently invisible in all three plans)
+===============================================================================
+
+10.1  Why this section belongs in the theme plan
+------------------------------------------------
+The accessibility "large print" theme works by multiplying every type
+size by --font-scale. That only works correctly if the layout *also*
+scales when the type does — otherwise an oversized font overflows a
+fixed-width container. Layout and type sizing are joined at the hip;
+the theme system has to acknowledge that.
+
+This is also the right moment to standardise responsive sizing because
+the Phase 4 sweep is already going to touch every CSS file.
+
+10.2  Current state — measured
+-----------------------------
+  * 49 uses of clamp() across 21 files, no consistent floor/ceiling.
+    Examples: index.css h1 uses clamp(2rem, 5vw, 3rem); MainDashboard
+    uses ten separate clamp() calls with different scaling factors.
+  * Five different breakpoints in use today, by file:
+        640px   App.css, WelcomeScreen, PasswordScreen, USBCheckScreen
+        768px   DicewarePasswordCreator, MainDashboard (3x)
+        968px   MainDashboard (1x)
+        1024px  MainDashboard (1x)
+        1200px  MainDashboard (1x)
+    There is no document explaining why these specific widths were
+    chosen — they appear to be picked per-component when something
+    visibly broke.
+  * Mix of px and rem throughout. Modals declare max-width in px
+    (App.css :619 = 480px; WelcomeScreen = 500–650px), while heading
+    sizes use rem via clamp() (good). Spacing tokens (--space-*) are
+    px, which means they don't scale with --font-scale.
+
+The inconsistency itself is the problem. None of it is unsafe; all of
+it makes the theme system harder to reason about.
+
+10.3  Standards this plan adopts
+--------------------------------
+(a) Breakpoint tokens (add to tokens.css):
+
+      --bp-sm:  640px    /* phone / very narrow window           */
+      --bp-md:  1024px   /* tablet / standard laptop sidebar     */
+      --bp-lg:  1440px   /* large laptop / desktop default       */
+      --bp-xl:  1920px   /* full HD external monitor             */
+
+    CSS Custom Properties don't work directly inside @media queries
+    (a spec gap), so the *values* live as comments in tokens.css for
+    documentation and we keep them as bare literals in @media:
+        @media (min-width: 1024px) { /* --bp-md */ ... }
+
+    During Phase 4, every existing media query is rounded to the
+    nearest breakpoint above. So 968 → 1024 and 1200 → 1440. We
+    accept a few pixels of visual drift to get one consistent ruler.
+
+(b) rem everywhere for sizes that should scale with --font-scale.
+    Convert the --space-* tokens from px to rem:
+        --space-xs: 0.25rem    (was 4px)
+        --space-sm: 0.5rem
+        --space-md: 1rem
+        --space-lg: 1.5rem
+        --space-xl: 2rem
+        --space-2xl: 3rem
+    The browser's base rem = 16px, so today's px values map 1:1. The
+    change is invisible until --font-scale moves; then padding,
+    gaps, and margins scale with the type and modals don't burst.
+
+(c) Modal/container max-widths stay in px (or move to rem with the
+    same rule). Either is fine; pick one per Phase 4 sweep. Current
+    `max-width: 480px` becomes `max-width: 30rem` for the same
+    visible result on default font-size.
+
+(d) Document the clamp() convention. The pattern in use today —
+    `clamp(<min-rem>, <preferred-vw>, <max-rem>)` for headings — is
+    correct and worth keeping. Make it explicit:
+        h1: clamp(1.5rem, 3vw, 2.5rem)
+        h2: clamp(1.25rem, 2.5vw, 2rem)
+    Headings are the only place clamp() is *needed* in this app
+    (the Electron window is the viewport — most other elements live
+    inside fixed-width containers). Remove clamp() from anywhere
+    it's used unnecessarily.
+
+(e) Container queries (@container) are *not* added in this pass. The
+    QMail UI doesn't have component-level reflow needs that media
+    queries don't solve. Revisit if the app gains an embeddable mode
+    or a resizable side panel.
+
+(f) Minimum window size. The Electron window has a configurable
+    minWidth/minHeight (in electron.cjs). The smallest breakpoint
+    we'll *design for* is --bp-sm (640px). The smallest the window
+    is *allowed* to be should match — set minWidth: 640 in
+    electron.cjs (currently no min; check during Phase 4).
+
+10.4  Tracking
+--------------
+Phase 4 owns the breakpoint normalisation (folded into the same
+per-file sweep as tokenisation and BEM renaming). Phase 0–3 don't
+need to do anything responsive — they just don't add new hardcoded
+breakpoints to the codebase.
+
+
+===============================================================================
+11. POINTS OF DISAGREEMENT BETWEEN THE THREE PLANS
+===============================================================================
+
+Summary of where the three plans differ and which side this revision
+takes (with brief reasoning). Useful for whoever inherits this work.
+
+D1  On-disk format for custom_theme.txt
+    Gemini  : JSON (rev 2)
+    GPT     : YAML
+    Opu     : was YAML; now JSON (this revision)
+    Decided: JSON. Removes the need for a hand-rolled YAML parser,
+             surfaces malformed input faster, and the PHP spec lists
+             JSON as a documented option (system-theme.php :446) so
+             we are not breaking the contract — only choosing a
+             different documented branch of it.
+
+D2  Phase ordering: token cleanup vs. React runtime
+    Gemini  : Backend alignment Phase 0, runtime Phase 1, consolidation
+              Phase 3 (i.e. runtime first)
+    GPT     : "Move repeated token definitions into a shared theme
+              layer first" — token cleanup first
+    Opu     : Runtime-first (Phase 0–3), consolidation Phase 4
+    Decided: Runtime-first. Reasoning in the §5 preamble. Note that
+             Gemini's revised plan now aligns with this — only GPT
+             still recommends tokens-first.
+
+D3  C-core spec discrepancies: blocking or parallel
+    Gemini  : Phase 0 — blocking, fix C before any GUI work
+    GPT     : "Reconcile the endpoint contract before implementation
+              if the backend docs and C code must be made consistent"
+              (conditional)
+    Opu     : Parallel work-stream; GUI codes defensively
+    Decided: Parallel. The GUI's themeService.js accepts either
+             response shape and logs a one-time warning if it sees
+             the old one — so the C upgrade can land independently
+             without coordination.
+
+D4  Scope of CSS consolidation work
+    Gemini  : "Surgical replacement" of all 547 colors + 282 font-sizes
+              (single phase, all files)
+    GPT     : Gradual, "starting with shared app chrome and then the
+              QMail screens"
+    Opu     : Phased by heavy-file priority, bundled with BEM rename
+              (revision 4)
+    Decided: Phased + bundled. One PR per CSS file, each visually
+             verifiable by toggling the theme picker. Avoids both the
+             giant-PR risk of Gemini's surgical approach and the
+             open-endedness of GPT's gradual approach.
+
+D5  Where do accessibility flags live? (minor)
+    Gemini  : Inside the high-contrast theme definition only
+    GPT     : First-class metadata in the theme file ("accessibility
+              flags as part of the theme metadata so the editor can
+              expose them without requiring users to know token
+              names")
+    Opu     : Both. The high-contrast theme bakes in 1.25x font-scale
+              and 0 motion-scale; the custom theme's "a11y" object in
+              the JSON schema (§2.4) lets a custom theme opt into the
+              same flags without copying the values. GPT's framing
+              wins for the editor UX.
+
+D6  Custom theme presets / starter pack (resolved by user)
+    Gemini  : Three standard + one custom slot
+    GPT     : "Custom themes should register the same way as built-in
+              themes" — implies the door is open to multiple
+    Opu     : was open; now confirmed three standard + one custom slot
+              (matches the single-file backend; no extension needed)
+    Decided: Three standard + one custom. User confirmation 2026-05-22.
+
+What everyone agrees on:
+  * [data-theme] attribute on <html> is the right runtime primitive.
+  * tokens.css separate from themes.css.
+  * <style id="qmail-user-theme"> (Gemini) / "custom-theme-overrides"
+    is the injection mechanism for custom themes.
+  * 8192-byte cap drives a base-inheritance schema (override-only,
+    don't ship full token sets).
+  * High-contrast theme should reduce blur, reduce motion, increase
+    font-scale, and sharpen borders — not just invert colours.
+  * The AccountPane "Dark Mode" placeholder is the integration point
+    for the picker.
+
+
+===============================================================================
+12. PARALLEL WORK-STREAMS
+===============================================================================
+
+12.1  Coordination model
+------------------------
+  * One agent owns one file at a time. No two agents touch the same
+    CSS file or the same JSX file concurrently — even though the CSS
+    changes are isolated, JSX files often import multiple CSS files
+    so two CSS-renames against the same component cause merge pain.
+  * Sequential merges. Opu merges in arrival order. If two PRs touch
+    overlapping JSX, the second rebases.
+  * Status file at docs/theme.status.txt is the source of truth for
+    "who is doing what right now." Claim a track by editing one line.
+    Format and seed entries are created alongside this revision.
+  * No track may start (other than Track A docs/research) until
+    Phase 0 has merged. Phase 0 creates tokens.css and themes.css —
+    every other track imports from these files.
+
+12.2  Track summary
+-------------------
+
+  Track  Description                                     Depends on
+  -----  ------------------------------------------      ------------
+  P0     Phase 0: tokens.css + themes.css + FOUC script  -
+  P1     Phase 1: ThemeProvider + light theme + picker   P0
+  P2     Phase 2: high-contrast theme                    P1
+  P3     Phase 3: custom theme + themeService.js         P1
+  P5     Phase 5: export/import                          P3
+  A      Editable-token doc                              -
+  B      WCAG values research (light + high-contrast)    -
+  C      C-core ticket: §8 discrepancies → backlog       -
+  D      themeService.js defensive parser (unit tests)   -  *
+  E1-22  Phase 4 per-file CSS conversion (22 tracks)     P0
+  F      BEM class rename mapping document               -
+
+  * Track D writes the parser + tests against the spec; the
+    integration into ThemeProvider happens in P3. Useful work
+    can start before P3.
+
+12.3  Tracks that can run before Phase 0 merges
+-----------------------------------------------
+
+  Track A — Editable-token doc
+    Output: docs/theme.editable-tokens.md listing the subset of
+    tokens the editor will surface (accent-primary, accent-secondary,
+    secondary-bg, text-primary, radius-md, font-scale,
+    glass-blur-amount, motion-scale), each with: allowed value
+    format (e.g. "hex color #rrggbb"), default per built-in theme,
+    one-sentence description, and a screenshot/diagram of what it
+    affects.
+    Suited to: any model. ~half-day's work. Becomes the help panel
+    content in §2.5's ThemeEditorModal.
+
+  Track B — Light + high-contrast WCAG values
+    Output: docs/theme.wcag-values.md listing every text/background
+    pair in the light and high-contrast themes from §4.2 / §4.3,
+    with measured WebAIM contrast ratios and a pass/fail per pair
+    against WCAG AAA (7:1 normal text, 4.5:1 large text). Where a
+    pair fails, propose a better value.
+    Suited to: a model with web access to a WCAG calculator, or
+    one that can do the maths from the relative-luminance formula.
+    Output should be a table with the proposed values that go into
+    themes.css. ~half-day's work.
+
+  Track C — C-core ticket draft
+    Output: ticket text for the C-core team summarising the five
+    D1–D5 discrepancies in §8. Include: what the spec says, what
+    the C code does today, the exact lines to change, and a
+    one-paragraph rationale for each. Sized as five linked sub-tasks.
+    Suited to: any model. Drop output in docs/theme.c-core-ticket.md.
+    ~1 hour.
+
+  Track D — themeService.js parser + tests
+    Output: src/api/themeService.js (the three async fns) + a Vitest
+    test file that exercises both response shapes (the spec's
+    { success, command, ... } and the current C { status, ... })
+    plus the JSON schema validation rules from §2.4 (token-key
+    regex, value blacklist for ;/}//*, base whitelist, oversize
+    error path, corrupted-JSON fallback).
+    Suited to: a model strong on test design. Imports nothing
+    from the not-yet-existing ThemeProvider — it's a pure module.
+    P3 integrates it. ~half-day's work.
+
+  Track F — BEM rename mapping
+    Output: docs/theme.bem-mapping.md — a table of every current
+    class name across the 22 CSS files mapped to its target BEM
+    name. Produced by ripgrep + manual judgement. Reviewed before
+    any Phase 4 PR uses it.
+    Suited to: any model with patience for tabular work. Lets
+    Phase 4 agents skip the per-file naming decision. ~1 day.
+
+12.4  Tracks that run after Phase 0 merges
+------------------------------------------
+
+  Tracks E1 through E22 — one per CSS file, biggest first:
+
+    E1  wallet/components/MainDashboard.css         (2,296 lines, ~91 fonts)
+    E2  wallet/components/tabs/ExportTab.css        (1,023 lines, ~29 fonts)
+    E3  wallet/components/tabs/AuthenticateTab.css  (987 lines, ~34 fonts)
+    E4  wallet/components/tabs/LockerTab.css        (971 lines, ~31 fonts)
+    E5  qmail/screens/AccountPane.css               (935 lines)
+    E6  App.css                                     (803 lines, incl. update-modal extract)
+    E7  screens/ServiceSelectionScreen.css          (679 lines)
+    E8  qmail/screens/ComposeModal.css              (662 lines)
+    E9  qmail/screens/EmailListPane.css             (654 lines)
+    E10 wallet/components/DicewarePasswordCreator.css (654 lines)
+    E11 qmail/screens/ContactsPane.css              (582 lines)
+    E12 qmail/screens/QMailDashboard.css            (565 lines)
+    E13 qmail/screens/ReadingPane.css               (516 lines)
+    E14 qmail/screens/NavigationPane.css            (368 lines)
+    E15 wallet/components/PasswordScreen.css        (369 lines)
+    E16 components/common/notifications/NotificationContainer.css (334 lines)
+    E17 wallet/components/USBCheckScreen.css        (310 lines)
+    E18 qmail/screens/AddContactModal.css           (299 lines)
+    E19 wallet/components/tabs/ReceiptModal.css     (248 lines)
+    E20 wallet/components/WelcomeScreen.css         (204 lines)
+    E21 qmail/screens/WalletSetupScreen.css         (77 lines)
+    E22 index.css cleanup pass                      (208 lines, remove relocated tokens)
+
+  Per-file work in each Ej:
+    1. Replace raw colour literals → existing or new tokens.
+    2. Replace raw font-sizes → --font-size-* tokens (§2.1).
+    3. Replace raw spacing → --space-* tokens (now in rem).
+    4. Replace raw blur values → var(--glass-blur).
+    5. Replace raw transition durations → token * var(--motion-scale).
+    6. Round breakpoints to the §10.3 scale (640/1024/1440/1920).
+    7. Rename classes to BEM per docs/theme.bem-mapping.md (Track F).
+    8. JSX side (same PR): apply §13 markup-hygiene preferences ON
+       THE TOUCHED COMPONENT ONLY — promote landmarks (nav/header/
+       main/section/footer/aside) where one fits, fold any inline
+       `style={{...}}` into the CSS, ensure headings stay within h1–h6,
+       collapse layout div-stacks to flex/grid where the same look
+       drops a div level. Stop when further changes would risk the
+       look or the bug surface.
+    9. Update every JSX import + className reference.
+    10. Visual smoke test: toggle dark → light → high-contrast and
+        confirm the touched screen renders correctly in all three.
+
+  Acceptance criteria per Ej:
+    * CSS: ripgrep of the file shows zero hex literals, zero rgba(),
+      zero raw font-size px/rem values, zero raw spacing px values —
+      only var(...) calls or values inside url() / calc() / clamp()
+      expressions.
+    * JSX: zero `style={{...}}` blocks in the touched component
+      (extract to CSS classes). Heading tags only h1–h6. No
+      regressions in semantic-landmark count (the count goes up or
+      stays the same; never down).
+    * Look: the screen looks the same or better. Visible regressions
+      override every guideline.
+
+12.5  Suggested initial assignments (claim by editing theme.status.txt)
+-----------------------------------------------------------------------
+Opu (this model) implements: P0, P1, P2, P3, P5.
+Other models can claim:      A, B, C, D, F immediately;
+                             E1–E22 once P0 has merged.
+
+The plan does not prescribe which model takes which lettered track.
+First-claim wins. The status file is the authoritative record.
+
+
+===============================================================================
+13. MARKUP HYGIENE DURING PHASE 4  (preferences, not gates)
+===============================================================================
+
+13.1  Overriding principle
+--------------------------
+The site must look excellent. Every rule below is a preference that
+yields when applying it would visibly degrade a screen. Phase 4 is
+already a large mechanical sweep; we use that touch to nudge markup
+toward standards rather than initiating a separate refactor that
+might break working components.
+
+If a guideline below conflicts with the look, the look wins. Note the
+exception in the PR description with one line: "kept .foo as <div>
+because <section> introduced a margin collapse on Safari" or similar.
+
+13.2  Baseline (measured 2026-05-22)
+------------------------------------
+  <div>      529 occurrences across 28 JSX files
+  <span>     152
+  <h1>–<h6>   85
+  <nav>        2
+  <section>    3
+  <header>     2
+  <main>       1
+  <footer>     2
+  <article>    0
+  <aside>     1
+  inline `style={{...}}` blocks: 58
+
+The site is overwhelmingly div-soup with nine semantic landmarks. Phase
+4 should move this ratio meaningfully without rewriting components.
+
+13.3  Heading levels — restrict to h1–h6
+----------------------------------------
+  * Use h1–h6 for all titles. Do not introduce `<div class="title">` or
+    `<p class="section-heading">` patterns. If a "heading-style" piece
+    of text is not actually a heading (e.g. a label above an input),
+    keep it as a `<label>`, `<p>`, or `<span>` — not a styled div.
+  * Honour document outline: one h1 per screen (the screen's title).
+    Children of that screen use h2 for major sections, h3 for
+    subsections, and so on. Do not skip levels to get a font-size.
+    Font-size lives in CSS, not in tag choice.
+  * If six levels feel insufficient, look first at whether the screen
+    has the wrong outline. Six is enough for QMail's screen depth.
+
+13.4  Semantic landmarks — bias toward, don't force
+---------------------------------------------------
+  Promote a `<div>` to a semantic tag when its role is clearly one of
+  these:
+
+    <header>    Top bar of a screen, a card's title region.
+    <nav>       The navigation tabs in NavigationPane and the wallet's
+                tab strip in MainDashboard.
+    <main>      The primary content region of each screen — exactly
+                one per screen.
+    <section>   A self-contained block with its own heading. Account
+                pane's "Account Information" / "Settings" blocks fit.
+    <article>   A self-contained piece of content (email list item,
+                contact card). EmailListItem and ContactCard are
+                strong candidates.
+    <aside>     Sidebar / supplementary content. NavigationPane fits.
+    <footer>    Bottom bar of a screen or a card.
+
+  Do *not* promote a `<div>` to a landmark when it's purely a layout
+  wrapper for flex/grid alignment. A wrapper that exists only to add
+  display:flex stays as `<div>`.
+
+  Spans are exempt: `<span>` for inline text formatting is correct
+  semantic HTML. Don't replace inline spans with anything.
+
+13.5  Reduce div nesting via flexbox/grid
+-----------------------------------------
+  The codebase has many places where two or three nested `<div>`s
+  exist to achieve a layout that one flex/grid container could
+  handle. Examples (look for these patterns during a Phase 4 PR):
+
+    <div class="row">                  →  one flex container
+      <div class="row__left">
+        <div class="row__title">...</div>
+        <div class="row__subtitle">...</div>
+      </div>
+      <div class="row__actions">...</div>
+    </div>
+
+  becomes:
+
+    <article class="row">              (or stays <div> if not an article)
+      <header class="row__head">
+        <h3>...</h3>
+        <p>...</p>
+      </header>
+      <menu class="row__actions">...</menu>
+    </article>
+
+  Rules of engagement:
+    * Drop a wrapping div only when one *function* (the wrapper does
+      nothing besides containing). A wrapper that adds padding or a
+      background can stay.
+    * `display: contents` is *not* a substitute for removing the div
+      — accessibility-tree exposure varies. Just remove the div.
+    * Don't collapse a div if removing it changes the cascade for
+      child styles. Verify visually after.
+
+13.6  Inline styles — extract to CSS
+------------------------------------
+  The 58 `style={{...}}` blocks must go. Replacement options in
+  priority order:
+
+  1. Existing class in the component's CSS file — add to it.
+  2. New class in the component's CSS file with a BEM name.
+  3. Inline CSS custom property if the value is dynamic (state-
+     driven): `style={{ '--row-color': severity.color }}` is
+     acceptable because the *style sheet* still owns the rule
+     that reads --row-color. This is the only inline-style pattern
+     that survives.
+
+  Dynamic values that need to flow into CSS go through custom
+  properties; never via `style={{ color: severity.color }}` directly.
+
+13.7  Palette reduction
+-----------------------
+  The 51 CSS variables in index.css are not the problem — they
+  define an intentional palette. The 547 raw colour literals that
+  bypass them are the problem.
+
+  During each E-track:
+    1. Collect every distinct colour literal in the file.
+    2. Each colour either (a) maps to an existing token (most do —
+       look for a 0–10% lightness delta and use the existing token),
+       or (b) is a true component-specific accent that needs a new
+       token in themes.css.
+    3. If a file introduces more than 2 new tokens, that's a smell —
+       the component is probably reinventing existing palette colours.
+       Prefer mapping to existing tokens with a small visual
+       compromise to introducing new ones.
+
+  Cap target: total distinct tokens in tokens.css + themes.css stays
+  under 80. We're at ~51 today; the audit should add at most ~30 new
+  ones across all 22 files combined. If a single component wants to
+  add 10 new tokens, push back.
+
+13.8  Verification per PR
+-------------------------
+  Before opening a Phase 4 PR, the agent runs:
+
+    rg '<div\b'         <touched.jsx>   # counts div uses
+    rg 'style=\{\{'     <touched.jsx>   # must be empty (or only
+                                          custom-property pattern)
+    rg '<h[1-6]\b'      <touched.jsx>   # confirm heading levels
+    rg '#[0-9a-fA-F]+|rgba\(' <touched.css>  # must be empty
+
+  PR description includes the delta:
+    "div: 23 → 14, semantic landmarks: 0 → 3, inline styles: 2 → 0,
+     new tokens: --row-shadow added to themes.css."
+
+  Reviewers verify by opening the screen in dev mode and toggling
+  themes.

@@ -5,6 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QMail</title>
+    <script>
+      /* Theme FOUC prevention — plan §6 R1.
+       * Reads the saved theme synchronously before React mounts.
+       * If no choice has been made yet, the OS dark/light preference
+       * is honoured on first launch. Custom themes fall back to the
+       * saved "base" theme until the async overrides land. */
+      (function () {
+        try {
+          var stored = localStorage.getItem('qmail.theme');
+          var base = localStorage.getItem('qmail.theme.base');
+          var theme = stored;
+          if (theme === 'custom' && base) theme = base;
+          if (!theme) {
+            theme = (window.matchMedia &&
+                     window.matchMedia('(prefers-color-scheme: light)').matches)
+                    ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

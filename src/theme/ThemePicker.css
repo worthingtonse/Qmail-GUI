@@ -1,0 +1,115 @@
+/* ThemePicker — fully token-driven so it reads correctly under every
+ * theme. Follows the §13 markup-hygiene preferences from the plan:
+ * fieldset + legend, semantic ul/li, no inline styles, BEM names. */
+
+.theme-picker {
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+}
+
+.theme-picker__legend {
+  padding: 0 var(--space-sm);
+  font-family: var(--font-display);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.theme-picker__description {
+  margin: 0 0 var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.theme-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.theme-picker__item {
+  margin: 0;
+}
+
+.theme-picker__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  cursor: pointer;
+  transition: all calc(250ms * var(--motion-scale)) ease;
+}
+
+.theme-picker__option:hover {
+  border-color: var(--border-medium);
+  background: var(--card-hover);
+}
+
+.theme-picker__option--checked {
+  border-color: var(--accent-primary);
+  background: var(--card-hover);
+  box-shadow: var(--glow-primary);
+}
+
+.theme-picker__input {
+  /* Hide native radio without losing keyboard focus or screen-reader
+   * presence. The label highlight is the visible indicator. */
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+}
+
+.theme-picker__input:checked {
+  border-color: var(--accent-primary);
+}
+
+.theme-picker__input:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+}
+
+.theme-picker__input:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.theme-picker__icon {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.theme-picker__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.theme-picker__label {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+}
+
+.theme-picker__hint {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
