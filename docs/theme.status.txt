@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (E22 complete; E11 in progress with gpt; E12–E21 ready for visual smoke)
+Last updated: 2026-05-23 by opu (Track C complete; rest_core fixes shipped as 0f26e8e on branch qmail; E10 in progress with gpt)
 
 Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 
@@ -105,8 +105,15 @@ B      DONE     opu     docs/theme.wcag-values.md (40 pairs measured,   ~half
                         from first principles; gradients reported at
                         both stops. Audit script at
                         scripts/wcag-audit.mjs (uncommitted).
-C      OPEN     -       docs/theme.c-core-ticket.md (the five §8        ~1
-                        discrepancies → ready for C-team backlog).      hour
+C      DONE     opu     docs/theme.c-core-ticket.md drafted + C fixes  ~1
+                        shipped in rest_core api_handlers_system.c     hour
+                        as commit 0f26e8e on branch qmail. Re-audit
+                        found D3 already resolved upstream (plan §8
+                        was stale); D1/D5 no-action; D2 (GET stub)
+                        + D4 (413 oversize) + D6 (DELETE removes
+                        file, new finding) shipped. rest_core build
+                        clean. GUI shims in themeService.js can be
+                        removed in a follow-up after C team verifies.
 D      DONE     opu     src/api/themeService.js + 30 Vitest tests.      ~half
                         Pure module, no React imports. Handles both     day
                         response shapes (spec + current C) and emits a
@@ -131,9 +138,9 @@ E5     OPEN     -       qmail/screens/AccountPane.css                         93
 E6     OPEN     -       App.css (incl. update-modal extract to its own file)  803
 E7     OPEN     -       screens/ServiceSelectionScreen.css                    679
 E8     OPEN     -       qmail/screens/ComposeModal.css                        662
-E9     OPEN     -       qmail/screens/EmailListPane.css                       654
-E10    OPEN     -       wallet/components/DicewarePasswordCreator.css         654
-E11    IN PROGRESS gpt     qmail/screens/ContactsPane.css                        582
+E9     IN REVIEW   gpt     qmail/screens/EmailListPane.css                       654
+E10    IN PROGRESS gpt     wallet/components/DicewarePasswordCreator.css         654
+E11    IN REVIEW   gpt     qmail/screens/ContactsPane.css                        582
 E12    IN REVIEW   gpt     qmail/screens/QMailDashboard.css                      565
 E13    IN REVIEW   gpt     qmail/screens/ReadingPane.css                         516
 E14    IN REVIEW   gpt     qmail/screens/NavigationPane.css                      368
