@@ -58,6 +58,11 @@
   --glow-secondary: 0 0 20px rgba(125, 211, 252, 0.3);
   --glow-success:   0 0 20px rgba(52, 211, 153, 0.3);
 
+  /* Decorative particles — match dark accents at low alpha */
+  --particle-1: rgba(167, 139, 250, 0.08);
+  --particle-2: rgba(125, 211, 252, 0.08);
+  --particle-3: rgba(251, 191, 36,  0.05);
+
   /* Motion */
   --motion-scale: 1;
 }
@@ -107,6 +112,12 @@
   --glow-primary:   0 0 20px rgba(91, 33, 182, 0.25);   /* was rgba(109, 40, 217, ...) */
   --glow-secondary: 0 0 20px rgba(7,  89, 133, 0.25);   /* was rgba(2,  132, 199, ...) */
   --glow-success:   0 0 20px rgba(6,  95,  70, 0.25);   /* was rgba(5,  150, 105, ...) */
+
+  /* Decorative particles — softer alpha on white; dark hues at 0.08
+     would smear too visibly. */
+  --particle-1: rgba(91,  33, 182, 0.04);   /* light accent-primary */
+  --particle-2: rgba(7,   89, 133, 0.04);   /* light accent-secondary */
+  --particle-3: rgba(146, 64,  14, 0.03);   /* light accent-tertiary */
 
   /* Lighter shadows for paper-on-paper feel */
   --shadow-sm: 0 1px 3px rgba(15, 20, 25, 0.04), 0 1px 2px rgba(15, 20, 25, 0.06);
@@ -178,6 +189,12 @@
   --status-error-bg:   #000000;
   --status-warning-bg: #000000;
   --status-info-bg:    #000000;
+
+  /* Particles — zeroed (body::after is also opacity:0 below, so this
+     is belt-and-suspenders). */
+  --particle-1: transparent;
+  --particle-2: transparent;
+  --particle-3: transparent;
 }
 
 /* High-contrast: functional refinements (P2 (a)).

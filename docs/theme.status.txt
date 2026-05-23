@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (Track A complete; E12 in progress with gpt; E13/E14/E15/E16/E17/E18/E19/E20/E21 ready for visual smoke)
+Last updated: 2026-05-23 by opu (E22 complete; E11 in progress with gpt; E12–E21 ready for visual smoke)
 
 Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 
@@ -133,8 +133,8 @@ E7     OPEN     -       screens/ServiceSelectionScreen.css                    67
 E8     OPEN     -       qmail/screens/ComposeModal.css                        662
 E9     OPEN     -       qmail/screens/EmailListPane.css                       654
 E10    OPEN     -       wallet/components/DicewarePasswordCreator.css         654
-E11    OPEN     -       qmail/screens/ContactsPane.css                        582
-E12    IN PROGRESS gpt     qmail/screens/QMailDashboard.css                      565
+E11    IN PROGRESS gpt     qmail/screens/ContactsPane.css                        582
+E12    IN REVIEW   gpt     qmail/screens/QMailDashboard.css                      565
 E13    IN REVIEW   gpt     qmail/screens/ReadingPane.css                         516
 E14    IN REVIEW   gpt     qmail/screens/NavigationPane.css                      368
 E15    IN REVIEW   gpt     wallet/components/PasswordScreen.css                  369
@@ -144,7 +144,7 @@ E18    IN REVIEW   gpt     qmail/screens/AddContactModal.css                    
 E19    IN REVIEW   gpt     wallet/components/tabs/ReceiptModal.css               248
 E20    IN REVIEW   gpt     wallet/components/WelcomeScreen.css                   204
 E21    IN REVIEW   gpt     qmail/screens/WalletSetupScreen.css                    77
-E22    OPEN     -       index.css cleanup pass (remove relocated tokens)      208
+E22    IN REVIEW opu    index.css cleanup pass (token swaps complete; visual smoke pending)  208
 
 ================================================================================
 ACCEPTANCE CRITERIA REMINDERS

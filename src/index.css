@@ -36,7 +36,8 @@ body::before {
   z-index: -2;
 }
 
-/* Subtle Particle Effect */
+/* Subtle Particle Effect — three radial gradients themed per
+   --particle-1/2/3. P2 (a) sets opacity:0 under high-contrast. */
 body::after {
   content: '';
   position: fixed;
@@ -45,10 +46,10 @@ body::after {
   width: 100%;
   height: 100%;
   background-image:
-    radial-gradient(circle at 20% 30%, rgba(167, 139, 250, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(125, 211, 252, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, rgba(251, 191, 36, 0.05) 0%, transparent 50%);
-  animation: particleFloat 20s ease-in-out infinite;
+    radial-gradient(circle at 20% 30%, var(--particle-1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, var(--particle-2) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, var(--particle-3) 0%, transparent 50%);
+  animation: particleFloat calc(20s * var(--motion-scale)) ease-in-out infinite;
   z-index: -1;
   pointer-events: none;
 }
@@ -98,9 +99,9 @@ p {
 code {
   font-family: 'Fira Code', 'Courier New', monospace;
   background: var(--tertiary-bg);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 0.9em;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-sm);
 }
 
 /* Scrollbar Styling */
@@ -115,7 +116,7 @@ code {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-medium);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 ::-webkit-scrollbar-thumb:hover {
