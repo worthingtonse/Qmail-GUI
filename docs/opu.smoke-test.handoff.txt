@@ -1,0 +1,467 @@
+QMail-GUI smoke-test handoff
+============================
+From: Claude Opus 4.7 (Phase 3 reviewer, exiting session)
+Date: 2026-05-23
+For:  Next session (any model) running the two-client smoke test
+      against a live backend.
+
+Purpose
+-------
+Sean is ready to start manual end-to-end verification of the QMail-GUI
+work that landed in commits 61fa333 (CI workflow) and b89c439
+(Phase 1-3 GUI + closure snapshot). This file:
+
+  1. Documents Sean's existing two-client test rig on E:\.
+  2. Answers Sean's questions about manual vs browser-driven testing.
+  3. Consolidates the full manual checklist into one file the next
+     session can walk top-to-bottom.
+
+CSS refactor warning
+--------------------
+Sean is about to start a CSS refactor workstream after this session.
+b89c439 is the rollback point. If a CSS change breaks something the
+smoke test catches, `git reset --hard b89c439` (or `git checkout b89c439
+-- src/**/*.css`) restores the pre-refactor CSS state. Don't lose this
+SHA.
+
+
+Sean's questions, answered
+==========================
+
+Q1. "How should we set up the testing?"
+
+The rig already exists on E:\. Two independent client setups, each
+with its own core.exe binary and its own pinned port:
+
+  E:\Client1\
+    core.exe              ← rest_core binary
+    Client_Data\
+      rest_core.conf      ← http_port=8081, identity SN 55076
+                            (@chariot.pyramid.byte)
+      qmail.db            ← Client1's mail store
+      Wallets\
+      ... + raida, telemetry, guardians, etc.
+    qmail_test_attachment.txt  ← test file for attachment flows
+
+  E:\Client2\
+    core.exe              ← rest_core binary
+    Client_Data\
+      rest_core.conf      ← http_port=8082, identity SN 55077
+                            (@chariot.harbor.byte)
+      qmail.db            ← Client2's mail store
+      Wallets\
+
+To start the two backends:
+
+  cd /d E:\Client1
+  .\core.exe              ← binds to 8081 per rest_core.conf
+
+  cd /d E:\Client2
+  .\core.exe              ← binds to 8082 per rest_core.conf
+
+Both must be running before you start the GUIs.
+
+(Note: Sean asked me to kill all running core.exe earlier. I did —
+PIDs 7404, 24672, 34588. Confirm none are running with PowerShell
+"Get-Process core" before relaunch. Windows Defender's
+MpDefenderCoreService is NOT a target; ignore it.)
+
+
+To start the two GUIs against these pinned ports, you have two
+options.
+
+Option A — Dev mode (recommended for smoke testing)
+---------------------------------------------------
+The Vite dev server runs the GUI in a browser; the GUI's port-
+resolution priority is (qmailApiServices.js:10-14):
+  1. ?backendPort=N URL param
+  2. VITE_API_PORT env var
+  3. 8080 fallback
+
+For two side-by-side dev clients:
+
+  # Terminal 1: Client1 GUI on http://localhost:5173, talks to 8081
+  cd /d D:\Code\src\JavaScript\Qmail-GUI
+  npm run dev
+  # then open: http://localhost:5173/?backendPort=8081
+
+  # Terminal 2: Client2 GUI on http://localhost:5174, talks to 8082
+  cd /d D:\Code\src\JavaScript\Qmail-GUI
+  npm run dev2
+  # then open: http://localhost:5174/?backendPort=8082
+  # (dev2 already sets VITE_API_PORT=8082 but the URL param is
+  #  authoritative.)
+
+Both browsers can be open simultaneously side-by-side. Each connects
+to its own backend. Same source tree, two clients.
+
+This is the simplest setup. You'll be able to refresh the page,
+inspect the network panel, and watch React state in DevTools — none
+of which is possible inside Electron without enabling devtools.
+
+
+Option B — Packaged Electron (closer to what a real user sees)
+--------------------------------------------------------------
+DO NOT use `npm run electron-dev` for two-client testing — it spawns
+its OWN core.exe at its OWN auto-picked free port. It would compete
+with the manually-launched E:\Client1\core.exe / E:\Client2\core.exe.
+
+Instead: build a packaged QMail.exe and place a copy in each client
+folder. The portable build expects rest_core.conf and Client_Data
+to live alongside it.
+
+  cd /d D:\Code\src\JavaScript\Qmail-GUI
+  npm run build-portable
+  # Output: release\QMail-Portable.exe (or similar — check
+  # electron-builder.config.cjs for the exact name)
+  copy release\QMail.exe E:\Client1\
+  copy release\QMail.exe E:\Client2\
+
+Then double-click each QMail.exe. Each one spawns ITS OWN core.exe
+sibling at an auto-picked free port. The pinned ports in E:\Client*\
+rest_core.conf are NOT used in this mode — Electron picks the port,
+not the config. So if you need ports 8081/8082 specifically (for
+example to point external tools at them), use Option A.
+
+I'd start with Option A for smoke testing. Option B is for shipping
+verification later.
+
+
+Q2. "Will I need to do the testing manually?"
+
+Yes — for this round.
+
+Reasons:
+  1. The Phase 1-3 checklists are heavy on visual verification: "is
+     the trash-icon hover state correct?", "does the italic preview
+     render only for empty bodies?", "does the unified Refresh
+     spinner stay synchronized?". A browser-automation harness can
+     check DOM presence but it can't see styling correctness — that
+     needs a human eye.
+
+  2. Several flows depend on RAIDA network state that a test harness
+     can't easily mock. E.g. the "Send anyway" override after RAIDA
+     warning, the pending-message decryption flow, the inbox-fee
+     locker. Mocking those out would test a different code path
+     than the one users hit.
+
+  3. The two-client smoke test is mutual — Client1 sends to Client2,
+     then Client2 replies, then Client1 sees the reply. That's a
+     stateful sequence with backend persistence between steps. The
+     usual test-harness pattern (per-test reset) doesn't apply.
+
+So: walk the checklist below by hand, side-by-side, with both
+clients visible.
+
+Future automation could partially help with:
+  - Per-screen smoke (does AccountPane render? does ContactsPane
+    render?) — Playwright / Puppeteer could click through.
+  - API-level smoke (does sendEmail return success?) — curl scripts
+    against the live backends.
+
+Both are valuable for regression after the CSS refactor lands. Not
+worth blocking this round on them.
+
+
+Q3. "Do we need to have Gem do it since it seems it can manipulate
+     a browser?"
+
+Reasonable instinct, but I'd skip Gem-driven testing for this round
+and revisit after the CSS refactor.
+
+Why not now:
+  - Gem's browser tool would have to know what "looks right" looks
+    like. Without a known-good baseline (screenshots, snapshot tests,
+    or detailed pixel descriptions), it's just clicking buttons. It
+    would catch broken flows (button doesn't respond) but not
+    regressed flows (button responds but does the wrong thing).
+  - The two-client mutual flow is the most important shape of this
+    test. Gem can drive ONE browser at a time. Coordinating two
+    Gem sessions (or one Gem switching between two windows) is
+    fiddly and slower than Sean manually clicking.
+  - The CSS refactor is about to happen. If you script a smoke test
+    against the current CSS class names, the refactor (which Track F
+    is about) will invalidate most of the selectors. Wait for the
+    BEM rename to settle before automating.
+
+Why later (after CSS refactor):
+  - Once the BEM rename lands, the selectors are stable. Then a
+    Playwright suite tied to BEM block names would survive the
+    refactor and catch regressions in future refactors.
+  - Gem could be the agent that *writes* and *maintains* that
+    Playwright suite, which is more valuable than having Gem click
+    once.
+
+For THIS smoke test: Sean drives manually, with the checklist below
+as the script.
+
+
+Consolidated manual smoke-test checklist
+========================================
+
+This consolidates the per-batch "Live-Backend Verification Pending"
+sections from opu.usability.batch10.fixes.txt through batch17.fixes.txt
+plus the ship-gate checklist at the bottom of opu.phase2.tickets.txt.
+
+Notation:
+  [C1]  perform on Client1
+  [C2]  perform on Client2
+  [→]   the result expected on the other client
+
+
+Setup verification (do this once, before the real checks)
+---------------------------------------------------------
+[C1] Open http://localhost:5173/?backendPort=8081 . Confirm:
+       - AccountPane → Profile shows the @chariot.pyramid.byte
+         identity (SN 55076).
+       - NavigationPane shows all six folders (inbox, sent, drafts,
+         trash, starred, archive).
+       - RAIDA health dots show mostly green (>= 6 reachable).
+       - Wallet card shows a non-zero CC balance (you'll need
+         funded coins to send).
+[C2] Same at http://localhost:5174/?backendPort=8082. Identity
+     should be @chariot.harbor.byte (SN 55077).
+
+If either of these fails, stop. Either the backend isn't running on
+the expected port, the GUI's port resolution isn't picking it up,
+or the wallet/identity setup is wrong. Investigate before proceeding.
+
+
+Phase 1 checks (FIX-01..05 — already shipped, regression-only)
+--------------------------------------------------------------
+[ ] [C1→C2] Send a small text email from Client1 to
+    @chariot.harbor.byte. On Client2 inbox, a "pending" row should
+    appear within ~10s with the lock icon and "Encrypted message"
+    subject (FIX-01).
+[ ] [C2] Click the pending row. The download flow runs; the
+    decrypted body appears (FIX-01 + FIX-04).
+[ ] [C2] AccountPane → Profile shows the correct identity (not
+    "John Doe" anywhere) (FIX-03 + FIX-30).
+[ ] [C2] AccountPane shows RAIDA server count and per-server
+    health (FIX-05).
+[ ] [C1] Compose → attach a file (E:\Client1\qmail_test_attachment.txt).
+    Send. On Client2, after decrypt, the attachment is downloadable
+    (FIX-02 + FIX-19).
+
+
+Phase 2 checks (FIX-06..34 — recent shipped work)
+-------------------------------------------------
+Send flow
+[ ] [C1] Compose, type only commas in To, click Send. Inline modal
+    error appears; NO dashboard toast (BUG-43 / FIX-33).
+[ ] [C1] Force a transient RAIDA issue (you can stop the Client1
+    core.exe briefly to simulate). The network-warning banner
+    appears with a Retry button. The Retry button shows a spinning
+    RefreshCw icon while re-checking (BUG-38 / FIX-22).
+[ ] [C1] After RAIDA returns, the warning clears. Send anyway also
+    works during a warning state (FIX-22).
+[ ] [C1] During a send, watch the progress copy. Today it's raw
+    backend printf — that's expected until CORE-E ships.
+
+Reply / Reply All / Forward
+[ ] [C2] On a received message, click Reply. ComposeModal opens
+    with the original sender's address in To, "Re: ..." subject,
+    quoted body (FIX-06).
+[ ] [C2] On a multi-recipient message, click Reply All. CC list
+    populated with the original recipients minus the user's own
+    address. No "Reply All" offered when the backend didn't ship
+    recipient metadata (FIX-07).
+[ ] [C2] Forward. New compose with empty To, "Fwd: ..." subject,
+    full quoted body with From/Date/Subject headers (FIX-06).
+
+Drafts
+[ ] [C1] Compose, type subject + body, close the modal without
+    sending. Switch to Drafts. The draft appears.
+[ ] [C1] Re-open the draft. Subject, body, and any touched
+    recipient fields hydrate correctly (FIX-04).
+[ ] [C1] In Compose, leave the modal idle for 5+ seconds with
+    typing. The "Saved" indicator flashes — autosave is firing
+    (FIX-39).
+[ ] [C1] Open Compose, click Advanced Options to expand. Close
+    Compose. Re-open. Advanced is still expanded (FIX-40).
+[ ] [C1] Use the contacts picker on To, Cc, and Bcc fields.
+    Selecting a contact preserves existing comma-separated
+    recipients (FIX-41).
+[ ] [C1] Send the draft. After send completes, switch to Drafts.
+    The draft is STILL THERE — that's because CORE-H is unbuilt.
+    Don't file this as a bug; it's a known backend gap. See
+    docs/opu.fix23.core-h.ticket.txt.
+
+Refresh + notifications
+[ ] [C1] Click the unified Refresh button (in NavigationPane).
+    The spinner runs through all four steps (RAIDA echo, mail
+    notifications, mail counts, message list) as one
+    coordinated action. Single success toast at the end
+    (FIX-20 / FIX-34).
+[ ] [C1] If any refresh step fails (e.g. stop Client1 core.exe
+    briefly), the aggregate "Refresh completed with some service
+    errors" warning appears — only ONE notification, not multiple
+    (BUG-41 / FIX-34).
+[ ] [C2] When a new email arrives at C2, the "New mail from ..."
+    toast appears. Clicking it focuses the new row in the inbox
+    (FIX-17).
+
+Reading-pane
+[ ] [C2] Open a read email. Mark Unread button is visible. Click
+    it — the row goes back to unread (BUG-39 / FIX-24).
+[ ] [C2] Open an unread email. Mark Unread is NOT visible (only
+    on read messages — BUG-39).
+[ ] [C2] In inbox: the Archive button is in the action row. The
+    Move-to... dropdown does NOT also list "Archive" (BUG-40).
+[ ] [C2] Move-to... dropdown lists Inbox / Archive / Trash but
+    NOT Starred. The star icon is the only star action (FIX-18
+    interim cleanup — until CORE-J ships).
+
+Trash / delete
+[ ] [C2] Click trash icon on a received message. It moves to Trash.
+[ ] [C2] Go to Trash. Multiple messages visible. Click "Delete
+    these N messages permanently" — confirm modal appears
+    (FIX-29 / FIX-14). Cancel works.
+[ ] [C2] Confirm the delete. The page reduces; if other Trash
+    pages remain, the count message acknowledges them.
+
+Contacts
+[ ] [C1] Contacts tab → click "Add Contact". Add Client2's
+    address (@chariot.harbor.byte, name "Client Two"). Save.
+    The contact appears in My Contacts.
+[ ] [C1] Click the trash icon on the new contact. The in-app
+    delete-confirm modal appears (NOT browser confirm — FIX-28).
+[ ] [C1] Delete. A "deleted, click to undo" toast appears. Click
+    it within 10s. The contact restores (FIX-28).
+[ ] [C1] Re-delete. Wait 10+ seconds. Toast expires; contact
+    stays deleted.
+[ ] [C1] Open Popular contacts (TrendingUp icon button). DRD
+    list loads.
+[ ] [C1] Add a popular contact via the + button. The button
+    swaps to a checkmark (BUG-44 / FIX-29). Close ContactsPane
+    and reopen — the check persists (the saved state is now
+    derived from My Contacts, not local memory).
+[ ] [C1] Click the Lookup icon button (Search). Type a serial
+    number. The local QMail service resolves it (FIX-42).
+[ ] [C1] Same panel, type a saved contact's name. It matches the
+    local contact (FIX-42).
+[ ] [C1] Same panel, type an unknown email. The copy says
+    "Address-to-serial lookup is not available yet" (FIX-42).
+
+Search
+[ ] [C2] Search for a term that returns < 50 results. No "top 50"
+    notice appears.
+[ ] [C2] Search for a term with > 50 actual matches. The notice
+    "Showing top 50 results. Refine your search to see more."
+    appears. (Note: if it appears at exactly 50, that's BUG-46 —
+    backend-blocked, see docs/opu.fix25-bug46.core-k.ticket.txt.)
+
+Sign-out / sign-in
+[ ] [C1] AccountPane → Sign Out. Confirm. Welcome screen appears.
+    Sign back in. Identity hydrates correctly (FIX-15 / FIX-15b).
+
+
+Phase 3 checks (FIX-38..47 — most recent shipped work)
+------------------------------------------------------
+[ ] [C1] In inbox, navigate to page 2. Change sort mode (e.g.
+    Newest → Unread). The pagination snaps to page 1 BEFORE the
+    new sort completes loading. No flash of "Page 2 of N" with
+    page-1 content (FIX-38).
+[ ] [C1] An empty message (body = "") shows preview "(no message
+    body)" in italics. A pending encrypted row shows "Waiting to
+    decrypt..." in normal weight (FIX-46).
+[ ] [C1] AccountPane → server cards show network-online (green),
+    network-offline (red), network-unknown (amber). Wallet cards
+    still show their own classes (Bank/Fracked/Limbo). No visual
+    confusion (FIX-45).
+[ ] [C1] If the backend ships a folder with a non-default
+    iconName, the GUI renders the matching icon. Unknown
+    iconName falls back to Mail. (Hard to test without a backend
+    that ships custom folders. Skip if you can't trigger it.)
+
+
+Known-broken-until-backend-ticket items
+---------------------------------------
+These will not work end-to-end. Don't file them as bugs.
+
+  CORE-A  Sent folder may not contain all sent mail (depends on
+          how rest_core persists outbound today). FIX-08 GUI side
+          shipped; backend half pending.
+  CORE-H  Drafts don't get deleted after send. See above.
+  CORE-J  Starred view shows whatever was Moved to folder=4
+          (typically nothing). The star icon sets is_starred but
+          the Starred nav entry doesn't filter by it. See
+          docs/opu.fix18.core-j.ticket.txt.
+  CORE-E  Send-progress shows raw printf strings ("Uploading file
+          1/3 (45821 bytes, 25 servers)") instead of friendly
+          stage labels. See docs/opu.fix26.core-e.ticket.txt.
+  CORE-K  Search "top 50 results" notice may false-positive at
+          exactly 50 matches. See docs/opu.fix25-bug46.core-k.ticket.txt.
+  CORE-F  "Repair Now" banner is currently removed; will come back
+          when the non-mutating identity-health endpoint ships.
+
+
+What to do with findings
+========================
+
+If a check fails:
+  - File a bug entry in docs/cla.bugs.txt under a new BUG-NN
+    appendix. Next BUG number to use is BUG-51.
+  - Include: file:line if known, what you did, what you saw, what
+    you expected. Severity: HIGH if it blocks a normal email flow,
+    MEDIUM for UX regressions, LOW for cosmetic.
+
+If a check passes:
+  - No action needed. Don't update individual batch fixes.txt
+    files — those are immutable post-shipment.
+
+After the full walkthrough:
+  - If everything passes, write a short closure note: "Smoke test
+    passed N/M checks, M-N failures filed as BUG-XX..YY." Save as
+    docs/opu.smoke-test.results-2026-MM-DD.txt or similar.
+  - If significant failures: bundle them in the closure note and
+    decide with Sean which to fix vs defer.
+
+
+Repo state at this handoff
+==========================
+Branch: main
+HEAD:   b89c439 Snapshot QMail-GUI before CSS refactor: Phase 1-3
+        GUI work + closure
+        ↑ this is the CSS-refactor rollback point.
+Prior:  61fa333 Add CI workflow: lint + build on push/PR
+
+Worktree: clean.
+
+Gates verified at handoff:
+  PASS  npm run lint --max-warnings 0
+  PASS  npm run build (1763 modules, ~2.2s)
+  PASS  node --check electron.cjs / preload.cjs
+
+Open backend tickets (Sean will hand to a separate backend model):
+  CORE-H docs/opu.fix23.core-h.ticket.txt  (drafts/delete)
+  CORE-J docs/opu.fix18.core-j.ticket.txt  (starred filter)
+  CORE-E docs/opu.fix26.core-e.ticket.txt  (send-progress stages)
+  CORE-K docs/opu.fix25-bug46.core-k.ticket.txt  (search pagination)
+  All four referenced from docs/opu.note-to-backend.txt.
+
+Parallel workstreams (NOT my scope):
+  CSS refactor — about to start. b89c439 is rollback.
+  Theming — separate workstream, Track F (BEM rename) is in
+    progress per opu and gpt. The smoke test should focus on
+    behavior, not visual styling, until that workstream settles.
+
+
+Things I would do differently in the next session
+=================================================
+1. Commit each batch as you ship it, not at the end. The b89c439
+   commit landed 135 files at once because Phase 1-3 was never
+   bisectable. Future batches: commit immediately after each
+   APPROVED review.
+
+2. Wire `npm run lint` into a pre-commit hook (not just CI). CI
+   catches drift in PRs but lets you locally land broken state.
+   `husky` + `lint-staged` is the standard shape and lives in
+   package.json.
+
+3. Tag the rollback point: `git tag pre-css-refactor b89c439` makes
+   the SHA discoverable later. If Sean accepts the rollback metaphor,
+   the tag is a useful artifact.
+
+
+End of handoff.
