@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (P5 complete; E19 in progress; E20/E21 with gpt; P2 (b) still waits on Track B)
+Last updated: 2026-05-23 by opu (Track B complete; P2 (b) now unblocked; E17/E18/E19 ready for visual smoke; E20/E21 with gpt)
 
 ================================================================================
 RUNTIME TRACKS (sequential — Opu owns these)
@@ -45,9 +45,11 @@ P2 (a) DONE       opu     P1          Phase 2 functional pass complete.
                                          caret colour. Scrollbars
                                          already worked (token-driven).
                                          Build + tests clean.
-P2 (b) BLOCKED    opu     P1, B       PALETTE pass — WCAG-verified
-                                         token values for light + high-
-                                         contrast. Waits on Track B.
+P2 (b) OPEN       opu     P1, B       PALETTE pass — WCAG-verified
+                                         token values. UNBLOCKED:
+                                         docs/theme.wcag-values.md
+                                         (Track B) has the proposed
+                                         swaps. Ready to apply.
 P3     DONE          opu     P1, D       Phase 3 complete. ThemeProvider now
                                          fetches /api/system/theme on entry
                                          into "custom", injects overrides
@@ -82,9 +84,14 @@ Track  Status   Owner   Output                                          Effort
 A      OPEN     -       docs/theme.editable-tokens.md (the subset the   ~half
                         ThemeEditorModal will surface, with allowed     day
                         formats and defaults per built-in theme).
-B      OPEN     -       docs/theme.wcag-values.md (measure WebAIM       ~half
-                        contrast for every text/bg pair in light +      day
-                        high-contrast; propose fixes for failures).
+B      DONE     opu     docs/theme.wcag-values.md (40 pairs measured,   ~half
+                        10 light-theme AA failures + 1 high-contrast    day
+                        AAA gap of 0.32 found; surgical proposals for
+                        each in 'Proposed adjustments'). Now ready for
+                        P2 (b) to consume. WCAG 2.x ratios computed
+                        from first principles; gradients reported at
+                        both stops. Audit script at
+                        scripts/wcag-audit.mjs (uncommitted).
 C      OPEN     -       docs/theme.c-core-ticket.md (the five §8        ~1
                         discrepancies → ready for C-team backlog).      hour
 D      DONE     opu     src/api/themeService.js + 30 Vitest tests.      ~half
@@ -119,9 +126,9 @@ E13    OPEN     -       qmail/screens/ReadingPane.css                         51
 E14    OPEN     -       qmail/screens/NavigationPane.css                      368
 E15    OPEN     -       wallet/components/PasswordScreen.css                  369
 E16    OPEN     -       components/common/notifications/NotificationContainer.css 334
-E17    OPEN     -       wallet/components/USBCheckScreen.css                  310
-E18    OPEN     -       qmail/screens/AddContactModal.css                     299
-E19    IN PROGRESS gpt     wallet/components/tabs/ReceiptModal.css               248
+E17    IN REVIEW   gpt     wallet/components/USBCheckScreen.css                  310
+E18    IN REVIEW   gpt     qmail/screens/AddContactModal.css                     299
+E19    IN REVIEW   gpt     wallet/components/tabs/ReceiptModal.css               248
 E20    IN REVIEW   gpt     wallet/components/WelcomeScreen.css                   204
 E21    IN REVIEW   gpt     qmail/screens/WalletSetupScreen.css                    77
 E22    OPEN     -       index.css cleanup pass (remove relocated tokens)      208
