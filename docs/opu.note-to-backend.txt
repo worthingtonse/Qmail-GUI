@@ -1,0 +1,319 @@
+Note to the rest_core backend owner — four small tickets
+=========================================================
+From: Claude Opus 4.7 (QMail-GUI Phase 3 reviewer)
+Date: 2026-05-23
+Scope: Four backend tickets that, between them, close out all
+       remaining GUI work plus the lingering BUG-46.
+
+All four asks are small. Between them, I think they total under
+two days of backend work plus tests. The GUI side of each is
+already designed and ready to land the moment your changes ship.
+
+Priority order (mine — your call obviously):
+
+  1. CORE-H  drafts/delete         fixes a real data leak
+  2. CORE-J  starred filter        makes the star icon mean what users think
+  3. CORE-E  send-progress stages  polish, but the smallest backend ask
+  4. CORE-K  search pagination     fixes BUG-46 + unlocks Next/Previous
+
+If you can only do one, do CORE-H — drafts pile up forever after
+send today, and the trash icon for drafts puts rows into an
+invisible half-state. Everything else is polish on top of
+features that already work.
+
+
+The four tickets at a glance
+----------------------------
+
+  CORE-H — Draft delete endpoint
+    Add POST /api/qmail/db/drafts/delete?email_id={hex}.
+    Verifies row.folder == 2, delegates to existing
+    qmail_db_email_delete. ~50 LOC. The SQL primitive already
+    exists.
+    Full spec: docs\opu.fix23.core-h.ticket.txt
+
+  CORE-J — Starred filter on /messages/list
+    Add an optional ?starred=true param. When true, WHERE clause
+    becomes "is_starred = 1 AND is_trashed = 0" (folder becomes
+    optional). Cross-folder. ~20 LOC across one SQL predicate
+    builder + one param parse.
+    Full spec: docs\opu.fix18.core-j.ticket.txt
+
+  CORE-E — Send-progress stages on upload_and_tell
+    Add a `data.stage` enum string to the task progress record
+    (six values: validate / prepare / upload / resolve / notify /
+    complete). Uses the existing task_set_data_string helper —
+    no new infrastructure. ~15 LOC across one helper extension
+    and 9 call sites.
+    Full spec: docs\opu.fix26.core-e.ticket.txt
+
+  CORE-K — Search pagination
+    Add `offset` param + `has_more` bool to
+    /qmail/db/messages/search. Internally request limit+1 rows;
+    if you got the extra, set has_more=true and drop it. Standard
+    peek-ahead trick — no second COUNT query, no schema change.
+    ~25 LOC.
+    Full spec: docs\opu.fix25-bug46.core-k.ticket.txt
+
+
+Why each is needed — short version
+----------------------------------
+
+CORE-H:
+  /qmail/db/drafts/ has list, create, update — but no delete.
+  Today the GUI's Send path can't clean up the draft it was
+  editing; drafts leak indefinitely after the email is sent.
+  And the Drafts list's trash icon currently calls
+  /qmail/db/messages/trash which sets is_trashed=1 but leaves
+  folder=2. The row drops out of both the Drafts view AND the
+  Trash view, so the data exists in the DB but is invisible from
+  every UI surface. Worse than not deleting at all.
+
+CORE-J:
+  The star icon (/qmail/star) and the Move-to-Starred action
+  (/qmail/move?folder=4) are completely independent operations on
+  the same table:
+    - /qmail/star sets is_starred. Doesn't touch folder.
+    - /qmail/move sets folder. Doesn't touch is_starred.
+  And the list endpoint's WHERE clause is "folder = ? AND
+  is_trashed = 0" — no way to ask for "is_starred=1 across all
+  folders." So clicking the star icon makes a row appear nowhere
+  the user can find it. The Starred nav entry (folder=4) shows
+  only rows the user explicitly Moved there, which is a different
+  feature most users will never use.
+
+CORE-E:
+  The backend already calls task_update_progress at 11+ sites in
+  qmail_upload_orchestrator.c with reasonable human copy ("Validated
+  3 file(s)", "Uploading file 1/3 (45821 bytes, 25 servers)",
+  "Building Tell notification for 1 beacon(s)"). The GUI displays
+  those verbatim. CORE-E splits that single message stream into
+  two channels: keep the existing free-form `message` for verbose
+  detail, add a structured `data.stage` enum so the GUI can map
+  each phase to friendly labels + icons + "Failed during <stage>"
+  context on errors. The current UX works but reads like printf
+  output; the fixed version feels like a real send progress UI.
+
+CORE-K:
+  Search returns up to 50 results with no offset, no totalCount,
+  no "more available" signal. The GUI compensates with a
+  heuristic: if results.length === 50, show "Showing top 50
+  results. Refine your search to see more." When there happen to
+  be EXACTLY 50 actual matches, the notice lies. That's BUG-46.
+  CORE-K replaces the heuristic with an authoritative has_more
+  bool (peek-ahead trick — request limit+1 internally, set the
+  flag if the extra row came back) and adds standard OFFSET-based
+  pagination so the user can actually browse past result 50.
+
+
+Smaller than they look
+----------------------
+
+For CORE-H, the underlying SQL function you need already exists.
+qmail_db_email_delete (qmail_db.c:756-784) is generic by email_id,
+handles all four related tables in one go, and returns
+RESULT_NOT_FOUND cleanly. The new handler just confirms folder=2
+before delegating — same shape as your existing
+api_handle_qmail_delete_permanent which checks is_trashed=1
+before delegating to the same function.
+
+For CORE-J, the change is one predicate builder in
+qmail_db_email_list_sorted (qmail_db.c:915-998) and one bool parse
+in api_handle_qmail_inbox. No schema change, no data migration.
+
+For CORE-E, the helper you need is already defined and unused.
+task_set_data_string (task_manager.h:117-125) was designed for
+exactly this — the doc example explicitly cites "phase" as a use
+case. Just extend the static upload_progress helper to take a
+stage arg and pass the matching enum at each call site.
+
+For CORE-K, the peek-ahead pattern is one extra row of CPU + JSON
+encoding. No second SQL statement, no schema change, no
+continuation cursor.
+
+
+What I checked before filing these
+----------------------------------
+
+For each ticket, I read enough of rest_core to confirm what's
+currently true vs what the original plan assumed. Files I touched:
+
+  CORE-H:
+    api_src/api_handlers.c                  (route registration)
+    api_src/api_handlers_qmail_drafts.c     (existing draft handlers)
+    api_src/api_handlers_qmail_folders.c    (move, delete-perm)
+    src/qmail/qmail_db.c                    (email_delete, perm-delete)
+
+  CORE-J:
+    api_src/api_handlers_qmail_inbox.c      (list, star handlers)
+    api_src/api_handlers_qmail_folders.c    (folder enum, move)
+    src/qmail/qmail_db.c                    (list_sorted, mark_star)
+    include/qmail/qmail_db.h                (public surface)
+
+  CORE-E:
+    api_src/api_handlers_system.c           (task status serializer)
+    src/qmail/qmail_upload_orchestrator.c   (all upload_progress sites)
+    src/task_manager.c                      (update_progress, complete*,
+                                              fail, set_data_string)
+    include/task_manager.h                  (public surface)
+
+  CORE-K:
+    api_src/api_handlers_qmail_inbox.c      (search handler)
+    src/qmail/qmail_db.c                    (email_search)
+    include/qmail/qmail_db.h                (public surface)
+
+I also walked the GUI side end-to-end for each, so the patches in
+the four ticket files match what the code does today, not what
+an earlier plan thought it did. Every ticket file has a
+"Diagnostic walk" section that names file:line for each claim.
+
+If anything in the tickets contradicts what you know about
+rest_core, your read of the code wins — please flag it and I'll
+correct the ticket.
+
+
+Two design questions I'd like your call on
+------------------------------------------
+
+These are the only places where I deferred to backend judgment
+rather than picking a path:
+
+1. CORE-H Option D — soft-delete vs hard-delete for drafts.
+   I argued AGAINST soft-delete (drafts are user-authored content
+   the user explicitly chose to discard; a 10-second in-app undo
+   toast gives the same recovery without cluttering trash with
+   sent-drafts the user can never meaningfully act on). But
+   you're closer to the data model than I am. If you have a
+   reason to prefer soft-delete (audit, eventual "recover
+   deleted drafts" surface, retention policy), say so and I'll
+   adjust the GUI side. The patch is mostly the same; only the
+   failure-toast copy changes.
+
+2. CORE-K Option B — should we return exact totalCount via a
+   second FTS COUNT query?
+   I argued AGAINST it (FTS5 COUNT is expensive because the
+   MATCH expression has to evaluate across the whole index; we'd
+   pay this on every keystroke). My recommendation is has_more
+   only, which is cheap (one extra row of peek-ahead) and
+   matches search UX (users want "more available," not "Page 7
+   of 23"). But if you've already benchmarked FTS COUNT on
+   realistic mailboxes and it's fine, totalCount is more
+   informative. The GUI patch changes slightly to use the
+   number instead of the bool.
+
+CORE-J doesn't have a comparable question. Option A (additive
+?starred=true filter) is the obvious shape.
+
+CORE-E doesn't either — the six-stage enum (validate / prepare /
+upload / resolve / notify / complete) is a direct mapping from
+the existing upload_progress call sites. You may want to correct
+one of the stage names; I'd want your read on whether "prepare"
+is the right word for the locker-codes step (line 428 in the
+orchestrator), since that step name is more visible to the user
+than to the developer.
+
+
+Migration questions
+-------------------
+
+CORE-J — Some rows may currently exist with folder=4 because
+someone explicitly Moved them there at some point. After CORE-J,
+those rows won't show in either the new Starred view (they'd need
+is_starred=1) or any other view. My recommendation is to leave
+them (we don't know each row's original folder; misattributing
+them to inbox is worse than leaving 0-5 stranded rows that the
+user can clean up themselves). If you'd rather migrate, the
+safest one-shot is to set is_starred=1 on every row where
+folder=4 AND leave folder=4. Those rows then appear in the new
+Starred view, and anyone who still navigates folder=4 directly
+still sees them. Drop the folder=4 enum after a release cycle.
+
+CORE-H — No migration needed. The endpoint is new; no existing
+draft state changes meaning.
+
+CORE-E — No migration needed. New field in the existing data
+object; absence is fine for any consumer that doesn't read it.
+
+CORE-K — No migration needed. New params with sensible defaults
+(offset=0, has_more=false on empty results); existing callers
+work unchanged.
+
+
+GUI-side status
+---------------
+
+Phase 3 GUI work is complete except for these four tickets. All
+other ledger items are either docs-only, decision-only, or
+shipped.
+
+After all four ship, the GUI work to consume them is one to two
+batches:
+
+  CORE-H GUI patch  ~90 LOC across deleteDraft helper +
+                     ComposeModal success branch + dashboard
+                     handleDeleteEmail draft branch.
+  CORE-J GUI patch  ~30 LOC — getMailList gains a starred flag,
+                     loadEmails branches on folder === "starred",
+                     row.folder is read from the row (not the
+                     requested folder).
+  CORE-E GUI patch  ~50 LOC — SEND_STAGE_COPY table, sendStage
+                     state, renderProgressIndicator update,
+                     CSS for the subtext line.
+  CORE-K GUI patch  ~50 LOC — searchEmails takes offset, search
+                     pagination state, EmailListPane cap notice
+                     copy update.
+
+Each is independent. CORE-H and CORE-K touch overlapping files
+(QMailDashboard.jsx) so they'd batch nicely together. CORE-J and
+CORE-E touch separate files and could also batch. If you ship
+all four at once, the GUI side could land in one big batch —
+maybe a day of work plus review.
+
+
+Sequencing suggestion
+---------------------
+
+If you want to ship these one at a time, the order that creates
+the least GUI-side rework is:
+
+  1. CORE-H first. It's the only one fixing a real data leak,
+     and its GUI patch doesn't depend on or touch any of the
+     other three.
+
+  2. CORE-J second. The GUI patch touches QMailDashboard.jsx
+     loadEmails / handleSortChange, but its diff is largely
+     additive — a new branch for folder === "starred".
+
+  3. CORE-K third. Touches search-specific paths
+     (QMailDashboard.jsx handleSearch, EmailListPane cap notice).
+     No overlap with CORE-H or CORE-J's GUI work.
+
+  4. CORE-E last. Pure polish on the send flow. ComposeModal-only
+     patch.
+
+But if you can batch any subset together, GUI is happy to consume
+them together — it's actually slightly cheaper to do one big GUI
+patch than four small ones.
+
+
+Anything else
+-------------
+
+The four ticket files (opu.fix18.core-j.ticket.txt,
+opu.fix23.core-h.ticket.txt, opu.fix25-bug46.core-k.ticket.txt,
+opu.fix26.core-e.ticket.txt) each include:
+  - A diagnostic walk with file:line references.
+  - The proposed contract with field names and types.
+  - Backend pseudocode (paste-ready).
+  - The GUI-side patch ready to land.
+  - Rejected alternatives with reasoning.
+  - Manual verification checks for after the backend ships.
+  - Migration / sequencing notes where relevant.
+
+You should not need to look at anything outside those files plus
+opu.usability.fix.plan.txt (which lists each FIX/CORE pair and
+points back at the ticket files).
+
+Thanks for the small backend asks at the end of a long Phase 3.
+
+End of note.

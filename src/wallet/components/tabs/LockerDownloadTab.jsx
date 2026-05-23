@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { downloadFromLocker } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
 import './LockerTab.css';
@@ -241,9 +241,9 @@ const LockerDownloadTab = () => {
         <div className="info-section">
           <h4>How Locker Download Works</h4>
           <ul>
-            <li><strong>Two-Phase Process:</strong> The system first peeks into the locker to see what's available, then downloads the coins with new authentication numbers.</li>
+            <li><strong>Two-Phase Process:</strong> The system first peeks into the locker to see what&apos;s available, then downloads the coins with new authentication numbers.</li>
             <li><strong>Secure Transfer:</strong> Downloaded coins receive new authentication numbers for security.</li>
-            <li><strong>Key Format:</strong> Use 8-character keys like "AFG-7YTB" - 3 letters, hyphen, then 4 alphanumeric characters.</li>
+            <li><strong>Key Format:</strong> Use 8-character keys like &quot;AFG-7YTB&quot; - 3 letters, hyphen, then 4 alphanumeric characters.</li>
             <li><strong>One-Time Use:</strong> Once downloaded, the locker becomes empty and the key cannot be reused.</li>
           </ul>
         </div>

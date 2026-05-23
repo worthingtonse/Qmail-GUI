@@ -1,0 +1,99 @@
+gpt out-of-scope bugs noticed during batch 1 review
+Date: 2026-05-21
+
+Scope
+=====
+These are issues noticed while reviewing
+docs\opu.usability.batch1.summary.txt. They are not strictly part of the two
+claimed batch-1 tickets, so they are split out from
+docs\gpt.usability.batch1.review.txt.
+
+1. Medium: Compose still exposes removed parity-server state in send preflight.
+
+   Files:
+     src\qmail\screens\ComposeModal.jsx:212
+     src\qmail\screens\ComposeModal.jsx:216
+     src\qmail\screens\ComposeModal.jsx:222
+     src\qmail\screens\ComposeModal.jsx:649
+
+   Problem:
+     The code comment says the parity-server endpoint was removed and Send is
+     now gated on RAIDA availability alone, but checkNetworkStatus() still calls
+     getParityServer() and stores parityConfigured. When RAIDA availability is
+     insufficient, the warning still appends:
+
+       | Parity not configured
+
+     because getParityServer() always returns failure.
+
+   Impact:
+     Users get a warning about a removed/unsupported feature. This keeps the
+     old parity concept alive in the compose UI even though the endpoint is
+     intentionally gone.
+
+   Suggested fix:
+     Remove getParityServer from ComposeModal entirely. Drop parityConfigured
+     from networkStatus and remove the "Parity not configured" warning text.
+     This is the FIX-22/FIX-31 coupling described in the plan.
+
+2. High: Account still offers identity repair from the wallet-wide fracked count.
+
+   Files:
+     src\qmail\screens\AccountPane.jsx:296
+     src\qmail\screens\AccountPane.jsx:301
+     src\qmail\screens\AccountPane.jsx:553
+     src\qmail\screens\AccountPane.jsx:585
+
+   Problem:
+     AccountPane shows Repair Now when walletBalance?.folders.fracked.coins > 0
+     and calls healWallet() from that panel. That wallet folder count is not an
+     identity-health signal.
+
+   Impact:
+     A user can be prompted to run a mutating QMail identity repair because
+     unrelated wallet coins are fracked. This is exactly the CORE-F issue in
+     the revised plan.
+
+   Suggested fix:
+     Until a non-mutating identity-health endpoint exists, remove this automatic
+     warning trigger. If manual repair remains available, put it behind an
+     explicit Account > Identity tools action and label it as a manual action,
+     not a health-derived warning.
+
+3. Medium: Account still renders the removed Parity Server Configuration panel.
+
+   Files:
+     src\qmail\screens\AccountPane.jsx:162
+     src\qmail\screens\AccountPane.jsx:265
+     src\qmail\screens\AccountPane.jsx:694
+
+   Problem:
+     AccountPane still loads getParityServer() and renders the Parity Server
+     Configuration section even though getParityServer() is now a stub that
+     returns "Parity server endpoint removed".
+
+   Impact:
+     The Account page continues to present a removed feature as if it were a
+     configuration/status surface. This undermines the cleanup done elsewhere
+     and can confuse users into thinking parity needs setup.
+
+   Suggested fix:
+     Remove the AccountPane parity state, loader, refresh button, and rendered
+     section in the same patch that removes ComposeModal's parity preflight.
+
+4. Low/process: batch summary does not match the current worktree scope.
+
+   Files currently modified outside the batch summary:
+     src\api\qmailApiServices.js
+     src\qmail\screens\ComposeModal.jsx
+     src\screens\ServiceSelectionScreen.jsx
+
+   Problem:
+     docs\opu.usability.batch1.summary.txt says only QMailDashboard.jsx and
+     AccountPane.jsx changed. The current worktree includes additional modified
+     files. They may be earlier work, but reviewers cannot tell from the batch
+     note.
+
+   Suggested fix:
+     Either isolate batch-1 changes before review or update the summary with a
+     "pre-existing modified files not in this batch" section.

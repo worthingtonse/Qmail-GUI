@@ -1,0 +1,476 @@
+FIX-26 / CORE-E — Send-progress stages
+=======================================
+Author: Claude Opus 4.7 (Phase 3 reviewer)
+Date:   2026-05-23
+Status: OPEN — backend ask is genuinely tiny. Zero new infrastructure.
+        Adds one string field (`data.stage`) to the existing task
+        status response by inserting one extra call alongside each
+        existing upload_progress site.
+
+Audience
+--------
+- Backend owner (rest_core).
+- Phase 3+ GUI implementer who will land the FIX-26 stage-driven UI
+  copy once the backend ships.
+
+High-level pointer: docs\opu.usability.fix.plan.txt — search for
+"FIX-26" and "CORE-E."
+
+
+TL;DR
+-----
+1. The task status response shape is already concrete and stable:
+     { id, status, progress, message, data }
+   The GUI reads all of them (qmailApiServices.js:499-518).
+   The "data" object passes through to the response verbatim
+   (api_handlers_system.c:347-352, "raw data verbatim" comment).
+
+2. The backend already calls upload_progress(task_id, percent, "...")
+   at 11+ sites in qmail_upload_orchestrator.c with reasonable
+   human-readable copy ("Validated 3 file(s)", "Identity resolved,
+   acquiring locker codes", "Uploading file 1/3 (45821 bytes,
+   25 servers)", "Building Tell notification for 1 beacon(s)",
+   etc.). The user-visible stage transitions ARE already happening
+   — they're just encoded as message-prefix conventions.
+
+3. The asked-for change is one extra line per upload_progress
+   call site that records the stage into data:
+     task_set_data_string(task_id, "stage", "validate");
+   The existing task_set_data_string helper is already defined
+   (task_manager.h:117-125, "Set a single string field inside the
+   task's 'data' object. Preserves all other top-level fields and
+   other 'data' fields.") and ready to use. Other commands could
+   use it for "phase" — the doc example explicitly cites that
+   pattern.
+
+4. With data.stage available, the GUI can map each stage value to
+   stable display copy + icon, instead of pattern-matching against
+   the message string (fragile if message text ever changes).
+
+5. The task_complete success / task_fail failure terminals
+   naturally preserve the last data.stage (per task_manager.c
+   comments), so the GUI knows WHERE a failure happened, not just
+   that one happened.
+
+No new fields on the response object. No new endpoints. No schema
+changes. The backend work is ~15 LOC of insertions across one
+file.
+
+
+Diagnostic walk
+---------------
+Files inspected:
+  D:\Code\src\C\rest_core\api_src\api_handlers_system.c
+    (api_handle_task_status — the JSON serializer for task GETs)
+  D:\Code\src\C\rest_core\src\qmail\qmail_upload_orchestrator.c
+    (all upload_progress call sites)
+  D:\Code\src\C\rest_core\src\task_manager.c
+    (task_update_progress, task_complete*, task_fail,
+     task_set_data_string)
+  D:\Code\src\C\rest_core\include\task_manager.h
+    (public surface)
+  D:\Code\src\JavaScript\Qmail-GUI\src\api\qmailApiServices.js
+    (getTaskStatus passthrough)
+  D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\ComposeModal.jsx
+    (sendProgress UI consumer)
+
+1. Task status JSON shape (api_handlers_system.c:382-401):
+
+     {
+       "status": "success",
+       "payload": {
+         "id":       "<task_id>",
+         "status":   "running" | "completed" | "success" |
+                     "failed" | "error" | "cancelled" | "timeout",
+         "progress": int 0-100,
+         "message":  "free-form human string from task_manager",
+         "data":     <verbatim from task file> or null
+       }
+     }
+
+   The "data" field is read RAW from disk (the "raw data verbatim"
+   comment at line 347-353). It can hold any JSON object the
+   command writer chose to record. This is the right field for
+   stage — it's structured, extensible, and doesn't require a
+   schema change on the response envelope.
+
+2. upload_progress call sites in qmail_upload_orchestrator.c:
+
+     line 389  pct=1    "Validated %d file(s) for upload"
+     line 428  pct=3    "Identity resolved, acquiring locker codes"
+     line 655  pct=5-89 "Uploading file %d/%d (%zu bytes, %d servers)"
+                        (per-file, loop body)
+     line 691  pct=5-89 "File %d/%d done: %d/%d servers OK"
+                        (per-file, end of loop body)
+     line 792  pct=90   "Upload complete: %d/%d servers ready for Tell"
+     line 948  pct=91   "Resolving recipients"
+     line 1008 pct=93   "Building Tell notification for %d beacon(s)"
+     line 1213 pct=93-99 "Tell beacon %d: %s"  (per-beacon loop)
+
+3. Helpers already available:
+     task_update_progress(id, percent, msg)         — used today
+     task_set_data_string(id, "stage", "validate")  — NOT used today
+                                                      by upload_and_tell;
+                                                      the doc example
+                                                      explicitly suggests
+                                                      "phase" as a key
+     task_complete_with_data(id, msg, data_json)    — terminal success
+     task_fail(id, error_msg)                       — terminal failure;
+                                                      preserves prior
+                                                      data fields per
+                                                      task_manager.c:152
+
+4. GUI consumer (ComposeModal.jsx):
+     line 149: const [sendProgress, setSendProgress] = useState("");
+     line 984: setSendProgress(message || "Processing...");
+     line 1066: <span>{sendProgress}</span>
+   Today the message string is passed through verbatim to a single
+   <span>. There is no stage mapping, no icon swap, no "Usually
+   takes 5-15 seconds" subtext. The user sees whatever
+   upload_progress's printf wrote.
+
+
+Proposed contract — CORE-E (Option A)
+-------------------------------------
+Goal: surface a stage enum string in data.stage on the task status
+response, written by the upload_and_tell orchestrator alongside
+each progress update.
+
+Stage enum (six values, lowercase):
+
+  validate   File validation complete. Progress ~1%.
+             Backend message form: "Validated N file(s) for upload"
+
+  prepare    Identity resolved, locker codes acquired. ~3%.
+             Backend message form:
+               "Identity resolved, acquiring locker codes"
+
+  upload     Per-file RAIDA upload in progress, OR upload phase
+             complete. 5-90%.
+             Backend message forms:
+               "Uploading file F/N (S bytes, R servers)"
+               "File F/N done: K/R servers OK"
+               "Upload complete: K/R servers ready for Tell"
+
+  resolve    DRD recipient resolution in progress. ~91%.
+             Backend message form: "Resolving recipients"
+
+  notify     Tell-beacon notification in progress. 93-99%.
+             Backend message forms:
+               "Building Tell notification for B beacon(s)"
+               "Tell beacon N: accepted|failed"
+
+  complete   Terminal success. 100%.
+             Backend message form: whatever task_complete is called
+             with (today: typically "..." in the upload caller).
+             stage is set BEFORE task_complete so it's preserved.
+
+On failure (task_fail), data.stage is NOT reset. The GUI inspects
+the preserved stage value alongside status==failed/error to display
+"Failed during <stage>" copy. This is why the task_manager.c
+comment at line 152 ("Safe to call after task_complete / task_fail
+— the terminal status is preserved") matters: it confirms data
+fields survive the terminal transition.
+
+Naming rationale:
+  - Single-word, lowercase, no underscores or kebab-case. Matches
+    the project's existing JSON key style (is_starred, email_id,
+    folder_id).
+  - "validate" / "prepare" instead of "validating" / "preparing":
+    consistent with the enum-like "completed" / "failed" used on
+    the status field. The string represents the phase you're IN,
+    not the verb.
+  - Six values is small enough that the GUI can map each one
+    statically. No catch-all needed.
+
+
+Backend implementation sketch
+-----------------------------
+File: src/qmail/qmail_upload_orchestrator.c
+
+Step 1: Extend the upload_progress helper to take a stage:
+
+    static void upload_progress(const char *task_id, int percent,
+                                const char *stage,
+                                const char *fmt, ...) {
+        if (!task_id || !task_id[0]) return;
+        char msg[256];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(msg, sizeof(msg), fmt, ap);
+        va_end(ap);
+        if (stage && stage[0]) {
+            task_set_data_string(task_id, "stage", stage);
+        }
+        task_update_progress(task_id, percent, msg);
+    }
+
+  Order matters: set data.stage BEFORE task_update_progress so the
+  data write doesn't race the status read in api_handle_task_status.
+  In practice it doesn't, because both writes go through
+  rewrite_task_with_data with file-level atomicity (task_manager.c
+  rewrite path), but ordering it that way also matches the
+  "stage is the current phase" mental model.
+
+Step 2: Update each call site to pass the stage:
+
+    upload_progress(opt->task_id, 1, "validate",
+                    "Validated %d file(s) for upload", file_count);
+    upload_progress(opt->task_id, 3, "prepare",
+                    "Identity resolved, acquiring locker codes");
+
+    /* In the per-file upload loop */
+    upload_progress(opt->task_id, file_progress, "upload",
+                    "Uploading file %d/%d (%zu bytes, %d servers)",
+                    f + 1, file_count, file_size, upload_count);
+    upload_progress(opt->task_id, done_progress, "upload",
+                    "File %d/%d done: %d/%d servers OK",
+                    f + 1, file_count, successes, upload_count);
+
+    upload_progress(opt->task_id, 90, "upload",
+                    "Upload complete: %d/%d servers ready for Tell",
+                    valid_server_count, upload_count);
+    upload_progress(opt->task_id, 91, "resolve", "Resolving recipients");
+    upload_progress(opt->task_id, 93, "notify",
+                    "Building Tell notification for %d beacon(s)",
+                    unique_beacon_count);
+
+    /* In the Tell-beacon loop */
+    upload_progress(opt->task_id, tell_progress, "notify",
+                    "Tell beacon %d: %s", beacon_id,
+                    tell_accepted ? "accepted" : "failed");
+
+Step 3: Just before task_complete (whatever caller invokes it for
+upload_and_tell — typically the REST handler wrapping the
+orchestrator):
+
+    task_set_data_string(task_id, "stage", "complete");
+    task_complete_with_data(task_id, "Email sent successfully", ...);
+
+Step 4: task_fail does NOT need a stage change — the last-set stage
+is preserved and tells the GUI WHERE failure happened.
+
+Estimated diff:
+  ~10 line changes (one extra arg + one new arg site at each of the
+  9 call sites) + the upload_progress signature extension + one
+  task_set_data_string at the terminal success. Maybe 15 LOC net
+  added. Under 30 minutes of typing once the backend owner confirms
+  the enum.
+
+No header changes (upload_progress is static to one .c file).
+No public API changes. No schema changes. No new endpoint.
+
+
+Rejected alternatives
+---------------------
+Option B — Add a top-level "stage" field to the response envelope
+  Modify api_handle_task_status to emit "stage" alongside id,
+  status, progress, message. Requires either a top-level
+  task_set_stage helper or a hidden field on the task file.
+
+  Why this was rejected:
+  - The existing data object already passes through verbatim and
+    was explicitly designed for command-specific extension fields
+    (e.g. deposit/upgrade's "counts" sub-object). Adding a
+    top-level "stage" duplicates that pattern.
+  - Other commands (deposit, upgrade) might want their own phase
+    enums later. Each command putting its stage in data.stage
+    avoids name collisions across the task-system response shape.
+  - The doc example at task_manager.h:105 already proposes
+    "phase": "POWN" as a data field. We're extending an
+    established convention, not inventing one.
+
+Option C — Pattern-match in the GUI against the message string
+  Leave the backend alone. Have the GUI parse the message prefix
+  ("Validated", "Identity resolved", "Uploading file", "Building
+  Tell", "Upload complete") and map each to a stage internally.
+
+  Why this was rejected:
+  - Fragile: any change to upload_progress's format strings (a typo
+    fix, a new translation, etc.) silently breaks the GUI stage
+    detection. The GUI would have no way to know it's broken
+    except by user reports of "stuck on Processing..."
+  - Conflates display copy with state. The backend's progress
+    message is meant for humans; the GUI's stage is meant for
+    code. They should be separate channels.
+  - The backend work to fix this properly is genuinely tiny — see
+    estimated diff above.
+
+  Option C is the no-backend-work option that fix.plan.txt would
+  fall back to if CORE-E is permanently declined. It's not the
+  recommended path, but it's not impossible.
+
+Option D — Use task_update_with_data to set message + data atomically
+  Replace upload_progress with task_update_with_data(id, pct,
+  msg, "\"stage\": \"validate\"") so both fields move in one
+  atomic file rewrite.
+
+  Why this was rejected:
+  - task_update_with_data takes the data fragment as a string the
+    caller has to format. The two-call pattern
+    (task_set_data_string + task_update_progress) is more readable
+    at each call site.
+  - The race risk is theoretical: a poller could only read the
+    file BETWEEN the two writes if it polled at sub-millisecond
+    granularity. The GUI polls once per second. Practical risk:
+    zero.
+  - If perf measurement ever shows the double-rewrite mattering,
+    swap to Option D as a transparent optimization. Until then,
+    the two-call pattern is clearer.
+
+
+GUI-side patch (ready to land once CORE-E ships)
+-----------------------------------------------
+One file. ~40 LOC.
+
+src/qmail/screens/ComposeModal.jsx
+
+  1. Add a stage→copy mapping module-scope (above ComposeModal):
+
+       const SEND_STAGE_COPY = {
+         validate: {
+           label: "Checking attachments",
+           subtext: "Usually takes a moment...",
+         },
+         prepare: {
+           label: "Securing identity",
+           subtext: "Acquiring locker codes from RAIDA...",
+         },
+         upload: {
+           label: "Uploading to RAIDA",
+           subtext: "Encrypted shards going to 25 servers...",
+         },
+         resolve: {
+           label: "Finding recipients",
+           subtext: "Looking up recipient beacons...",
+         },
+         notify: {
+           label: "Notifying recipients",
+           subtext: "Telling recipient beacons your email arrived...",
+         },
+         complete: {
+           label: "Email sent successfully!",
+           subtext: "",
+         },
+       };
+
+  2. Read data.stage from getTaskStatus's result. The qmailApiServices
+     getTaskStatus already exposes data.result (which is the raw
+     "data" object from the response). Pull stage from it:
+
+       const stage = taskResult.data.result?.stage || null;
+
+     (Or pipe stage through qmailApiServices' mapper for cleanliness —
+     either is fine.)
+
+  3. Replace the message passthrough in the poll loop's onProgress
+     branch (line 983-984):
+
+       setProgress(currentProgress || 0);
+       setSendProgress(message || "Processing...");
+       setSendStage(stage);            // NEW
+
+  4. Update renderProgressIndicator (line 1043-1067) to use stage
+     when present, falling back to message:
+
+       const copy = sendStage ? SEND_STAGE_COPY[sendStage] : null;
+       const label = copy?.label || sendProgress || "Processing...";
+       const subtext = copy?.subtext || "";
+
+     Render:
+       <div>
+         <Loader />
+         <span className="send-progress-label">{label}</span>
+         {subtext && (
+           <span className="send-progress-subtext">{subtext}</span>
+         )}
+         <progress value={progress} max={100} />
+       </div>
+
+  5. On failure (sendingStatus === "failed"), if a stage was last
+     known, prepend "Failed during <stage label>" to the error toast:
+
+       const stageContext = sendStage && SEND_STAGE_COPY[sendStage]
+         ? `Failed during ${SEND_STAGE_COPY[sendStage].label.toLowerCase()}: `
+         : "";
+       const finalMessage = stageContext + failureMessage;
+       // Pass finalMessage to markSendFailed.
+
+     The user gets "Failed during uploading to RAIDA: timeout after
+     60s" instead of just "timeout after 60s." Useful for debugging
+     and for the user's own diagnosis.
+
+  6. Add a small CSS rule for .send-progress-subtext (de-emphasized
+     vs the label). One rule in ComposeModal.css.
+
+Estimated GUI diff: ~40 LOC ComposeModal.jsx + ~10 LOC CSS.
+
+
+Verification (after CORE-E ships)
+---------------------------------
+Manual checks against a live backend:
+
+  1. Send a small email (no attachments, one recipient). Watch the
+     send-progress region cycle through:
+       Checking attachments → Securing identity → Uploading to RAIDA
+       → Finding recipients → Notifying recipients
+       → Email sent successfully
+     Each transition should be visible (the steps are quick but
+     non-instant). Progress bar fills smoothly 0→100.
+
+  2. Send an email with multiple attachments. The "Uploading to
+     RAIDA" stage should hold for longer; the per-file progress is
+     reflected in the bar.
+
+  3. Send an email to multiple recipients. The "Notifying
+     recipients" stage should hold for longer.
+
+  4. Simulate failure in different stages and confirm the
+     "Failed during <stage>" copy is accurate:
+       (a) Kill the network during validate — should say
+           "Failed during checking attachments" or fall through
+           to a higher-level error if validate failed before any
+           progress was written.
+       (b) Kill RAIDA mid-upload — should say
+           "Failed during uploading to RAIDA"
+       (c) Kill DRD mid-resolve — should say
+           "Failed during finding recipients"
+       (d) Kill beacon mid-notify — should say
+           "Failed during notifying recipients"
+
+  5. Poll cadence: confirm the GUI sees stage transitions on
+     reasonable beats. The poll runs every 1s
+     (ComposeModal.jsx:966), so a stage that lasts under 1s might
+     be missed. That's fine — the user sees stages that took long
+     enough to be visible.
+
+  6. Inspect a single getTaskStatus response in dev tools and
+     confirm the shape:
+
+       payload.data: { "stage": "upload", ...other fields }
+
+
+Schedule
+--------
+- This file documents the contract.
+- This batch ships NOTHING interim. Today's GUI displays the raw
+  message string verbatim, which works (the user sees backend copy
+  like "Uploading file 1/3 (45821 bytes, 25 servers)"). Verbose
+  and slightly nerdy, but not wrong. There's no useful interim
+  cleanup that doesn't depend on stage data.
+- After CORE-E lands, ship the GUI patch in one batch.
+
+CORE-E is marked optional in fix.plan.txt. The current GUI
+behavior is "functional but unfriendly" rather than broken. If
+backend bandwidth is tight, this is the safest ticket to defer.
+
+
+Files touched by this batch
+---------------------------
+- docs/opu.fix26.core-e.ticket.txt — this file (new).
+- docs/opu.usability.fix.plan.txt — refresh FIX-26 + CORE-E
+  entries to point here.
+
+No code changes. No backend changes. CORE-E remains OPEN.
+
+End of file.

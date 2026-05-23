@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, ArrowLeft, FileText, X, Download, Upload, ArrowRightLeft, Wallet, ArrowUpRight, Shield, Wrench, ClipboardList } from 'lucide-react';
 import { getWalletTransactions, getWalletReceipt } from '../../../api/apiService.js';
 import './ReceiptModal.css';
+
+/* eslint-disable react/prop-types -- this tab receives wallet props from its parent and the project does not use prop-types. */
 
 const TransactionsTab = ({ wallet, walletPath, onBack }) => {
   const [transactions, setTransactions] = useState([]);
@@ -17,13 +19,7 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
   const [receiptError, setReceiptError] = useState(null);
 
   // Load transactions when component mounts or wallet changes
-  useEffect(() => {
-    if (wallet) {
-      loadTransactions();
-    }
-  }, [wallet]);
-
-  const loadTransactions = async () => {
+  const loadTransactions = useCallback(async () => {
     if (!wallet) return;
     
     setIsLoading(true);
@@ -46,7 +42,13 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [wallet, walletPath]);
+
+  useEffect(() => {
+    if (wallet) {
+      loadTransactions();
+    }
+  }, [wallet, loadTransactions]);
 
   const loadReceipt = async (receiptId, walletPath) => {
     if (!receiptId) {
@@ -294,10 +296,10 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
                           {transaction.remarks || 'Unknown'}
                         </span>
                       </td>
-                      <td className="receipt-cell">
+                      <td className="receipt-modal__cell">
                         {transaction.task_id ? (
                           <button 
-                            className="receipt-btn"
+                            className="receipt-modal__trigger"
                             onClick={() => loadReceipt(transaction.task_id, wallet.path)}
                             title={`View receipt: ${transaction.task_id}`}
                           >
@@ -305,7 +307,7 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
                             View
                           </button>
                         ) : (
-                          <span className="no-receipt">-</span>
+                          <span className="receipt-modal__empty-indicator">-</span>
                         )}
                       </td>
                     </tr>
@@ -331,53 +333,66 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
 
       {/* Receipt Modal */}
       {showReceiptModal && (
-        <div className="receipt-modal-overlay" onClick={closeReceiptModal}>
-          <div className="receipt-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="receipt-modal-header">
-              <h3>Transaction Receipt</h3>
+        <div className="receipt-modal__overlay" onClick={closeReceiptModal}>
+          <section
+            className="receipt-modal__dialog"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="receipt-modal-title"
+          >
+            <header className="receipt-modal__header">
+              <h3 id="receipt-modal-title" className="receipt-modal__title">
+                Transaction Receipt
+              </h3>
               <button 
-                className="close-modal-btn" 
+                className="receipt-modal__close-icon"
                 onClick={closeReceiptModal}
                 title="Close receipt"
+                type="button"
               >
                 <X size={20} />
               </button>
-            </div>
-            
-            <div className="receipt-modal-body">
+            </header>
+             
+            <section className="receipt-modal__body">
               {receiptFilename && (
-                <div className="receipt-filename">
+                <p className="receipt-modal__filename">
                   <strong>Receipt ID:</strong> {receiptFilename}
-                </div>
+                </p>
               )}
-              
+               
               {isLoadingReceipt ? (
-                <div className="receipt-loading">
-                  <div className="loading-spinner"></div>
+                <div className="receipt-modal__loading">
+                  <div className="receipt-modal__spinner"></div>
                   <p>Loading receipt...</p>
                 </div>
               ) : receiptError ? (
-                <div className="receipt-error">
-                  <h4>Error loading receipt</h4>
+                <section className="receipt-modal__error" aria-live="polite">
+                  <h4 className="receipt-modal__error-title">Error loading receipt</h4>
                   <p>{receiptError}</p>
-                </div>
+                </section>
               ) : receiptContent ? (
-                <div className="receipt-content">
+                <section className="receipt-modal__content" aria-label="Receipt content">
                   <pre>{receiptContent}</pre>
-                </div>
+                </section>
               ) : (
-                <div className="receipt-empty">
+                <section className="receipt-modal__empty" aria-live="polite">
                   <p>No receipt content available</p>
-                </div>
+                </section>
               )}
-            </div>
-            
-            <div className="receipt-modal-footer">
-              <button className="close-receipt-btn" onClick={closeReceiptModal}>
+            </section>
+             
+            <footer className="receipt-modal__footer">
+              <button
+                className="receipt-modal__close-button"
+                onClick={closeReceiptModal}
+                type="button"
+              >
                 Close
               </button>
-            </div>
-          </div>
+            </footer>
+          </section>
         </div>
       )}
     </div>

@@ -1,0 +1,98 @@
+# QMail GUI Theme System Plan
+
+## 1. Existing Situation Analysis
+
+Currently, the QMail GUI uses a modern, dark-themed aesthetic. However, the implementation has several limitations for theme flexibility:
+
+*   **CSS Variable Underutilization:** An audit shows **547 raw color literals** and **282 hardcoded font-size declarations** across 22 CSS files.
+*   **CSS Fragmentation:** Styling is spread across many files, with `MainDashboard.css` reaching over 2,200 lines and containing significant redundant code.
+*   **Accessibility Gaps:** There is no "High Contrast" or "Large Font" mode. The "Dark Mode" toggle in `AccountPane.jsx` is currently a placeholder.
+*   **Backend Integration:** The backend already provides a `/api/system/theme` endpoint managing `Data/Themes/custom_theme.txt`, but it currently deviates from the documented PHP specification in key response fields.
+
+## 2. Proposed Theme System Architecture
+
+### 2.1 Layered CSS Structure
+We will separate the "Tokens" (abstract names) from "Themes" (concrete values).
+
+*   **src/styles/tokens.css (New):** Defines the variable names and their default/fallback states.
+*   **src/styles/themes.css (New):** Contains the sets of values for standard themes:
+    *   `[data-theme='dark']` (Default)
+    *   `[data-theme='light']`
+    *   `[data-theme='high-contrast']` (Accessible: black/yellow, no blur, 1.25x font scale, 0 motion scale).
+
+### 2.2 Dynamic Theme Application
+A `ThemeProvider` React context will:
+1.  Read the active theme ID from `localStorage`.
+2.  **System Sync:** Support a "System" option that follows the OS theme using `@media (prefers-color-scheme: dark)`.
+3.  Apply `data-theme` to the `document.documentElement`.
+4.  **Custom Theme Loading:** If the theme is "custom", fetch the content from `/api/system/theme`, parse the JSON, and inject overrides into a `<style id="qmail-user-theme">` tag.
+
+### 2.3 Backend & Customization API
+*   **Format:** The GUI will use **JSON** for the `custom_theme.txt` file.
+*   **Minimalist Schema:** To stay well under the 8KB limit, the file will strictly contain a version, a base theme reference, and the specific token overrides:
+    `{ "version": 1, "base": "dark", "tokens": { "--accent-primary": "#a78bfa" } }`
+
+## 3. Responsive Design & Scaling (Reactivity)
+
+To handle different monitor sizes and prevent the UI from feeling "tiny" on 4K screens or "cramped" on smaller laptops, we will implement the following:
+
+### 3.1 Scaling Tokens
+Instead of hardcoded `px` values, we will use a relative scale:
+*   `--base-unit: 1rem;` (Typically 16px).
+*   `--font-scale: 1;` (Can be 1.25 for High Contrast).
+*   `--spacing-scale: 1;` (Allows scaling all padding/margins globally).
+
+### 3.2 Responsive Units
+*   **Standardize on `rem`:** Shift all `px` values to `rem` for typography and spacing. This allows the entire UI to scale if the root font size is adjusted.
+*   **Fluid Typography:** Use `clamp()` for headings (e.g., `font-size: clamp(1.5rem, 4vw, 2.5rem);`) so they grow and shrink based on the viewport width.
+
+### 3.3 Grid System
+*   Standardize on an **8px grid** for all margins and paddings.
+*   Replace absolute positioning with **Flexbox** and **CSS Grid** to allow components to reflow naturally as the monitor size changes.
+
+## 4. Implementation Plan
+
+### Phase 0: Backend Alignment (C Core)
+1.  Update `api_handlers_system.c` to match the documented PHP specification:
+    *   Rename response keys to use `success: true`.
+    *   Update command names to `get-theme` and `update-theme`.
+    *   Update the POST oversize error code to `413 Payload Too Large`.
+    *   Implement create-on-GET behavior for the default theme stub.
+
+### Phase 1: Logic and Switching Infrastructure (Priority: High)
+1.  Implement `ThemeProvider` and wrap the application.
+2.  Add a FOUC-prevention script in `index.html`.
+3.  Replace the `AccountPane.jsx` placeholder with a functional theme picker.
+4.  Implement the standard `light` and `high-contrast` CSS in `src/styles/themes.css`.
+
+### Phase 2: Theme Editor
+1.  Build a `ThemeEditorModal` allowing users to edit a minimalist set of tokens.
+2.  Connect the editor to the `POST /api/system/theme` endpoint.
+
+### Phase 3: Consolidation, Cleanup & Responsive Refactor
+1.  Move all variables into `src/styles/tokens.css`.
+2.  **Surgical Replacement:** Replace the **547 color literals** and **282 font-size declarations** with the new token system.
+3.  **Unit Migration:** Convert `px` to `rem` and introduce the 8px grid tokens.
+4.  Audit large files (`MainDashboard.css`) to remove dead code and commented-out sections.
+
+## 5. Model Disagreements Summary
+
+As we analyzed the plans from Gem, GPT, and Opus, several points of divergence emerged:
+
+| Feature | Gemini (Final) | Opus | GPT |
+| :--- | :--- | :--- | :--- |
+| **File Format** | **JSON** (User preference) | **YAML** (Matches PHP spec) | JSON/YAML (Ambiguous) |
+| **Priority** | **Logic First** (Switcher first) | **Cleanup First** (Audit first) | Architecture First |
+| **Custom Schema**| **Minimalist** (Overrides only) | **Full Metadata** (Author/A11y) | Full Metadata |
+| **C Core Strategy**| **Fix C Code** | Defensive GUI + Fix C | Not mentioned |
+| **Variable Origin**| tokens.css | variables.css | theme contract |
+
+**Resolution for this project:** We are proceeding with **Logic First** using a **Minimalist JSON** schema, and we will **Fix the C Core** to ensure long-term stability and spec compliance.
+
+## 6. Positive Criticisms of Peer Plans
+
+*   **gpt.theme.plan.txt:** 
+    *   **Strength:** The "Theme Contract" framing ensures components *consume* style values but never *define* them.
+*   **opu.theme.plan.txt:**
+    *   **Strength:** The quantitative audit (547 colors / 282 fonts) provides an exact scope of work for the consolidation phase.
+    *   **Strength:** The `base-inheritance` strategy is the most efficient way to stay under the 8KB limit.

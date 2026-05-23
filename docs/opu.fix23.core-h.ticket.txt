@@ -1,0 +1,500 @@
+FIX-23 / CORE-H — Draft delete endpoint
+========================================
+Author: Claude Opus 4.7 (Phase 3 reviewer)
+Date:   2026-05-23
+Status: OPEN — backend route handler missing. The SQL primitive
+        already exists. The GUI has TWO consumers waiting on it.
+
+Audience
+--------
+- Backend owner (rest_core).
+- Phase 3+ GUI implementer who will land the delete-on-send and
+  Drafts-list-trash patches once the backend ships.
+
+High-level pointer: docs\opu.usability.fix.plan.txt — search for
+"FIX-23" and "CORE-H." This file documents the contract precisely,
+the diagnostic walk, and the GUI-side patches ready to land.
+
+
+TL;DR
+-----
+1. The backend has NO `/api/qmail/db/drafts/delete` route. Only
+   list, create, and update exist for the drafts namespace
+   (api_handlers.c:130-132).
+2. The underlying SQL primitive — `qmail_db_email_delete` — already
+   exists, is generic by email_id, and cleans up the four related
+   tables in one transaction (qmail_db.c:756-784). It does NOT
+   check folder type.
+3. The other delete route, `/api/qmail/db/messages/delete`, is hard-
+   gated on `is_trashed=1` (qmail_db.c:1572-1575). Drafts are never
+   trashed (folder=2, is_trashed=0). That route can't reach them.
+4. So CORE-H is a small route handler that:
+     - validates email_id,
+     - confirms the row is actually a draft (folder=2),
+     - delegates to the existing qmail_db_email_delete.
+5. The GUI has TWO orphaned flows waiting for this:
+     (a) Send-from-draft: ComposeModal never deletes the draft
+         after a successful send. Drafts pile up indefinitely.
+     (b) Drafts-list trash icon: today routes through
+         deleteEmail() which hits /qmail/db/messages/trash. That
+         sets is_trashed=1 but leaves folder=2 — leaving the
+         draft in a weird half-state that's filtered out of both
+         the Drafts view AND the Trash view.
+
+The recommended contract is straightforward — `POST /api/qmail/db/
+drafts/delete?email_id={hex}`. Tiny backend, ~80 LOC across both
+GUI consumers, no schema changes, no migration.
+
+
+Diagnostic walk
+---------------
+Files inspected:
+  D:\Code\src\C\rest_core\api_src\api_handlers.c
+  D:\Code\src\C\rest_core\api_src\api_handlers_qmail_drafts.c
+  D:\Code\src\C\rest_core\api_src\api_handlers_qmail_folders.c
+  D:\Code\src\C\rest_core\src\qmail\qmail_db.c
+  D:\Code\src\JavaScript\Qmail-GUI\src\api\qmailApiServices.js
+  D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\ComposeModal.jsx
+  D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\QMailDashboard.jsx
+
+1. Endpoint registration table (api_handlers.c):
+     /api/qmail/db/drafts/list     → api_handle_qmail_drafts
+     /api/qmail/db/drafts/create   → api_handle_qmail_draft_save
+     /api/qmail/db/drafts/update   → api_handle_qmail_draft_update
+   No delete entry.
+
+2. Underlying SQL functions (qmail_db.c):
+     qmail_db_drafts_list           (line 2109)
+     qmail_db_draft_save            (line 2177)
+     qmail_db_draft_update          (line 2187)
+     qmail_db_draft_update_recipients (line 2237)
+   No qmail_db_draft_delete or qmail_db_drafts_delete.
+
+3. qmail_db_email_delete (line 756-784):
+     - Takes email_id only.
+     - Doesn't validate folder, is_trashed, or sender.
+     - Deletes from four tables in sequence:
+         qmail_email_contacts
+         qmail_email_servers
+         qmail_attachments
+         qmail_emails
+     - Returns RESULT_NOT_FOUND if the email row didn't exist.
+   This is the right primitive to delegate to once a CORE-H
+   handler has confirmed the row IS a draft.
+
+4. qmail_db_email_delete_permanent (line 1553-1579):
+     - Checks `SELECT is_trashed FROM qmail_emails WHERE email_id`.
+     - Returns RESULT_INVALID_PARAM if is_trashed=0.
+     - Otherwise delegates to qmail_db_email_delete.
+   This is the model CORE-H should follow — same shape, but check
+   `folder = 2` instead of `is_trashed = 1`.
+
+5. GUI consumers today:
+   (a) ComposeModal.jsx tracks currentDraftId through autosave and
+       manual Save Draft (lines 156, 221, 543-550). On a successful
+       send (the isFinished && isSuccessful branch at line 986-989),
+       there is NO deleteDraft call. The draft row stays in the
+       drafts table forever even after the email lands.
+   (b) QMailDashboard.handleDeleteEmail (line 1167-1193) is the
+       same handler used by every folder, including drafts. For a
+       draft, it calls deleteEmail(emailId) (qmailApiServices.js
+       line 1254-1280), which POSTs DELETE to
+       /api/qmail/db/messages/trash. That endpoint calls
+       qmail_db_email_move with is_trashed=1, but the row's folder
+       stays 2 (drafts). Result: the row drops out of /drafts/list
+       (which filters on folder=2 AND is_trashed=0) AND out of the
+       trash view (which filters on is_trashed=1 AND folder=3 for
+       display purposes). The data isn't lost — it's just invisible
+       from both views. A leak in either direction.
+
+The two consumers prove that CORE-H is needed twice over: once for
+the implicit cleanup after send, once for the explicit Drafts-list
+trash icon.
+
+
+Proposed contract — CORE-H
+--------------------------
+Endpoint:
+  POST /api/qmail/db/drafts/delete
+  Params:
+    email_id  hex string (32 chars, QMAIL_GUID_SIZE * 2)
+
+Behavior:
+  1. Parse and validate email_id. 400 on missing or malformed.
+  2. SELECT folder, is_trashed FROM qmail_emails WHERE email_id = ?
+     - If no row: 404 "Draft not found."
+     - If row.folder != 2 (QMAIL_FOLDER_DRAFTS): 400 "Not a draft.
+       Use /qmail/db/messages/delete for trashed messages or
+       /qmail/db/messages/trash for soft delete." This is defense
+       in depth — the GUI should never call this endpoint with a
+       non-draft email_id, but if a buggy client does, refuse it
+       loudly rather than silently deleting from the wrong folder.
+     - If row.is_trashed != 0: arguable. Drafts aren't supposed to
+       be trashed today. Treat the row as a draft and proceed —
+       hard-delete via qmail_db_email_delete. (Alternatively,
+       refuse; see Rejected Alternatives.) Recommendation: proceed.
+  3. Delegate to qmail_db_email_delete.
+  4. On success: 200 with
+       { "success": true, "email_id": "<hex>" }
+  5. On db error: 500 with the standard error response shape.
+
+Why POST (not DELETE):
+  Consistency with /qmail/db/drafts/{list,create,update} which are
+  all POST/GET on the same namespace. Also matches the existing
+  /qmail/db/messages/trash (which is registered as DELETE but
+  invoked by the GUI as DELETE-with-query-params, an unusual
+  pattern). Either verb is defensible; POST is the more orthodox
+  fit for this namespace. The GUI patch below uses POST.
+
+Auth / scope:
+  No new auth surface. Inherits whatever protects /drafts/list.
+
+Backend implementation sketch:
+
+  /* api_handlers_qmail_drafts.c — append at the bottom */
+  void api_handle_qmail_draft_delete(http_request_t *request,
+                                     http_response_t *response,
+                                     void *user_data) {
+      (void)user_data;
+      char rid[API_QMAIL_RID_LEN];
+      api_qmail_generate_rid(rid);
+      uint64_t t_start = platform_time_ms();
+
+      const char *eid_hex = http_request_get_param(request, "email_id");
+      uint8_t email_id[QMAIL_GUID_SIZE];
+      if (!api_qmail_require_guid_param_with_rid(
+              request, response, "email_id",
+              "Missing or invalid 'email_id' parameter (32 hex chars)",
+              "Invalid hex format for email_id", email_id, rid)) {
+          return;
+      }
+
+      /* Verify the row exists AND is a draft before deleting */
+      const char *check_sql =
+          "SELECT folder FROM qmail_emails WHERE email_id = ?";
+      sqlite3_stmt *stmt = NULL;
+      int rc = sqlite3_prepare_v2(qmail_db_handle(), check_sql, -1, &stmt, NULL);
+      if (rc != SQLITE_OK) {
+          api_qmail_error_response_with_rid(response,
+              "Failed to query draft", 500, rid);
+          return;
+      }
+      sqlite3_bind_blob(stmt, 1, email_id, QMAIL_GUID_SIZE, SQLITE_STATIC);
+      rc = sqlite3_step(stmt);
+      if (rc != SQLITE_ROW) {
+          sqlite3_finalize(stmt);
+          api_qmail_error_response_with_rid(response,
+              "Draft not found", 404, rid);
+          return;
+      }
+      int folder = sqlite3_column_int(stmt, 0);
+      sqlite3_finalize(stmt);
+
+      if (folder != QMAIL_FOLDER_DRAFTS) {
+          api_qmail_error_response_with_rid(response,
+              "Email is not a draft", 400, rid);
+          return;
+      }
+
+      result_t res = qmail_db_email_delete(email_id);
+      if (res == RESULT_NOT_FOUND) {
+          api_qmail_error_response_with_rid(response,
+              "Draft not found", 404, rid);
+          return;
+      }
+      if (res != RESULT_SUCCESS) {
+          api_qmail_result_error_response_with_rid(response,
+              "Failed to delete draft", 500, res, rid);
+          return;
+      }
+
+      json_builder_t jb;
+      api_qmail_success_response(&jb, "Draft deleted");
+      api_qmail_add_request_id(&jb, rid);
+      json_add_string(&jb, "email_id", eid_hex);
+      json_object_end(&jb);
+      http_response_set_json(response, &jb);
+
+      log_info(LOG_CAT_COMMAND, "DRAFT_DELETE rid=%s result: ok elapsed=%llums",
+               rid, (unsigned long long)(platform_time_ms() - t_start));
+  }
+
+  /* api_handlers.c — register alongside the other drafts routes */
+  http_server_register_endpoint(server, "/api/qmail/db/drafts/delete",
+                                api_handle_qmail_draft_delete, NULL);
+
+That's it. ~50 LOC backend + 1 LOC registration.
+
+
+Rejected alternatives
+---------------------
+Option B — Extend /qmail/db/messages/delete to accept drafts
+  Drop the is_trashed=1 gate in qmail_db_email_delete_permanent
+  and let any email_id flow through. Then the GUI's existing
+  delete path (with a folder-aware helper) works for drafts too.
+
+  Why this was rejected:
+  - Removes a useful safety net. Today's /messages/delete refuses
+    to hard-delete anything that isn't explicitly trashed first.
+    That's intentional — it prevents a buggy client from
+    deleting inbox messages without the user dragging them to
+    trash first.
+  - Conflates "draft cleanup" (a normal post-send operation)
+    with "permanent message delete" (a destructive user action).
+    The two should have different audit/log signatures and
+    different rate-limit profiles, if any are ever added.
+
+Option C — Add starred-style folder filter to qmail_db_email_delete
+  Make qmail_db_email_delete accept an optional `expected_folder`
+  parameter. Callers pass 2 from the drafts handler, etc.
+
+  Why this was rejected:
+  - Changes a stable function signature used by every other
+    delete path. Higher blast radius than a dedicated handler
+    that wraps the same primitive.
+
+Option D — Soft-delete (move to trash) instead of hard-delete
+  POST /qmail/db/drafts/delete sets folder=3 and is_trashed=1
+  instead of removing the row.
+
+  Why this was rejected:
+  - Drafts are user-authored content the user explicitly chose
+    to delete. They're not received messages where soft-delete
+    + undo makes sense.
+  - The GUI already plans an in-app confirm modal with a 10s
+    undo toast (matching FIX-28's ContactsPane pattern). That
+    gives the user the same recovery affordance without
+    cluttering the trash folder with sent-drafts-and-discarded-
+    drafts that the user can never meaningfully act on.
+  - Drafts are usually short-lived. The user creates them,
+    sends them (cleanup) or discards them (cleanup). Long-term
+    soft-delete state is the wrong default.
+
+  If the backend owner disagrees and prefers soft-delete, the
+  GUI patches are mostly the same — only the failure-toast copy
+  changes. Flag it during review.
+
+
+GUI-side patch (ready to land once CORE-H ships)
+-----------------------------------------------
+This is two files plus a new API helper.
+
+src/api/qmailApiServices.js
+  Add a deleteDraft helper alongside saveDraft / updateDraft:
+
+    /**
+     * Permanently delete a draft. Requires CORE-H.
+     * @param {string} emailId - hex email_id of the draft
+     * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+     */
+    export const deleteDraft = async (emailId) => {
+      try {
+        const url = `${API_BASE_URL}/qmail/db/drafts/delete?email_id=${encodeURIComponent(emailId)}`;
+        const response = await fetch(url, { method: "POST" });
+        const data = await handleResponse(response);
+
+        if (data && data.success) {
+          return { success: true, data: { emailId } };
+        }
+        throw new Error("Invalid response from delete draft endpoint");
+      } catch (error) {
+        console.error("Delete draft failed:", error);
+        return { success: false, error: error.message };
+      }
+    };
+
+src/qmail/screens/ComposeModal.jsx — delete-on-send (FIX-23a)
+  - Import deleteDraft alongside saveDraft / updateDraft.
+  - In handleSend, the success branch at line 986-999:
+
+      if (isFinished) {
+        taskFinished = true;
+        if (isSuccessful || state === "completed") {
+          // Delete the draft AFTER confirmed send success.
+          // Fire-and-forget — don't block the success state.
+          // If cleanup fails, warn but don't claim the send failed.
+          const draftIdAtSend = currentDraftId;
+          if (draftIdAtSend) {
+            deleteDraft(draftIdAtSend)
+              .then((result) => {
+                if (!result.success && !cancelledRef.current) {
+                  // showInfo or a warning-variant toast. The send
+                  // succeeded — surface this as cleanup noise, not
+                  // a send failure. Wording matters here.
+                  console.warn(
+                    "Draft cleanup failed after successful send:",
+                    result.error,
+                  );
+                  // If the unified provider supports a warning
+                  // variant, prefer that. Otherwise use showInfo
+                  // with explicit copy:
+                  //   "Email sent. Draft cleanup failed —
+                  //    you can delete it manually from Drafts."
+                }
+              })
+              .catch((err) => {
+                console.warn("Draft cleanup threw:", err);
+              });
+          }
+
+          setSendingStatus("completed");
+          setSendProgress("Email sent successfully!");
+          setTimeout(() => {
+            if (cancelledRef.current) return;
+            onSend(emailData);
+            setIsSending(false);
+            setSendingStatus(null);
+            setSendProgress("");
+            setTaskId(null);
+            setCurrentDraftId(null);  // already-deleted draft id
+          }, 1500);
+        } else {
+          markSendFailed(taskError || message || "Failed to send email");
+        }
+      }
+
+  - Also handle the fallback success branch at line 1022-1032
+    (the no-taskId path) identically.
+
+  Key invariants:
+    * The draftIdAtSend snapshot is taken BEFORE the setTimeout so
+      a late re-render can't blank it out.
+    * .then's "draft cleanup failed" check guards on
+      !cancelledRef.current so an unmount mid-flight stays quiet.
+    * No await — the delete races the 1500ms onSend dispatch. The
+      user sees Email Sent immediately; if cleanup fails, the
+      warning fires under it. Most of the time the delete returns
+      in under 100ms and the user never sees anything.
+    * setCurrentDraftId(null) inside the setTimeout makes the
+      autosave-skip guards (line 504 sendingStatus === "completed",
+      line 500 !isOpen) the actual blockers; the id cleanup is
+      defensive in case the modal stays open past the success
+      flash for any reason.
+
+src/qmail/screens/QMailDashboard.jsx — Drafts list trash (FIX-23b)
+  Today: handleDeleteEmail unconditionally routes through
+  deleteEmail() → /messages/trash. For drafts that's the broken
+  is_trashed=1 + folder=2 dead state described above.
+
+  Patch: branch on isDraft (or folder === "drafts") in
+  handleDeleteEmail:
+
+    const handleDeleteEmail = async (emailId, isPermanent = false) => {
+      // Drafts have their own delete endpoint per CORE-H.
+      const target = emails.find((email) => email.id === emailId);
+      if (target?.isDraft || currentFolder === "drafts") {
+        try {
+          const result = await deleteDraft(emailId);
+          if (!result.success) {
+            showDashboardNotification(
+              `Failed to delete draft: ${result.error}`,
+              "error",
+            );
+            return;
+          }
+          setEmails((prev) => {
+            const remaining = prev.filter((email) => email.id !== emailId);
+            if (remaining.length === 0 && currentFolder !== "inbox") {
+              setTimeout(() => handleFolderChange("inbox"), 0);
+            }
+            return remaining;
+          });
+          if (selectedEmail && selectedEmail.id === emailId) {
+            setSelectedEmail(null);
+          }
+          loadMailCounts();
+          return;
+        } catch (error) {
+          console.error("Delete draft error:", error);
+          showDashboardNotification("Error deleting draft", "error");
+          return;
+        }
+      }
+
+      // ... existing trash/permanent-delete flow unchanged ...
+    };
+
+  Optional polish (decision-only): wrap the drafts-delete in an
+  in-app confirm modal mirroring FIX-28's ContactsPane pattern
+  (AlertTriangle header + Cancel/Delete buttons + 10s undo toast).
+  The send-from-draft path explicitly does NOT need a confirm —
+  the user already clicked Send, the draft cleanup is implicit.
+  Only the explicit Drafts-list trash icon would benefit.
+
+  Recommendation: ship the bare patch first (matches the existing
+  Trash icon behavior in other folders, no confirm), then layer
+  the confirm in a follow-up if user testing reveals accidental
+  draft deletes. The "undo" affordance is more valuable for
+  inbox messages (with persistent server-side content) than for
+  drafts (the user wrote them and is presumably aware of what
+  they typed).
+
+Estimated effort for the after-CORE-H patches:
+  ~90 LOC across deleteDraft helper + ComposeModal change +
+  QMailDashboard branch. One batch (probably grouped with the
+  Starred view patch from CORE-J if both land around the same
+  time — both touch the same files).
+
+
+Verification (after CORE-H ships)
+---------------------------------
+Manual checks against a live backend:
+
+  1. Open Compose, write subject + body, click Save Draft. Confirm
+     a draft row appears in /drafts/list.
+  2. Re-open the same draft from the Drafts list. Confirm
+     currentDraftId is set (check log line "Editing draft").
+  3. Send the draft. Confirm:
+       - Email Sent flash appears in the modal.
+       - The Drafts list refreshes and the draft is gone.
+       - /drafts/list backend response no longer includes the row.
+       - The Sent folder (or wherever sent mail lands) contains
+         the new message.
+  4. Simulate a deleteDraft failure (e.g. stop the backend mid-
+     send, or pass a bogus email_id manually): confirm a warning
+     toast appears WITHOUT contradicting the "Email Sent" state.
+     The toast copy should make clear that the send succeeded and
+     only cleanup failed.
+  5. From the Drafts list, click the trash icon on a draft.
+     Confirm the row disappears AND /drafts/list backend response
+     no longer includes it (true hard delete, not a soft trash).
+  6. Edge case: trash a draft whose currentDraftId is also active
+     in the open Compose modal. Both flows should converge cleanly
+     — closing the modal doesn't re-create the draft, and trying
+     to Save Draft on the now-deleted row should return a 404
+     surfaced as the modal error banner.
+
+  7. Concurrency: send a draft while the Drafts list is open.
+     Confirm the row disappears from the list on the next refresh.
+     (BUG-23 / FIX-08 send-poll machinery already does this via
+     loadMailCounts → loadEmails, but the new delete-on-send adds
+     a race we should sanity-check.)
+
+
+Schedule
+--------
+- This file documents the contract.
+- The interim GUI side ships NOTHING in this batch — there's
+  nothing to remove or change. The current send-from-draft path
+  leaks drafts (annoying but not destructive), and the Drafts
+  list trash icon half-works (the row disappears from the user's
+  view, which is the user's intent; only the backend leak makes
+  it wrong).
+- After CORE-H lands, ship the two GUI patches together in one
+  batch.
+
+CORE-H is HARD per the original plan, but like CORE-J the actual
+implementation is genuinely small — one new route handler that
+mirrors the shape of api_handle_qmail_delete_permanent. Maybe
+half a day of backend work plus tests.
+
+
+Files touched by this batch
+---------------------------
+- docs/opu.fix23.core-h.ticket.txt — this file (new).
+- docs/opu.usability.fix.plan.txt — refresh FIX-23 + CORE-H
+  entries to point here.
+
+No code changes. No backend changes. CORE-H remains OPEN.
+
+End of file.

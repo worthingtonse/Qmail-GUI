@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { runEchoTest, createWalletBackup } from '../../../api/apiService.js';
 
 const SettingsTab = () => {
@@ -114,7 +114,7 @@ const SettingsTab = () => {
             <p className="backup-description">
               Create a complete .zip backup of your active wallet.
               <strong>Must be an absolute path</strong> (e.g., C:\Backups or /home/user/backups).
-              The directory will be created if it doesn't exist.
+              The directory will be created if it doesn&apos;t exist.
             </p>
             
             <div className="backup-form">

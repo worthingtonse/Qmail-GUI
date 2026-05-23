@@ -1,0 +1,307 @@
+Opus QMail-GUI Phase 2 handoff
+Date: 2026-05-23
+
+Purpose
+-------
+This handoff is for the next Opus session after context is cleared.
+Phase 1 is fully closed; the next session should pick up Phase 2
+implementation/review work without rediscovering Phase 0/1 history.
+
+Primary Phase 2 plan
+--------------------
+Read this first:
+
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.phase2.tickets.txt
+
+That file is the dedicated Phase 2 ticket extract. The master plan
+is still authoritative if there is a conflict:
+
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt
+
+Project root:
+
+  D:\Code\src\JavaScript\Qmail-GUI\
+
+Phase 1 is DONE. Do not redo Phase 1 work.
+
+  Closeout summary: docs\gpt.phase1.closeout.txt
+  Per-batch fix files (worth a skim for what was already tightened):
+    docs\opu.usability.batch6.fixes.txt   (FIX-05.5, FIX-06, FIX-07)
+    docs\opu.usability.batch7.fixes.txt   (FIX-15, FIX-15b)
+    docs\opu.usability.batch8.fixes.txt   (FIX-14, FIX-11a, FIX-17)
+    docs\opu.usability.batch9.fixes.txt   (FIX-09, FIX-12)
+
+Open bug ledger (already triaged):
+    docs\cla.bugs.txt    (BUG-01 .. BUG-36, plus per-batch appendices)
+    docs\gem.bugs.txt
+    docs\gpt.bugs.txt
+    docs\opu.bugs.txt
+
+Recommended Phase 2 batch order
+-------------------------------
+From docs\opu.phase2.tickets.txt:
+
+Batch 10:
+  FIX-22 + FIX-31
+  Compose send-gating UX + remove Parity Server section.
+  MUST SHIP TOGETHER — FIX-31 deletes getParityServer(), which
+  ComposeModal.checkNetworkStatus currently calls.
+
+Batch 11:
+  FIX-19 + FIX-24 + FIX-27 + FIX-30
+  Dangerous-attachment warning, Mark Unread/Archive buttons,
+  post-success button-disable window, John Doe removal.
+
+Batch 12:
+  FIX-20 + FIX-33 + FIX-34
+  Unified Refresh, send-failure + poll resiliency, unified
+  notification system.
+
+Batch 13:
+  FIX-21 + FIX-25 + FIX-29 + FIX-32
+  Pending-click decision, search result-cap notice, save-DRD-to-
+  contacts (depends on FIX-09, already shipped), Server Details
+  slice.
+
+Batch 14:
+  FIX-28
+  Replace ContactsPane window.confirm (already logged as BUG-32).
+  Standalone or foldable into Batch 13.
+
+Backend-blocked (file backend tickets, do NOT ship GUI-only):
+  FIX-18  ↔  CORE-J  (starred filter)          HARD
+  FIX-23  ↔  CORE-H  (deleteDraft endpoint)    HARD
+  FIX-26  ↔  CORE-E  (upload_and_tell stages)  optional
+
+Start here: Batch 10
+--------------------
+Batch 10 is the first useful implementation session for Phase 2.
+
+The FIX-22 + FIX-31 coupling is a HARD CUTOVER:
+  - Delete the Parity Server section from AccountPane.jsx.
+  - Delete getParityServer() from qmailApiServices.js.
+  - Remove parity state + handlers from AccountPane.
+  - Update ComposeModal.checkNetworkStatus() in the SAME PATCH:
+      * canSend starts null ("checking…"); Send is "Checking
+        network…" disabled.
+      * On false, soften to a warning banner + Retry, not a hard
+        block. Backend remains final authority.
+      * Drop the Promise.all entry for getParityServer; only
+        getServers() (>= 6 reachable) remains.
+
+Regression checklist for Batch 10:
+  [ ] Compose opens on a healthy network — Send becomes enabled.
+  [ ] Block /raida/echo — Send shows warning-with-Retry.
+  [ ] Retry restores Send when the network returns.
+  [ ] "Send anyway" override still calls the backend.
+  [ ] Account view shows no Parity Server section.
+  [ ] Attachment send still works (Batch 5 regression).
+  [ ] Compose Reply / Reply All / Forward / Draft still open and
+      pre-fill correctly (Phase 1 regression coverage).
+  [ ] Sign Out / re-entry path still works (Phase 1 regression).
+
+Phase 2 conventions that bit me in Phase 1
+------------------------------------------
+- Default to no comments. Add one only when WHY is non-obvious. No
+  "added for X flow" or "fixes #123" — that belongs in the PR.
+
+- normalizeIdentityForUi returns BOTH camelCase and snake_case for
+  every field. Don't refactor consumers to camelCase-only.
+
+- The codebase has a lot of pre-existing eslint baseline noise
+  (73 errors / 4 warnings as of Phase 1 closeout — see BUG-36).
+  Use per-file lint to confirm parity or no new categories, NOT
+  project-wide lint as a pass/fail signal.
+
+- Pre-existing pattern in QMailDashboard: useEffect with `[]` deps
+  captures the mount-time `loadMailCounts` (and friends). Don't
+  "fix" the eslint-disable comments without understanding the
+  intentional closure pattern — at least one batch has tried.
+
+- React 18 batches state updates inside event handlers, so
+  cross-component setState chains (e.g. sign-out cascading through
+  App → QMail → QMailDashboard → AccountPane) commit in a single
+  paint. Order the setState calls anyway — the spec calls for
+  reset-before-route — but don't add manual delays.
+
+- "Coming Soon" dead controls are visibly disabled, NOT silently
+  no-op'd. Delete Account stays hidden entirely.
+
+- Do NOT synthesize server state in the GUI. No fake Sent rows,
+  fake identity health, or fake mark-as-read persistence.
+
+- The worktree has many user/Opus changes and untracked docs. Do
+  NOT reset, checkout, or revert unrelated files.
+
+Phase 1 wisdom worth carrying into Phase 2
+------------------------------------------
+The fixes I added on top of GPT's Phase 1 implementations tend to
+cluster around the same gotchas. Watch for these again in Phase 2:
+
+  1. **Defensive value coercion in modal builders.** ComposeModal's
+     reply/replyAll/forward branches crash on null body / null
+     sender / null timestamp even when isDownloaded=true (FIX-04
+     race). Coerce to "" before .replace() etc.
+
+  2. **First-poll "ghost arrival" toast.** Pollers that fire a
+     "New X arrived" toast on the FIRST fetch lie to the user
+     about pre-existing data. Use an `isFirstPoll` flag.
+
+  3. **Modal close-on-error.** Async confirm modals (Batch 8
+     trash-page delete) need try/catch in the handler that the
+     modal awaits, otherwise the modal stays open when the
+     follow-up loadEmails / loadCounts throws.
+
+  4. **document.title side effects.** QMailDashboard sets the
+     window title in a useEffect; it persists across unmount.
+     ServiceSelectionScreen doesn't reset it (BUG-26). FIX-34
+     (unified notification system) is a good place to also
+     centralize title management.
+
+  5. **Notification object payloads matter.** Toasts now carry
+     targetPendingGuid / targetEmailId for clickability (FIX-17).
+     FIX-34 (notification unification) MUST preserve those
+     payloads — string-only notifications break the clickable
+     path.
+
+  6. **Cancellation refs survive refactors.** ComposeModal's
+     cancelledRef.current guard exists for a reason (BUG-04).
+     FIX-33 refactors the send-poll loop; the cancellation
+     contract must still break the loop on modal close.
+
+  7. **Pre-existing race: handleReply/handleReplyAll/handleForward
+     capture selectedEmail at click time.** If the user clicks
+     Reply before the post-select getEmailById merge completes,
+     the quoted body uses the 100-char preview. Already logged in
+     docs\opu.bugs.txt. Flagged for Batch 8 in Phase 1; deferred
+     out then. Worth re-evaluating if FIX-24 (Mark Unread + Archive
+     buttons) touches the same handler surface.
+
+Key files for Phase 2
+---------------------
+These will be touched repeatedly:
+
+  src\qmail\screens\ComposeModal.jsx       (FIX-22, FIX-27, FIX-33)
+  src\qmail\screens\QMailDashboard.jsx     (FIX-20, FIX-21, FIX-25,
+                                            FIX-30, FIX-33, FIX-34)
+  src\qmail\screens\ReadingPane.jsx        (FIX-19, FIX-24)
+  src\qmail\screens\AccountPane.jsx        (FIX-31, FIX-32)
+  src\qmail\screens\ContactsPane.jsx       (FIX-28, FIX-29)
+  src\qmail\screens\EmailListPane.jsx      (FIX-25 search notice)
+  src\api\qmailApiServices.js              (FIX-19 attachment safety,
+                                            FIX-20 checkMailNow +
+                                            peekBeacon rename,
+                                            FIX-31 getParityServer
+                                            deletion, FIX-23 once
+                                            CORE-H lands)
+  src\components\common\notifications\*    (FIX-34 — already exists
+                                            as NotificationProvider
+                                            wrapping App.jsx)
+
+Read before editing:
+
+  src\qmail\screens\QMailDashboard.jsx    (the dashboard is the
+                                           hub of every Phase 2
+                                           refactor)
+  src\qmail\screens\ComposeModal.jsx      (FIX-22 + FIX-27 + FIX-33
+                                           all touch this file)
+  src\api\qmailApiServices.js             (helpers + error shapes)
+  src\qmail\screens\AccountPane.jsx       (parity removal + server
+                                           details slice)
+
+Verification commands
+---------------------
+Use the repo root:
+
+  cd D:\Code\src\JavaScript\Qmail-GUI
+  npm run build
+
+Syntax checks:
+
+  node --check electron.cjs
+  node --check preload.cjs
+
+Touched-file ESLint (the only lint gate that matters for Phase 2):
+
+  ./node_modules/.bin/eslint <touched.jsx> <touched.js> \
+    --report-unused-disable-directives --max-warnings 0
+
+DO NOT use `npm run lint` as a gate — it fails on pre-existing
+repo baseline issues (BUG-36).
+
+Git commands need the safe.directory override in this environment:
+
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' status --short
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' diff --check
+
+Expected output pattern for Phase 2 batches
+-------------------------------------------
+Same as Phase 1. When implementing a batch, write:
+
+  docs\opu.usability.batchN.summary.txt
+
+Including:
+  - Tickets covered.
+  - Files changed.
+  - Behavior implemented.
+  - Edge cases handled.
+  - Verification run.
+  - Reviewer questions for any non-obvious decision.
+
+When reviewing a GPT-implemented batch, write:
+
+  docs\opu.usability.batchN.fixes.txt
+
+Including:
+  - Reviewed files.
+  - Verdict (code fixes applied OR no fixes required).
+  - Spec verification checklist.
+  - Build / lint status.
+  - Out-of-scope observations.
+
+If out-of-scope bugs are found, append to docs\cla.bugs.txt with a
+new BUG-NN block following the existing format. Keep BUG numbers
+sequential; the last one used in Phase 1 was BUG-36.
+
+Phase 2 ship gate (full list)
+-----------------------------
+- Everything from the Phase 0/1 gates (build, lint baseline not
+  regressed, returning-user startup regression check).
+
+- Batch 10 (FIX-22 + FIX-31): Compose Send button reaches enabled
+  on a healthy network AND surfaces a warning-with-Retry when
+  /raida/echo is blocked. Account view shows no Parity Server
+  section.
+
+- Batch 12 (FIX-33): flaky-network send recovers via retry counter;
+  persistent failure surfaces in the dashboard notification AFTER
+  the 1500ms post-success window.
+
+- Full manual checklist at the bottom of
+  docs\opu.phase2.tickets.txt.
+
+Open hazards to keep in mind
+----------------------------
+- The repo-wide ESLint baseline is failing (BUG-36, 73 errors / 4
+  warnings). Phase 2 must keep touched-file lint clean and should
+  NOT grow the baseline.
+
+- Backend-blocked Phase 1 tickets remain parked:
+  FIX-08  ↔  CORE-A  (Sent persistence)
+  FIX-10  ↔  CORE-F  (Repair Now)         HARD
+
+  Do not pick those up GUI-only.
+
+- The Phase 1 manual walkthrough is still required before release
+  signoff. Phase 2 work can proceed in parallel, but a release cut
+  needs the live verification from
+  docs\opu.phase1.tickets.txt (bottom checklist).
+
+- FIX-29 depends on FIX-09 (already shipped in Batch 9). The DRD
+  "Add to My Contacts" button needs the schema FIX-09 produced.
+
+- FIX-30 (John Doe removal) was "already touched in FIX-03." The
+  remaining work is the AccountPane "Loading…" placeholder. Don't
+  rewrite FIX-03's identity threading.
+
+End of file.

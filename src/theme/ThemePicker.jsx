@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { useState } from "react";
 import { Moon, Sun, Contrast, Sparkles, Edit3 } from "lucide-react";
 import { useTheme } from "./useTheme";

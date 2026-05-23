@@ -1,0 +1,174 @@
+Batch 14 Review (FIX-28)
+========================
+Reviewer: Claude Opus 4.7 (Phase 2)
+Implementer: GPT (gpt.usability.batch14.summary.txt)
+Date: 2026-05-22
+
+Reviewed Files
+--------------
+- src/qmail/screens/ContactsPane.jsx
+- src/qmail/screens/ContactsPane.css
+- docs/gpt.usability.batch14.summary.txt
+
+Verdict
+-------
+APPROVED — no code fixes required.
+
+With Batch 14 landed, FIX-28 (and the BUG-32 it traced to) is now
+fully complete. Phase 2 GUI-side work is effectively done; only
+backend-blocked tickets remain (FIX-18, FIX-23, FIX-26).
+
+Two LOW-severity out-of-scope observations recorded as BUG-47 and
+BUG-48 in docs\cla.bugs.txt. Neither blocks the patch.
+
+Note on Sequencing
+------------------
+The JSX/logic for FIX-28 already shipped with Batch 13's
+ContactsPane.jsx (ContactsPane.jsx mtime 22:21:14, before this
+batch summary at 22:25). Batch 13's "Notes" section was wrong to
+claim window.confirm remained — I flagged that as BUG-45.
+
+Batch 14 adds the .contact-delete-* CSS rules to ContactsPane.css
+(file mtime 22:25:18, matching the batch summary). Together the
+two batches implement FIX-28 in full. Recommend updating the
+docs\opu.phase2.tickets.txt batch-order to reflect that both
+batches participated.
+
+Spec Verification Checklist
+---------------------------
+FIX-28 (Replace ContactsPane window.confirm)
+  [x] Zero window.confirm calls in src\ (grep clean).
+  [x] In-app delete-confirm modal (ContactsPane.jsx:337-398) with:
+        - AlertTriangle icon header + "Delete Contact?" title
+        - body text "This will remove {name} from your local contacts."
+        - optional address display in monospace block
+        - inline error region (deleteContactError) for prep/delete
+          failures while keeping the modal open
+        - Cancel + Delete actions; both gated on isDeletingContact
+        - Delete button swaps to a spinning RefreshCw +
+          "Deleting..." during the in-flight period
+  [x] Overlay-click cancels via handleCancelDeleteContact, also
+      gated on !isDeletingContact (line 248) — no accidental
+      dismiss during the destructive op.
+  [x] Modal-click stopPropagation prevents accidental dismiss
+      (line 348).
+  [x] aria-modal + aria-labelledby + role="dialog" — accessibility
+      basics covered.
+  [x] Successful delete:
+        - setPendingDeleteContact(null) closes the modal
+        - await loadContacts() refreshes the list
+        - addNotification({duration: 10000, onClick: restore})
+          fires the undo toast through the unified NotificationProvider
+  [x] Undo path:
+        - restoreDeletedContact(contact, payload.data) (line 226-239)
+        - addContact(payload) then loadContacts() + showSuccess
+        - Failure → showError. Both use the unified provider.
+  [x] Payload built BEFORE delete (line 261-265). If
+      buildContactPayload fails, the modal stays open and shows
+      the inline error — the destructive op is never attempted.
+      Good defensive ordering.
+  [x] Undo notification uses a 10s duration (the unified system's
+      default is 5s). Reasonable for an undo affordance.
+
+  CSS verification (Batch 14's net new bytes):
+  [x] .contact-delete-overlay: fixed inset:0, z-index:9000, blur
+      backdrop, dim overlay. Matches the AccountPane sign-out
+      modal and QMailDashboard attachment-confirm modal styles.
+  [x] .contact-delete-modal: 420px max width, card-bg, strong
+      border, shadow-xl.
+  [x] .contact-delete-header: danger-colored icon row.
+  [x] .contact-delete-address: monospace styling for the
+      address line; word-break for long addresses.
+  [x] .contact-delete-error: danger-tinted box; only renders
+      when deleteContactError is non-empty.
+  [x] .contact-delete-actions: right-aligned button row with
+      icon-text inline-flex layout.
+
+Build / Lint Status
+-------------------
+PASS: npm run build (1754 modules, ~2.1s)
+       dist/index-69c70f48.js 392 KB
+       dist/index-8892dcef.css 209 KB (+1.4 KB vs Batch 13 — matches
+         the new .contact-delete-* block)
+PASS: ./node_modules/.bin/eslint src/qmail/screens/ContactsPane.jsx
+       --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+
+Grep cross-checks:
+  - window.confirm in src\: ZERO matches.
+  - .contact-delete-* class names: every JSX class name has a
+    matching CSS rule (overlay, modal, header, address, error,
+    actions). No orphan class names.
+
+Out-of-Scope Observations
+-------------------------
+Recorded in docs\cla.bugs.txt:
+
+  BUG-47 (LOW, React warning) — Undo notification onClick closure
+    references restoreDeletedContact → loadContacts → setContacts.
+    If the user navigates away from ContactsPane within the 10s
+    undo window and clicks the toast, setContacts fires on an
+    unmounted component. React 18 silently drops the state update.
+    Functionally correct (contact IS restored backend-side; next
+    ContactsPane mount picks it up via loadContacts), just
+    cosmetic noise. Suggested fix: have restoreDeletedContact
+    skip the local loadContacts and rely on the next mount-time
+    fetch, OR gate on a mountedRef.
+
+  BUG-48 (LOW, consistency) — Delete-flow errors use local
+    deleteContactError state + inline modal display, while every
+    other ContactsPane error path uses the unified showError() from
+    NotificationProvider. Defensible (inline-error keeps the user
+    in-context during a preparation-failure), but inconsistent with
+    Batch 12's FIX-34 unification pattern. Decision-only fix: either
+    route through showError + close the modal, OR document the
+    inline-error exception with a one-line comment.
+
+Pre-existing concerns from Batch 13 review still applicable:
+  - BUG-44 (DRD saved-state local on remount) — unchanged.
+
+Regression Checklist
+--------------------
+Static / code-level verification only — live backend not exercised.
+
+  [code-level pass] Delete user contact opens the in-app modal.
+  [code-level pass] Cancel closes the modal without deleting.
+  [code-level pass] Cancel disabled during in-flight delete
+    (handleCancelDeleteContact early-returns when isDeletingContact).
+  [code-level pass] Successful delete refreshes contacts and emits
+    the undo toast.
+  [code-level pass] Clicking the undo toast restores the contact
+    via addContact + loadContacts; showSuccess fires on success.
+  [code-level pass] Restore failure routes through showError.
+  [code-level pass] buildContactPayload failure shows inline error,
+    keeps modal open, skips the destructive delete.
+  [code-level pass] Backend delete failure shows inline error,
+    keeps modal open (so user can retry or cancel).
+  [unchanged] Batch 10-13 surface: no regression touched.
+
+Live-backend verification — full delete-then-undo round trip,
+delete with intentional backend failure, navigate-away-then-undo
+behavior — should still happen before the Phase 2 ship gate.
+
+Documentation Follow-ups (recommended for next session)
+-------------------------------------------------------
+1. Mark BUG-32 RESOLVED in docs\cla.bugs.txt (it's the original
+   Phase 1 trigger for FIX-28, and FIX-28 is now fully landed).
+2. Update docs\opu.phase2.tickets.txt to note that FIX-28 shipped
+   across Batches 13 + 14 (JSX in Batch 13, CSS in Batch 14).
+3. Update the Phase 2 status block: GUI-side work complete except
+   for FIX-18 / FIX-23 / FIX-26 (backend-blocked).
+4. Schedule the live manual checklist walkthrough from the bottom
+   of docs\opu.phase2.tickets.txt for ship-gate signoff.
+
+Phase 2 Status
+--------------
+GUI-side: COMPLETE through Batch 14.
+Backend-blocked tickets remaining:
+  FIX-18 ↔ CORE-J  (starred filter)         HARD
+  FIX-23 ↔ CORE-H  (deleteDraft endpoint)   HARD
+  FIX-26 ↔ CORE-E  (upload_and_tell stages) optional
+
+Next phase: live manual verification walkthrough + ship-gate
+review.

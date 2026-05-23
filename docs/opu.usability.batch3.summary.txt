@@ -1,0 +1,295 @@
+opu QMail-GUI fix batch 3 — implementation summary
+Date: 2026-05-21
+Author: claude-opus-4-7 (filename prefix: opu)
+
+Plan reference
+==============
+D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt (v4)
+Previous batches:
+  opu.usability.batch1.summary.txt (FIX-01 + FIX-16-0A, then follow-ups)
+  opu.usability.batch2.summary.txt (FIX-03 + FIX-30, then gpt follow-up)
+
+This batch closes out Phase 0A with two more tickets:
+  - FIX-04: hydrate drafts BEFORE opening ComposeModal
+  - FIX-05: remove the static "healthy" Server Status panel from
+            AccountPane
+
+Both renderer-only. No backend changes. No new dependencies.
+
+Files changed
+=============
+  src\qmail\screens\QMailDashboard.jsx  — FIX-04
+  src\qmail\screens\EmailListPane.jsx   — FIX-04 (thread spinner prop)
+  src\qmail\screens\EmailListItem.jsx   — FIX-04 (render spinner)
+  src\qmail\screens\AccountPane.jsx     — FIX-05 (panel removed)
+
+Four files. The QMailDashboard changes ride on top of batch 2's
+prop chain work.
+
+FIX-04: Draft hydrate-before-mount
+==================================
+Bug:
+  /db/drafts/list returns preview metadata only (subject preview,
+  body_preview, timestamps, star state — NOT full body, NOT
+  recipients). The previous QMailDashboard.handleSelectEmail isDraft
+  branch passed the preview row straight into ComposeModal as
+  editDraft. The modal saw an empty body and empty To/Cc/Bcc. Worse,
+  a Save Draft on that empty state would persist the empty fields,
+  clobbering the original full draft.
+
+Fix:
+  1. Added loadingDraftId state in QMailDashboard.
+  2. In handleSelectEmail's isDraft branch:
+     - Set loadingDraftId = email.id
+     - Try { res = await getEmailById(email.id) }
+     - On success: setEditDraft({ ...email, ...res.data }) then
+       open the modal.
+     - On failure: setNotification("Could not load draft. Try
+       again.") and don't open the modal.
+     - Finally: clear loadingDraftId.
+     - Re-clicks while a hydrate is in flight are ignored.
+  3. Threaded loadingDraftId through EmailListPane to EmailListItem
+     as isLoadingDraft.
+  4. EmailListItem renders a Loader2 spinner in place of the draft-
+     selection checkbox when isLoadingDraft is true, and ignores
+     row/checkbox clicks during that window. The row gets opacity
+     0.7 and aria-busy for screen readers.
+
+Known API limitation flagged for reviewers:
+  /db/messages/get currently returns { id, from, subject, body,
+  timestamp, isRead, folder } — it does NOT return to/cc/bcc/
+  subsubject for draft rows. So even after this fix, draft recipients
+  remain empty unless the backend either:
+    (a) extends /db/messages/get to include recipient fields when
+        folder==drafts, or
+    (b) ships a dedicated /db/drafts/get?email_id=X endpoint, or
+    (c) /db/drafts/list itself starts returning the full draft data.
+
+  FIX-04 still helps in a real way today: the body is now populated
+  (it was empty before — the draft mapper's `draft.body || ""` was
+  effectively always ""). When a backend ticket lands to expose
+  recipients, no GUI change is needed; the spread in
+  setEditDraft({ ...email, ...res.data }) picks them up automatically.
+
+Decisions worth flagging for review:
+  1. Spinner placement (inside the draft checkbox slot) reuses the
+     existing column rather than adding a new visual. Less layout
+     disruption. Alternative: replace the whole row with a skeleton
+     during hydrate. Current choice is lighter weight.
+  2. We ignore re-clicks (`if (loadingDraftId) return;`) rather than
+     queueing them. A user mashing the same draft repeatedly waits
+     for the first fetch.
+  3. Failure path keeps the modal CLOSED and shows a toast. v4 plan
+     said the user can "try again" — clicking the draft a second
+     time re-runs the hydrate.
+  4. The `currentDraftId` consistency check from FIX-04 verify step 2
+     (save → reopen → edit → save → confirm one draft, not two) is
+     covered by ComposeModal's existing line 73 which sets
+     currentDraftId from editDraft.id on mount. Verified by reading;
+     should be confirmed in manual testing.
+
+FIX-05: Server Status panel removed
+====================================
+Bug:
+  AccountPane initialized serverHealth state to a hard-coded
+  { status: "healthy", service: "QMail Client Core",
+    version: "1.0.0", timestamp: Date.now() } and never updated it.
+  The "Service Status" row was permanently green regardless of
+  actual service state — exactly the failure mode the v3/v4 plan
+  flagged as the same shape as backend MVP-3.
+
+Fix:
+  Removed per the plan's option A (preferred):
+  - The entire Server Status JSX block (~50 lines)
+  - The serverHealth useState declaration
+  - The Heart icon import (no longer used)
+  - Updated the loading-gate comment to drop the stale serverHealth
+    reference.
+
+  Comment block in place explaining the removal and pointing
+  reviewers at NavigationPane (the dot grid driven by /raida/echo,
+  which IS the authoritative health view).
+
+  Did NOT use option B (derive from /raida/echo here too) because
+  it would duplicate what the dot grid already shows and risk the
+  two views drifting apart over time. One source of truth.
+
+Decisions worth flagging for review:
+  1. AccountPane.css still has the .profile-section / .section-header
+     styles that the removed block used. Those styles are shared
+     with Profile Information and Parity Server Configuration, so
+     not removed.
+  2. Future work: when FIX-31 (remove Parity section) ships, the
+     account-content area will be much leaner. May want to
+     reconsider what the AccountPane "above the fold" content looks
+     like once that's done.
+  3. NavigationPane already runs an /api/raida/echo poll every 2
+     minutes. AccountPane no longer makes its own redundant
+     health-status calls — the loadAccountData() function still
+     calls getServers() + getParityServer() for the RAIDA Network
+     Status section below; FIX-31 will clean up getParityServer's
+     last consumer.
+
+Verification
+============
+1. npm run build — passes (2.06s). JS bundle -1.2kB (Server Status
+   block + serverHealth state removed). CSS unchanged.
+
+2. ESLint baseline check on the four touched files:
+     QMailDashboard.jsx + AccountPane.jsx + EmailListPane.jsx +
+     EmailListItem.jsx
+   Combined: 100 errors + 1 warning. ~2 net additions over
+   pre-batch-3 baseline (the loadingDraftId / isLoadingDraft props
+   match the existing "no prop-types anywhere" pattern in this
+   codebase — not new style violations, just additions to the
+   already-unfixed baseline). No new error categories.
+
+3. Manual checklist (deferred — no live backend in session):
+
+   FIX-04:
+   [ ] Save a draft with body + To + Cc.
+   [ ] Click the draft in Drafts. Confirm the row shows a spinner
+       briefly, then the modal opens with body populated.
+   [ ] Edit the body. Click Save Draft. Switch to Drafts and back.
+       Confirm there's still ONE draft row (not two — id consistency).
+   [ ] Simulate getEmailById 500-ing. Confirm "Could not load draft"
+       toast and that the inbox stays interactive.
+   [ ] (Known limitation) To/Cc/Bcc will still be empty until the
+       backend exposes them; flagged in this summary.
+
+   FIX-05:
+   [ ] Open Account. Confirm the "Server Status" section at the top
+       is GONE.
+   [ ] Confirm the NavigationPane dot grid still renders and updates.
+   [ ] Stop the backend. Confirm the dot grid turns red and AccountPane
+       does not contradict it (no remaining "healthy" indicator).
+
+Reviewers please confirm
+========================
+gem / gpt: please look at this diff and respond with:
+  1. FIX-04 known limitation (To/Cc/Bcc still empty until backend
+     ships): does the fix as-shipped still earn FIX-04 in your
+     judgment, or should it stay open until recipients are also
+     hydrated?
+  2. Spinner placement on the draft row — visible enough? Should
+     it sit elsewhere (e.g. overlay the row title)?
+  3. FIX-05 cleanup: was option A (remove the section entirely) the
+     right call, or would you have preferred option B (derive from
+     /raida/echo here too, redundantly with NavigationPane)?
+
+Out-of-scope but worth tracking
+================================
+- Backend ticket CORE-L (new — proposed here): expose draft
+  recipients via /db/messages/get when folder==drafts. Unblocks the
+  remaining gap in FIX-04. Small backend change; the GUI side is
+  already ready.
+
+Next batch (if this passes review)
+==================================
+Phase 0A is now CLOSE. Remaining 0A item:
+  None. Phase 0A complete after this batch.
+
+Phase 0B next:
+  - FIX-02 (attachment picker — Electron IPC + UI)
+  - FIX-13-0B (first-run import error message disambiguation)
+  - FIX-35-0B / FIX-36-0B / FIX-37-0B (onboarding copy/feedback
+    polish)
+
+FIX-02 is the biggest cross-boundary ticket — touches electron.cjs,
+preload.cjs, and ComposeModal. Will need a packaged-build smoke test
+per the 0B ship gate.
+
+Follow-up (gpt batch-3 review)
+==============================
+Date: 2026-05-22
+Reviewer: gpt (review delivered inline by the user)
+
+Two findings: one high (draft save can still clobber recipients),
+one medium (stale hydrate can pop modal after user moved on). Both
+genuine bugs that gem missed in her batch 3 review. Fixing both
+before considering FIX-04 closed.
+
+Patches applied:
+
+1. (gpt #1, High) Draft save no longer clobbers unhydrated recipients.
+   Root cause: updateDraft() always serialized to/cc/bcc/subsubject
+     as `field || ""`, and the backend treats provided-but-empty
+     to/cc as "clear the existing recipient rows" (per
+     api_handlers_qmail_drafts.c:313). A body-only edit on a draft
+     whose recipients weren't surfaced by /db/messages/get (the
+     known CORE-L limitation) would wipe them.
+   Three coordinated changes:
+   a. ComposeModal: added touchedFields state {to, cc, bcc,
+      subsubject}. A field is "touched" if it has a non-empty
+      initial value (from editDraft or replyTo) OR if the user
+      typed into it. Untouched fields are NOT sent in the
+      updateDraft payload.
+   b. ComposeModal.handleSaveDraft: builds draftData with
+      `subject`, `body` always, plus only the touched
+      recipient/subsubject fields.
+   c. qmailApiServices.updateDraft: payload no longer applies
+      `|| ""` defaults to optional fields. Only `subject` and
+      `body` are always sent; to/cc/bcc/subsubject are sent only
+      if `typeof draftData.X === "string"`.
+
+   Verified edge cases:
+   - Open existing draft (no recipients surfaced) → type body →
+     save: payload contains subject + body only. Backend
+     preserves recipients. ←—— gpt's main bug, fixed.
+   - Open existing draft → type into Cc field → save: payload
+     contains subject + body + cc. Other recipient fields stay
+     preserved.
+   - Reply to a message: To is pre-populated, touched=true. Save
+     persists To.
+   - New compose (no editDraft): all fields untouched until the
+     user types. Save on a new draft creates it with whatever
+     was typed; missing fields are simply omitted (no harm — no
+     existing data to preserve).
+   - User opens draft, clears the To field intentionally: To was
+     marked touched on open (it had content), so save sends the
+     now-empty to=" " — clearing as intended.
+
+2. (gpt #2, Medium) Stale draft hydrate no longer pops modal.
+   Root cause: handleSelectEmail awaited getEmailById then
+     unconditionally setEditDraft + opened the modal. If the user
+     clicked a different message or changed folder during the
+     fetch, the stale result still appeared.
+   Three guards added:
+   a. New draftHydrateRequestRef counter in QMailDashboard.
+      Bumped before each await; the post-await success branch
+      checks `draftHydrateRequestRef.current === requestId` and
+      drops the result silently if stale.
+   b. handleFolderChange bumps the counter and clears
+      loadingDraftId so a draft hydrate from the previous folder
+      can't bleed through.
+   c. handleSelectEmail's non-draft branch (clicking a regular
+      message during a draft hydrate) also bumps the counter,
+      so the draft modal won't pop after the user has selected
+      a different message.
+
+   The finally clause only clears loadingDraftId if the request
+   id is still current — prevents the stale finally from
+   clobbering a newer hydrate's loading state.
+
+Files changed in follow-up:
+  src\api\qmailApiServices.js              (updateDraft payload)
+  src\qmail\screens\QMailDashboard.jsx     (request id + guards)
+  src\qmail\screens\ComposeModal.jsx       (touchedFields)
+
+Verification:
+- npm run build: passes (2.06s). JS bundle +0.7kB (touchedFields
+  state + conditional payload + request id guards). CSS unchanged.
+- ESLint on QMailDashboard.jsx: 9 issues, identical to pre-followup
+  baseline. No new violations.
+
+Reviewer-question response:
+gpt asked whether FIX-04 should stay open. With these two patches
+the save path is no longer destructive AND the race is closed. The
+remaining gap (recipients still don't display in the modal until
+CORE-L lands on the backend) is a presentation-only issue: the user
+can see and edit recipients, the save preserves whatever wasn't
+touched, and recipients land automatically once the backend exposes
+them via /db/messages/get. I'd close FIX-04 with this follow-up,
+with CORE-L tracked separately as the next step.
+
+End of file.

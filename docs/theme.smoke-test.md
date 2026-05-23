@@ -143,20 +143,20 @@ each. Add a row when an E-track lands.
 | E.smoke.5 | E5 | qmail/screens/AccountPane.css | PENDING (not yet claimed) |
 | E.smoke.6 | E6 | App.css (+ update-modal extract) | PENDING (not yet claimed) |
 | E.smoke.7 | E7 | screens/ServiceSelectionScreen.css | PENDING (not yet claimed) |
-| E.smoke.8 | E8 | qmail/screens/ComposeModal.css | PENDING (not yet claimed) |
-| E.smoke.9 | E9 | qmail/screens/EmailListPane.css | PENDING (not yet claimed) |
-| E.smoke.10 | E10 | wallet/components/DicewarePasswordCreator.css | PENDING (not yet claimed) |
-| E.smoke.11 | E11 | qmail/screens/ContactsPane.css | PENDING (not yet claimed) |
-| E.smoke.12 | E12 | qmail/screens/QMailDashboard.css | PENDING (not yet claimed) |
-| E.smoke.13 | E13 | qmail/screens/ReadingPane.css | PENDING (not yet claimed) |
-| E.smoke.14 | E14 | qmail/screens/NavigationPane.css | PENDING (not yet claimed) |
+| E.smoke.8 | E8 | qmail/screens/ComposeModal.css | PENDING (in review per status file) |
+| E.smoke.9 | E9 | qmail/screens/EmailListPane.css | PENDING (in review per status file) |
+| E.smoke.10 | E10 | wallet/components/DicewarePasswordCreator.css | PENDING (in review per status file) |
+| E.smoke.11 | E11 | qmail/screens/ContactsPane.css | PENDING (in review per status file) |
+| E.smoke.12 | E12 | qmail/screens/QMailDashboard.css | PENDING (in review per status file) |
+| E.smoke.13 | E13 | qmail/screens/ReadingPane.css | PENDING (in review per status file) |
+| E.smoke.14 | E14 | qmail/screens/NavigationPane.css | PENDING (in review per status file) |
 | E.smoke.15 | E15 | wallet/components/PasswordScreen.css | PENDING (in review per status file) |
 | E.smoke.16 | E16 | components/common/notifications/NotificationContainer.css | PENDING (in review per status file) |
 | E.smoke.17 | E17 | wallet/components/USBCheckScreen.css | PENDING (in review per status file) |
 | E.smoke.18 | E18 | qmail/screens/AddContactModal.css | PENDING (in review per status file) |
 | E.smoke.19 | E19 | wallet/components/tabs/ReceiptModal.css | PENDING (in review per status file) |
-| E.smoke.20 | E20 | wallet/components/WelcomeScreen.css | PENDING (with gpt) |
-| E.smoke.21 | E21 | qmail/screens/WalletSetupScreen.css | PENDING (with gpt) |
+| E.smoke.20 | E20 | wallet/components/WelcomeScreen.css | PENDING (in review per status file) |
+| E.smoke.21 | E21 | qmail/screens/WalletSetupScreen.css | PENDING (in review per status file) |
 | E.smoke.22 | E22 | index.css cleanup pass | PENDING (not yet claimed) |
 
 For each E-track, the smoke check is:

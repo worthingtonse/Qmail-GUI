@@ -1,8 +1,22 @@
 // --- src/api/qmailApiServices.js ---
 // This file contains all QMail-specific API call functions.
 
-// API port is configurable via VITE_API_PORT env variable (default: 8080)
-const API_PORT = import.meta.env.VITE_API_PORT || "8080";
+// Port resolution priority:
+//   1. ?backendPort=N in the URL — set by Electron at boot to support
+//      multi-instance (every QMail.exe picks its own free port).
+//   2. VITE_API_PORT env var — for dev workflows that prefer a fixed
+//      port (e.g. when running rest_core manually).
+//   3. 8080 fallback — historical default.
+const readPortFromQuery = () => {
+  if (typeof window === "undefined" || !window.location) return null;
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get("backendPort");
+  return fromUrl && /^\d+$/.test(fromUrl) ? fromUrl : null;
+};
+const API_PORT =
+  readPortFromQuery() ||
+  import.meta.env.VITE_API_PORT ||
+  "8080";
 const API_BASE_URL = `http://localhost:${API_PORT}/api`;
 
 const extractApiErrorMessage = (data, fallback) => {
@@ -28,6 +42,10 @@ const extractApiErrorMessage = (data, fallback) => {
 
   return fallback;
 };
+
+const isTruthyApiFlag = (value) =>
+  value === true || value === 1 || value === "1" || value === "true";
+
 /**
  * A helper function to handle fetch responses.
  * It reads the exact backend error payload even on non-ok responses.
@@ -318,6 +336,23 @@ export const saveDraft = async (draftData) => {
  */
 export const updateDraft = async (draftId, draftData) => {
   try {
+    // gpt-batch3 #1: only send fields the caller actually provided.
+    // The backend treats present-but-empty to/cc/bcc as "clear the
+    // existing recipient rows" (api_handlers_qmail_drafts.c). Always
+    // sending `to: ""` for a body-only edit clobbered recipients.
+    //
+    // Callers (ComposeModal.handleSaveDraft) build draftData with
+    // only touched fields. Subject and body are still always sent
+    // (they're the modal's authoritative content).
+    const payload = {
+      subject: draftData.subject || "",
+      body: draftData.body || "",
+    };
+    if (typeof draftData.to === "string") payload.to = draftData.to;
+    if (typeof draftData.cc === "string") payload.cc = draftData.cc;
+    if (typeof draftData.bcc === "string") payload.bcc = draftData.bcc;
+    if (typeof draftData.subsubject === "string") payload.subsubject = draftData.subsubject;
+
     // API-FIX: Changed PUT /api/mail/draft/{id} → POST /api/qmail/db/drafts/update?email_id={id}
     const response = await fetch(`${API_BASE_URL}/qmail/db/drafts/update?email_id=${encodeURIComponent(draftId)}`, {
       // API-FIX: Changed method from PUT to POST
@@ -325,14 +360,7 @@ export const updateDraft = async (draftId, draftData) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        subject: draftData.subject || "",
-        body: draftData.body || "",
-        to: draftData.to || "",
-        cc: draftData.cc || "",
-        bcc: draftData.bcc || "",
-        subsubject: draftData.subsubject || "",
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await handleResponse(response);
@@ -370,20 +398,18 @@ export const updateDraft = async (draftId, draftData) => {
 };
 
 /**
- * Pings the QMail server to check for new messages and beacon status.
- * This endpoint performs an immediate RAIDA beacon check, bypassing the background monitor.
+ * Peeks at QMail beacon status without forcing a new check.
  * Use cases:
  * - On application startup to get current mail state
- * - When user clicks "Refresh" button to force immediate check
+ * - Startup/background status display
  * - To detect if Identity Coin needs healing (Status 200 Invalid AN)
  *
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 /**
- * Pings the QMail server to check for new messages and beacon status.
- * UPDATED: Handles missing beacon_status and maps notification_count.
+ * Peeks at QMail beacon status and maps notification_count.
  */
-export const pingQMail = async () => {
+export const peekBeacon = async () => {
   try {
     // API-FIX: Changed /api/qmail/ping → /api/qmail/net/beacon/peek
     const response = await fetch(`${API_BASE_URL}/qmail/net/beacon/peek`);
@@ -427,6 +453,29 @@ export const pingQMail = async () => {
     console.error("QMail check failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to ping QMail server.`;
     return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Forces an immediate QMail beacon check.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const checkMailNow = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/qmail/net/beacon/ping`, {
+      method: "POST",
+    });
+    const data = await handleResponse(response);
+    if (data && data.success === false) {
+      return {
+        success: false,
+        error: data.message || "Beacon ping failed",
+      };
+    }
+    return { success: true, data };
+  } catch (error) {
+    console.error("Beacon ping failed:", error);
+    return { success: false, error: error.message };
   }
 };
 
@@ -694,17 +743,32 @@ export const getEmailById = async (emailId) => {
 
     // API-FIX: Backend returns { success, email_id, subject, sender_sn, received_timestamp, is_read, is_starred, folder, body, body_length }
     if (data && (data.email_id || data.success)) {
+      const normalizeRecipientField = (...values) => {
+        const value = values.find((item) =>
+          Array.isArray(item)
+            ? item.length > 0
+            : typeof item === "string" && item.trim().length > 0,
+        );
+        if (Array.isArray(value)) return value.join(", ");
+        return value || "";
+      };
+
       return {
         success: true,
         data: {
           // API-FIX: id mapped from data.email_id
           id: data.email_id || emailId,
           // API-FIX: from mapped from data.sender_sn (serial number as string)
-          from: String(data.sender_sn),
+          from: data.sender_address || String(data.sender_sn || ""),
+          senderEmail: data.sender_address || String(data.sender_sn || ""),
           // API-FIX: subject mapped from data.subject
           subject: data.subject || "No Subject",
           // API-FIX: body mapped from data.body
           body: data.body || "",
+          to: normalizeRecipientField(data.to, data.To, data.to_addresses),
+          cc: normalizeRecipientField(data.cc, data.CC, data.cc_addresses),
+          bcc: normalizeRecipientField(data.bcc, data.BCC, data.bcc_addresses),
+          subsubject: data.subsubject || data.sub_subject || data.SubSubject || "",
           // API-FIX: timestamp mapped from data.received_timestamp
           timestamp: data.received_timestamp,
           // API-FIX: isRead mapped from data.is_read
@@ -755,6 +819,15 @@ export const getEmailAttachments = async (emailId) => {
             fileExtension: att.extension,
             // API-FIX: att.size_bytes → size
             size: att.size_bytes,
+            dangerous:
+              isTruthyApiFlag(att.dangerous) ||
+              isTruthyApiFlag(att.is_dangerous) ||
+              isTruthyApiFlag(att.isDangerous),
+            warning:
+              (typeof att.warning === "string" && att.warning) ||
+              att.warning_message ||
+              att.warningMessage ||
+              "",
           })),
           count: data.count || 0,
         },
@@ -767,6 +840,46 @@ export const getEmailAttachments = async (emailId) => {
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch attachments.`;
     return { success: false, error: errorMessage };
   }
+};
+
+/**
+ * Error shown when a contact input cannot be resolved to a real serial number.
+ */
+export const CONTACT_ADDRESS_OR_SN_ERROR =
+  "Please enter a serial number (or a QMail address once the lookup service is available).";
+
+const SERIAL_NUMBER_PATTERN = /^\d+$/;
+const EMAIL_LIKE_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Resolves the Add Contact address field into backend contact fields.
+ * @param {string} input - Serial number today; QMail address after CORE-C lands.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const resolveAddressOrSn = async (input) => {
+  const value = String(input || "").trim();
+
+  if (SERIAL_NUMBER_PATTERN.test(value)) {
+    return {
+      success: true,
+      data: {
+        serial_number: value,
+        serialNumber: value,
+        auto_address: "",
+        autoAddress: "",
+        source: "serial_number",
+      },
+    };
+  }
+
+  const looksLikeEmail = EMAIL_LIKE_PATTERN.test(value) || value.includes("@");
+  if (looksLikeEmail) {
+    // CORE-C will add address -> SN lookup. Until then, reject email-shaped
+    // input instead of creating an unusable serial_number=0 contact.
+    return { success: false, error: CONTACT_ADDRESS_OR_SN_ERROR };
+  }
+
+  return { success: false, error: CONTACT_ADDRESS_OR_SN_ERROR };
 };
 
 /**
@@ -797,28 +910,35 @@ export const getContacts = async (query = "") => {
     }
 
     // Transform the contacts
-    let transformedContacts = contacts.map((contact) => ({
-      // API-FIX: serial_number → userId
-      userId:
+    let transformedContacts = contacts.map((contact) => {
+      // API-FIX: serial_number -> userId
+      const serialNumber =
         contact.serial_number ||
         contact.user_id ||
         contact.userId ||
-        Math.random().toString(36).substr(2, 9),
-      firstName: contact.first_name || contact.firstName || "",
-      lastName: contact.last_name || contact.lastName || "",
-      middleName: contact.middle_name || contact.middleName || "",
-      autoAddress:
-        contact.auto_address || contact.autoAddress || contact.email || "",
-      description: contact.description || "",
-      denomination: contact.denomination || "",
-      className: contact.class_name || "",
-      trustLevel: contact.trust_level ?? 0,
-      userNotes: contact.user_notes || "",
-      fullName:
-        `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() ||
-        contact.denomination ||
-        "Unknown Contact",
-    }));
+        "";
+
+      return {
+        userId: serialNumber || Math.random().toString(36).substr(2, 9),
+        firstName: contact.first_name || contact.firstName || "",
+        lastName: contact.last_name || contact.lastName || "",
+        middleName: contact.middle_name || contact.middleName || "",
+        autoAddress:
+          contact.auto_address ||
+          contact.autoAddress ||
+          contact.email ||
+          (serialNumber ? String(serialNumber) : ""),
+        description: contact.description || "",
+        denomination: contact.denomination || "",
+        className: contact.class_name || "",
+        trustLevel: contact.trust_level ?? 0,
+        userNotes: contact.user_notes || "",
+        fullName:
+          `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() ||
+          contact.denomination ||
+          (serialNumber ? `User ${serialNumber}` : "Unknown Contact"),
+      };
+    });
 
     // If we have a search query, filter the results client-side
     if (query && query.trim() !== "") {
@@ -916,28 +1036,52 @@ export const deleteContact = async (serialNumber) => {
 };
 
 /**
- * Gets information about all RAIDA servers.
- * @param {boolean} includeUnavailable - Whether to include unavailable servers (default: false)
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ * Gets RAIDA server topology and live availability.
+ * Merges /api/qmail/local/status (topology) with /api/raida/echo (per-server health).
+ * @returns {Promise<{success: boolean, data?: {servers, totalServers, availableServers}, error?: string}>}
  */
 export const getServers = async () => {
   try {
     // API-FIX: Changed /api/data/servers → /api/qmail/local/status
-    const url = `${API_BASE_URL}/qmail/local/status`;
-    const response = await fetch(url);
-    const data = await handleResponse(response);
+    // /qmail/local/status returns topology only (raida_index, ip, port, region,
+    // hostname). It does NOT return is_available or percent_uptime. We merge
+    // live availability from /raida/echo so consumers get honest health data.
+    const [statusRes, echoRes] = await Promise.all([
+      fetch(`${API_BASE_URL}/qmail/local/status`).then((r) => handleResponse(r)).catch(() => null),
+      fetch(`${API_BASE_URL}/raida/echo`).then((r) => r.ok ? r.json() : null).catch(() => null),
+    ]);
 
-    console.log("Data received from /qmail/local/status:", data);
+    console.log("Data received from /qmail/local/status:", statusRes);
 
-    // API-FIX: Backend returns { success, servers: { count, list: [...] } }
-    if (data && data.servers && Array.isArray(data.servers.list)) {
+    if (statusRes && statusRes.servers && Array.isArray(statusRes.servers.list)) {
+      // Build an index -> echo-status map (status === "Ready" means online).
+      const echoByIndex = new Map();
+      if (echoRes && Array.isArray(echoRes.raidas)) {
+        echoRes.raidas.forEach((r) => echoByIndex.set(r.index, r));
+      }
+
+      const merged = statusRes.servers.list.map((s) => {
+        const echo = echoByIndex.get(s.raida_index);
+        const isAvailable = echo ? echo.status === "Ready" : false;
+        return {
+          ...s,
+          // Aliases for legacy consumers (AccountPane reads server_id / ip_address).
+          server_id: s.raida_index,
+          ip_address: s.ip,
+          is_available: isAvailable,
+          // percent_uptime is not produced by either endpoint. Surface a sentinel
+          // (null) so consumers can render "unknown" instead of fabricating 100%.
+          percent_uptime: null,
+          latency_ms: echo ? echo.latency_ms : null,
+        };
+      });
+
       return {
         success: true,
         data: {
-          // API-FIX: data.servers.list → servers array
-          servers: data.servers.list,
-          totalServers: data.servers.count || data.servers.list.length,
-          availableServers: data.servers.list.filter((s) => s.is_available).length,
+          servers: merged,
+          totalServers: statusRes.servers.count || merged.length,
+          availableServers: merged.filter((s) => s.is_available).length,
         },
       };
     } else {
@@ -946,48 +1090,6 @@ export const getServers = async () => {
   } catch (error) {
     console.error("Get servers failed:", error);
     return { success: false, error: error.message };
-  }
-};
-
-/**
- * Gets the current parity server configuration.
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- */
-// API-FIX: Parity server endpoint removed
-export const getParityServer = async () => {
-  return { success: false, error: 'Parity server endpoint removed' };
-};
-
-/**
- * Triggers manual sync of user directory and server records from RAIDA
- * @returns {Promise<{success: boolean, data?: any, error?: string}>}
- */
-export const syncData = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/admin/sync`, {
-      method: "POST",
-    });
-    const data = await handleResponse(response);
-
-    console.log("Data received from /admin/sync:", data);
-
-    if (data && data.status === "success") {
-      return {
-        success: true,
-        data: {
-          message: data.message || "Sync completed",
-          usersUpdated: data.users_synced || 0,
-          serversUpdated: data.servers_synced || 0,
-          timestamp: data.timestamp,
-        },
-      };
-    } else {
-      throw new Error("Invalid response from sync endpoint");
-    }
-  } catch (error) {
-    console.error("Sync data failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to sync data.`;
-    return { success: false, error: errorMessage };
   }
 };
 
@@ -1177,88 +1279,6 @@ export const deleteEmail = async (emailId) => {
   }
 };
 
-// Locker download with polling
-// export const downloadLockerCoins = async (lockerCode, onProgress) => {
-//   try {
-//     const cleanCode = lockerCode.replace(/-/g, '').trim();
-
-//     // if (cleanCode.length !== 8) {
-//     //   throw new Error('Locker code must be 8 characters');
-//     // }
-
-//     // Format with hyphen XXX-XXXXX
-//     const formattedCode = cleanCode.slice(0, 3) + '-' + cleanCode.slice(3);
-
-//     const response = await fetch(`${API_BASE_URL}/locker/download`, {
-//       method: 'POST',
-//       headers: { 'Content-Type': 'application/json' },
-//       body: JSON.stringify({ locker_code: formattedCode })
-//     });
-
-//     if (!response.ok) {
-//       const errorData = await response.json();
-//       throw new Error(errorData.error || errorData.details || 'Failed to download coins');
-//     }
-
-//     const data = await response.json();
-
-//     // Check for immediate error
-//     if (data.status === 'error') {
-//       throw new Error(data.error || data.details || 'Invalid locker code');
-//     }
-
-//     // If task_id exists, poll for status
-//     if (data.id || data.task_id) {
-//       const taskId = data.id || data.task_id;
-//       return await pollTaskStatus(taskId, onProgress);
-//     }
-
-//     return data;
-//   } catch (error) {
-//     console.error('Locker download error:', error);
-//     throw error;
-//   }
-// };
-
-// Create mailbox after locker download
-// export const createMailbox = async (address, domain, lockerCode, recoveryEmail = null) => {
-//   try {
-//     const cleanCode = lockerCode.replace(/-/g, '').trim();
-
-//     // Convert to hex
-//     const hexCode = Array.from(cleanCode)
-//       .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
-//       .join('');
-
-//     const response = await fetch(`${API_BASE_URL}/mail/create-mailbox`, {
-//       method: 'POST',
-//       headers: { 'Content-Type': 'application/json' },
-//       body: JSON.stringify({
-//         address,
-//         domain,
-//         locker_code: hexCode,
-//         recovery_email: recoveryEmail
-//       })
-//     });
-
-//     if (!response.ok) {
-//       const errorData = await response.json();
-//       throw new Error(errorData.error || errorData.details || 'Failed to create mailbox');
-//     }
-
-//     const data = await response.json();
-
-//     if (data.status === 'error') {
-//       throw new Error(data.error || data.details || 'Failed to create mailbox');
-//     }
-
-//     return data;
-//   } catch (error) {
-//     console.error('Create mailbox error:', error);
-//     throw error;
-//   }
-// };
-
 export const sendEmail = async (emailData) => {
   try {
     const toList = Array.isArray(emailData.to) ? emailData.to : [];
@@ -1272,10 +1292,20 @@ export const sendEmail = async (emailData) => {
     bccList.forEach((recipient) => params.append("bcc", recipient));
     if (emailData.subject) params.set("subject", emailData.subject);
     if (emailData.body) params.set("body", emailData.body);
-    params.set("storage_weeks",
-      emailData.storage_weeks !== undefined ? String(emailData.storage_weeks) : "8");
+    // API-FIX: Changed storage_weeks → duration (Phase 3.7)
+    // Documented API default is 4 weeks.
+    params.set("duration",
+      emailData.storage_weeks !== undefined ? String(emailData.storage_weeks) : "4");
 
-    const response = await fetch(`${API_BASE_URL}/qmail/net/messages/send`, {
+    // API-FIX: Added attachment_file_path support
+    if (Array.isArray(emailData.attachments)) {
+      emailData.attachments.forEach(path => {
+        if (path) params.append("attachment_file_path", path);
+      });
+    }
+
+    // API-FIX: Changed /api/qmail/net/messages/send → /api/qmail/net/messages/upload_and_tell
+    const response = await fetch(`${API_BASE_URL}/qmail/net/messages/upload_and_tell`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
@@ -1286,7 +1316,7 @@ export const sendEmail = async (emailData) => {
 
     if (
       data &&
-      (data.success || data.status === "success" || data.status === "accepted" || data.file_guid)
+      (data.success || data.status === "success" || data.status === "accepted" || data.file_guid || data.task_id)
     ) {
       return {
         success: true,
@@ -1349,17 +1379,82 @@ export const checkVersion = async () => {
 };
 
 /**
+ * gpt-batch4 #2: shared helper to find the registered Mail wallet
+ * filesystem path. Used both by importCredentials (to decide where
+ * to store credentials) and by WalletSetupScreen (to target the
+ * right wallet for Check Change). Returns null if the list call
+ * fails OR succeeds-but-empty; callers can distinguish those cases
+ * by inspecting the second return value when needed.
+ *
+ * @returns {Promise<{path: string|null, reason: "ok"|"network"|"no_wallet"}>}
+ */
+export const lookupMailWalletPath = async () => {
+  try {
+    const listRes = await fetch(`${API_BASE_URL}/wallets/list`);
+    if (!listRes.ok) {
+      return { path: null, reason: "network" };
+    }
+    const listData = await listRes.json();
+    if (!listData || !Array.isArray(listData.wallets) || listData.wallets.length === 0) {
+      // gpt-batch4 #3: backend reachable, but no wallets registered.
+      // This is a "configure your wallet" failure, NOT a network
+      // failure — they need different recovery messages.
+      return { path: null, reason: "no_wallet" };
+    }
+    const wallets = listData.wallets;
+    const mailWallet =
+      wallets.find((w) => w.wallet_name === "Mail" && w.online) ||
+      wallets.find((w) => w.wallet_name === "Mail");
+    const fallback = wallets.find((w) => w.online) || wallets[0];
+    const resolved = (mailWallet || fallback)?.wallet_path || null;
+    return resolved
+      ? { path: resolved, reason: "ok" }
+      : { path: null, reason: "no_wallet" };
+  } catch (e) {
+    console.warn("lookupMailWalletPath: /wallets/list unreachable:", e);
+    return { path: null, reason: "network" };
+  }
+};
+
+/**
  * Imports credentials using a locker code.
  * Scenario 1 & 2: Success (Healthy or Healed)
  * Scenario 3: Invalid Format (400)
  * Scenario 5: Empty/Invalid Locker (404)
  */
-export const importCredentials = async (lockerCode) => {
+export const importCredentials = async (lockerCode, walletPath = null) => {
   try {
     // API-FIX: Changed POST /setup/import-credentials with JSON body
     //          → GET /qmail/raida/locker/import-credentials?locker_key= (query param, like locker download)
+    // API-FIX: Added required wallet_path parameter. The backend expects a full
+    // filesystem path (the wallet_path field returned by /api/wallets/list), not
+    // the bare wallet name "Default" - that produces 404 "Wallet not found".
+    // Prefer the wallet named "Mail" - the backend saves credentials under
+    // wallet_path/Mail and identity detection (qmail_users.c) prefers the
+    // registered Mail wallet. Picking Default would write to Default/Mail
+    // which qmail will not see as the identity.
+    let resolvedPath = walletPath;
+    let resolveReason = "ok";
+    if (!resolvedPath) {
+      const lookup = await lookupMailWalletPath();
+      resolvedPath = lookup.path;
+      resolveReason = lookup.reason;
+    }
+    if (!resolvedPath) {
+      // gpt-batch4 #3: distinguish "backend unreachable" from
+      // "backend reachable but no wallet registered." Both need
+      // recovery, but different recovery.
+      return {
+        success: false,
+        error:
+          resolveReason === "no_wallet"
+            ? "No wallet is registered on the QMail backend."
+            : "Could not reach the QMail backend to look up wallets.",
+        status: resolveReason === "no_wallet" ? "no_wallet" : "network",
+      };
+    }
     const response = await fetch(
-      `${API_BASE_URL}/qmail/raida/locker/import-credentials?locker_key=${encodeURIComponent(lockerCode)}`
+      `${API_BASE_URL}/qmail/raida/locker/import-credentials?locker_key=${encodeURIComponent(lockerCode)}&wallet_path=${encodeURIComponent(resolvedPath)}`
     );
 
     const data = await response.json();
@@ -1367,7 +1462,7 @@ export const importCredentials = async (lockerCode) => {
     if (response.ok) {
       return { success: true, data };
     } else {
-      // Handles HTTP 400, 404, etc.
+      // Handles HTTP 400, 404, etc. handleImport switches on status.
       return {
         success: false,
         error: data.message || "Failed to import credentials",
@@ -1376,7 +1471,14 @@ export const importCredentials = async (lockerCode) => {
     }
   } catch (error) {
     console.error("Import API Error:", error);
-    return { success: false, error: "Network error: Server is unreachable" };
+    // FIX-13-0B: distinguish the network-fail catch from HTTP errors
+    // so handleImport can show "backend unreachable" instead of a
+    // generic "invalid code" message.
+    return {
+      success: false,
+      error: "Network error: Server is unreachable",
+      status: "network",
+    };
   }
 };
 
@@ -1450,6 +1552,135 @@ export const getIdentity = async () => {
     console.error("Identity check failed:", error);
     return null;
   }
+};
+
+/**
+ * FIX-03: Normalize a getIdentity() (or import-credentials) response into
+ * a flat UI-friendly shape that consumers can read without guessing field
+ * names. Returns BOTH camelCase (preferred for new code) AND snake_case
+ * aliases (preserve compatibility with existing consumers like
+ * AccountPane and WalletSetupScreen).
+ *
+ * Pass null/undefined safely — returns null so callers can check.
+ *
+ * @param {object|null} raw - the getIdentity() response
+ * @param {object} [opts]
+ * @param {string} [opts.defaultDomain="qmail.cloud"] - domain to use when
+ *   building pretty_address; the backend response does not carry one.
+ * @returns {object|null}
+ */
+export const normalizeIdentityForUi = (raw, opts = {}) => {
+  if (!raw) return null;
+  const defaultDomain = opts.defaultDomain || "qmail.cloud";
+
+  // The backend currently returns: address, serial_number, registered,
+  // display_name, first_name, last_name, description, denomination,
+  // class_name (or class), beacon_raida — plus a synthetic `configured`
+  // flag and a nested `identity` object added by getIdentity(). We read
+  // both top-level AND nested fields so callers can pass either shape.
+  //
+  // The import-credentials response is shaped differently (coins_found,
+  // coins_saved, wallet_path, mail_wallet_path) and does NOT include
+  // identity fields at all. Callers should run getIdentity() first and
+  // pass that response here; passing raw import metadata returns a
+  // sparse object with configured=false.
+  // gpt-batch2 #5: actually read raw.identity.
+  const nested = raw.identity || {};
+
+  // gpt-batch2 #1: the backend already returns a fully-formed QMail
+  // address in `address` (e.g. "Alice.Admin@Developer.C25.Giga"). DON'T
+  // append a default domain to a value that already has one — that
+  // produced "Alice.Admin@Developer.C25.Giga@qmail.cloud" for every
+  // returning user. Only synthesize a domain when the source value
+  // looks like a bare local-part.
+  const rawAddress =
+    raw.address ||
+    raw.email ||
+    raw.email_address ||
+    nested.address ||
+    nested.email ||
+    "";
+
+  // pretty_address: prefer an explicit backend value; otherwise use
+  // rawAddress as-is if it already contains '@'; otherwise synthesize
+  // local@defaultDomain.
+  const explicitPretty = raw.pretty_address || raw.prettyAddress || nested.pretty_address || "";
+  const prettyAddress =
+    explicitPretty ||
+    (rawAddress.includes("@")
+      ? rawAddress
+      : rawAddress
+        ? `${rawAddress}@${defaultDomain}`
+        : "");
+
+  // address field on the returned shape: the local-part (text before @)
+  // if rawAddress was a full email, otherwise rawAddress as-is.
+  const address = rawAddress.includes("@") ? rawAddress.split("@")[0] : rawAddress;
+
+  // Derive domain: from rawAddress if it had one, else default.
+  const domain = rawAddress.includes("@")
+    ? rawAddress.split("@").slice(1).join("@")
+    : raw.domain || defaultDomain;
+
+  const serialNumber =
+    raw.serial_number || raw.serialNumber || nested.serial_number || nested.sn || 0;
+
+  // needsHealing: backend doesn't expose a direct identity-health flag
+  // yet (CORE-F is the hard prerequisite). Surface false here and let
+  // FIX-10 wire the real signal once CORE-F lands.
+  const needsHealing = Boolean(raw.needs_healing || raw.needsHealing || false);
+
+  const configured = Boolean(
+    raw.configured === true || (raw.registered === true && serialNumber > 0),
+  );
+
+  const displayName = raw.display_name || raw.displayName || nested.display_name || "";
+  const firstName = raw.first_name || raw.firstName || nested.first_name || "";
+  const lastName = raw.last_name || raw.lastName || nested.last_name || "";
+  const autoAddress = raw.auto_address || raw.autoAddress || nested.auto_address || "";
+  const className =
+    raw.class_name || raw.className || raw.class || nested.class_name || "";
+
+  // gpt-batch4 #2: preserve mail_wallet_path when present (only the
+  // import-credentials response carries this; getIdentity() does not).
+  // Callers can fall back to lookupMailWalletPath() if absent.
+  const mailWalletPath =
+    raw.mail_wallet_path || raw.mailWalletPath || nested.mail_wallet_path || null;
+
+  return {
+    // camelCase (new convention)
+    address,
+    prettyAddress,
+    serialNumber,
+    domain,
+    displayName,
+    firstName,
+    lastName,
+    autoAddress,
+    description: raw.description || nested.description || "",
+    className,
+    beaconRaida: raw.beacon_raida || raw.beaconRaida || nested.beacon_raida || null,
+    isHealthy: !needsHealing,
+    needsHealing,
+    configured,
+    mailWalletPath,
+    // snake_case aliases (preserve compatibility — existing consumers
+    // read these). Updating every consumer in one ticket would risk
+    // missing a callsite.
+    pretty_address: prettyAddress,
+    serial_number: serialNumber,
+    email_address: prettyAddress,
+    auto_address: autoAddress,
+    needs_healing: needsHealing,
+    display_name: displayName,
+    first_name: firstName,
+    last_name: lastName,
+    class_name: className,
+    mail_wallet_path: mailWalletPath,
+    // Original raw response, for any consumer that needs fields we
+    // didn't enumerate.
+    raw,
+  };
 };
 
 /**
@@ -1615,4 +1846,28 @@ export const deleteEmailPermanent = async (emailId) => {
     console.error("Permanent delete email failed:", error);
     return { success: false, error: error.message };
   }
+};
+
+export const emptyTrashFolder = async (emailIds = []) => {
+  const ids = [...new Set(emailIds.filter(Boolean))];
+  const results = [];
+
+  for (const emailId of ids) {
+    const result = await deleteEmailPermanent(emailId);
+    results.push({ emailId, ...result });
+  }
+
+  const failed = results.filter((result) => !result.success);
+  return {
+    success: failed.length === 0,
+    data: {
+      requestedCount: ids.length,
+      deletedCount: ids.length - failed.length,
+      failedIds: failed.map((result) => result.emailId),
+    },
+    error:
+      failed.length > 0
+        ? `Failed to delete ${failed.length} message${failed.length === 1 ? "" : "s"}.`
+        : null,
+  };
 };

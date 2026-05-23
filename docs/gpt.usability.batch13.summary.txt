@@ -1,0 +1,81 @@
+Batch 13 Summary - FIX-21 + FIX-25 + FIX-29 + FIX-32
+====================================================
+
+Scope
+-----
+Implemented Phase 2 Batch 13:
+- FIX-21: Pending-mail click semantics.
+- FIX-25: Search scope and result-cap honesty.
+- FIX-29: Save DRD popular contacts locally.
+- FIX-32: AccountPane Server Details slice removal.
+
+Changes
+-------
+FIX-21:
+- Pending or undownloaded message rows no longer auto-start decrypt/download
+  when clicked.
+- Clicking a pending row now selects it and shows the existing ReadingPane
+  "Download Message" action. The decrypt step is explicit and manual.
+- Clickable pending-mail notifications still focus the pending row without
+  triggering download.
+
+FIX-25:
+- EmailListPane search placeholder now reads "Search all mail..." to avoid
+  implying folder-scoped search.
+- QMailDashboard tracks whether the search response hit the current 50-result
+  cap.
+- EmailListPane renders the notice:
+  "Showing top 50 results. Refine your search to see more."
+  when a non-empty search returns exactly 50 rows.
+- Search results now reset the displayed total to the search-result count so
+  normal folder pagination does not leak into capped search results.
+
+FIX-29:
+- DRD/popular contact rows now render an "Add to My Contacts" icon button.
+- The button persists the DRD entry through the same addContact() path as the
+  regular Add Contact modal.
+- The save path uses the DRD serial number when available, falling back to the
+  existing resolveAddressOrSn() behavior for SN-only lookup.
+- A saved DRD row is marked with a check icon and the global notification
+  system reports success or failure.
+
+FIX-32:
+- AccountPane Server Details no longer slices the RAIDA server list to 10.
+- The section now shows the full returned server list and includes the count
+  in the section label.
+
+Files Changed
+-------------
+- src/qmail/screens/QMailDashboard.jsx
+- src/qmail/screens/EmailListPane.jsx
+- src/qmail/screens/EmailListPane.css
+- src/qmail/screens/ContactsPane.jsx
+- src/qmail/screens/ContactsPane.css
+- src/qmail/screens/AccountPane.jsx
+- docs/gpt.usability.batch13.summary.txt
+
+Verification
+------------
+PASS: npm run build
+PASS: npx eslint src/qmail/screens/QMailDashboard.jsx src/qmail/screens/EmailListPane.jsx src/qmail/screens/ContactsPane.jsx src/qmail/screens/AccountPane.jsx --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for the Batch 13 files
+
+Notes
+-----
+- A scan still finds window.confirm in ContactsPane delete. That is expected:
+  replacing it is Batch 14 / FIX-28 and was intentionally left untouched.
+- Full repo lint was not used as a required gate because the known baseline
+  lint debt remains outside these touched files.
+
+Manual Verification Notes
+-------------------------
+Pending live app checks:
+- Pending row click selects the row and does not decrypt until Download Message
+  is clicked.
+- Search with fewer than 50 matches shows no cap notice.
+- Search with exactly 50 returned rows shows the refine-search notice.
+- DRD popular row Add to My Contacts persists locally and then appears in
+  Compose autocomplete after contacts reload.
+- AccountPane Server Details displays all returned RAIDA servers.

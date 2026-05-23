@@ -1,0 +1,34 @@
+# Review: QMail-GUI Fix Batch 2 (FIX-03, FIX-30)
+Date: 2026-05-21
+Reviewer: Gemini CLI
+
+## 1. Summary of Changes
+This batch successfully addresses the "Identity Disconnect" issue where real user data wasn't propagating to the UI, leading to the "John Doe" placeholder. It establishes a robust prop chain and a centralization point for identity data.
+
+## 2. Key Improvements & Strengths
+
+### A. The Normalization Helper (`normalizeIdentityForUi`)
+- **Compatibility First**: The decision to return both `camelCase` and `snake_case` is a pragmatic win. It allows for modernizing new code while preventing a massive "flag-day" refactoring of existing consumers like `AccountPane`.
+- **Sensible Fallbacks**: Defaulting the domain to `qmail.cloud` when missing from the backend ensures that pretty-address generation is consistent across the app.
+
+### B. Prop Chain & Synchronization
+- **Sync Seeding**: By passing `initialIdentity` from `App` down to `QMailDashboard`, the "John Doe" flash is eliminated for returning users.
+- **Smart Routing**: Routing returning users straight to the dashboard while keeping the `WalletSetupScreen` for the post-import first-run experience is a significant usability improvement.
+
+### C. Resilience & Race Condition Mitigation
+- **Hydration Retry**: The inclusion of a 500ms retry in `ServiceSelectionScreen` (post-import) and a mount-time retry in `QMailDashboard` provides a necessary buffer for backend indexing lag.
+- **Integrated Stale-Selection Guard**: I noted the integration of a `selectedEmailRef` in `QMailDashboard`. This is an excellent "future-proof" fix that prevents async hydration from overwriting the UI if a user rapidly clicks between messages.
+
+## 3. Response to Opus's "Decisions worth flagging"
+
+1.  **No explicit Loading state for userAccount=null**: **Approved.** The existing conditional rendering in `AccountPane` is clean. Since the rest of the dashboard (inbox, counts, RAIDA status) is functional, a global loading state for just the identity would be overkill.
+2.  **Permanent snake_case aliases**: **Acceptable.** This is a low-cost way to maintain stability. A full migration to camelCase is a technical debt item that can be tackled later if desired.
+3.  **handleSelectService service-arg-still-ignored**: **Agreed.** This is fine for Batch 2; as noted, FIX-15b will be the logical place to expand this logic.
+4.  **Single-shot mount-time retry**: **Approved.** Two attempts (initial + 1 retry) are sufficient for transient lag. Anything more would require a more complex event-based or socket-based notification system which is out of scope.
+
+## 4. Minor Observations
+- **Wait between attempts (FIX-01 follow-up)**: I noticed the small optimization to skip the final sleep in `hydrateDownloadedEmail`. Good attention to detail on performance.
+- **Advanced-Even-If-Null Branch**: The decision in `ServiceSelectionScreen` to advance even if identity fails is correct. The user's coins are imported, and they should be allowed to use the app; the dashboard can continue to resolve the identity in the background.
+
+## 5. Verdict
+**Batch 2 Approved.** The identity plumbing is now solid, and the "John Doe" placeholder is successfully retired. The application feels much more like a "real" product now that it recognizes the user on launch.

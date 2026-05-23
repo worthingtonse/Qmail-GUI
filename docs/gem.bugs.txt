@@ -62,3 +62,35 @@ Description: `ipcMain.handle('read-file')` always uses `process.resourcesPath`. 
 14. [LOW] Backend Cleanup
 File: electron.cjs
 Description: The backend process is killed only on `window-all-closed`. If the main process crashes or is terminated abruptly, the child `qmail-backend.exe` might become an orphaned zombie process.
+
+15. [MEDIUM] Hardcoded Backend Port in Electron
+File: electron.cjs
+Description: The backend `core.exe` is spawned with a hardcoded `-port 8080`. However, the renderer process uses `VITE_API_PORT` (defaulting to 8080). If a developer or user changes the environment variable, the frontend will attempt to connect to the wrong port, causing a "Service Unreachable" error.
+
+16. [HIGH] IPC Handler Stubs (Potential Vulnerabilities)
+File: electron.cjs
+Description: `run-command` handler is currently a stub returning success. If implemented as a shell execution tool, it would introduce a Remote Code Execution (RCE) risk. `check-usb-drive` returns true unconditionally which may bypass intended hardware-based security checks or licensing logic.
+
+17. [MEDIUM] Incomplete Error Recovery in loadInitialData
+File: src/qmail/screens/QMailDashboard.jsx
+Description: If critical dashboard data (like mailCounts or folders) fails to load, the application shows a generic "Error loading dashboard data" toast but proceeds to set loading(false). This results in a "broken" dashboard (empty folders, zero counts) without a clear path for the user to trigger a full re-initialization.
+
+18. [LOW] Redundant CSS Imports
+File: src/qmail/screens/AccountPane.css
+Description: `AccountPane.css` imports `QMailDashboard.css` via `@import`. In a Vite environment, this can lead to duplication of base styles and CSS variables in the final bundle, slightly increasing the application's memory footprint and potentially causing specificity issues.
+
+19. [LOW] Stale API Imports & Lack of Pagination Metadata
+Files: src/qmail/screens/AccountPane.jsx, src/qmail/screens/EmailListPane.jsx
+Description: Stale API imports (`pingQMail`, `getHealthStatus`) are present but replaced by static logic. Also, list views hardcode EMAILS_PER_PAGE = 50. If the backend changes its default limit, the UI pagination will drift and display incorrect page numbers.
+
+20. [MEDIUM] Temporal Dead Zone (TDZ) in Component Logic
+File: src/qmail/screens/ComposeModal.jsx
+Description: Helper functions like `parseEmailList` were defined as `const` at the bottom of the component but called within `useEffect` or other handlers defined earlier. This creates a risk of `ReferenceError` if the code path is hit during mount (especially in dev mode with HMR). While fixed in Batch 6, this pattern exists in other components and should be audited.
+
+21. [MEDIUM] Attachment Persistence Gap (Backend Limitation)
+Files: src/qmail/screens/ComposeModal.jsx, src/api/qmailApiServices.js
+Description: The backend (v2 REST API) does not currently support persisting attachment associations with drafts (CORE-N). Users who attach files and save a draft will lose those attachments upon reopening the draft. The GUI now warns about this, but it remains a functional gap compared to standard email clients.
+
+22. [LOW] Brittle Identity Filtering
+File: src/qmail/screens/ComposeModal.jsx (isOwnAddress)
+Description: The "Reply All" logic manually filters out the user's own address by checking a hardcoded list of identity fields (SN, address, prettyAddress). If the backend adds new identity forms (e.g., aliases, vanity domains), this filtering will fail to catch them, leading to the user replying to themselves in group threads. This should ideally be handled by a canonical "IsThisMe" endpoint or a more robust normalization shared with the backend.

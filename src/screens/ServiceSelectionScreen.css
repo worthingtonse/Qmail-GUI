@@ -190,6 +190,29 @@
   box-shadow: var(--shadow-xl), 0 0 30px rgba(99, 102, 241, 0.4);
 }
 
+.service-button.existing-identity {
+  background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+  box-shadow: var(--shadow-md), 0 0 20px rgba(20, 184, 166, 0.28);
+}
+
+.service-button.existing-identity:hover:not(:disabled) {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl), 0 0 30px rgba(20, 184, 166, 0.38);
+}
+
+.service-button.existing-identity .service-button-content span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.service-button.existing-identity small {
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  opacity: 0.86;
+}
+
 .service-button:active {
   transform: translateY(-2px);
 }
@@ -528,9 +551,80 @@
   animation: slideIn 0.3s ease;
 }
 
+.local-identity-check,
+.local-identity-error,
+.buy-locker-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+
+.local-identity-check {
+  color: var(--text-secondary);
+  background-color: var(--secondary-bg);
+  border: 1px solid var(--border-medium);
+}
+
+.local-identity-error {
+  color: var(--accent-danger);
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--accent-danger);
+}
+
+.buy-locker-hint {
+  color: var(--text-secondary);
+  background-color: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.local-identity-check svg,
+.local-identity-error svg,
+.buy-locker-hint svg {
+  flex-shrink: 0;
+}
+
+.local-identity-error span {
+  flex: 1;
+}
+
+.buy-locker-hint span {
+  flex: 1;
+}
+
 .locker-error svg {
   flex-shrink: 0;
 }
+
+/* gpt-batch4: inline retry inside the .locker-error row. Moved from
+   inline JSX styles to a class so disabled/hover states behave
+   consistently with the rest of the theme. */
+.locker-error-retry {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  padding: 0 var(--space-xs);
+  font-weight: 500;
+  transition: opacity var(--transition-base);
+}
+
+.locker-error-retry:hover:not(:disabled) {
+  opacity: 0.7;
+  text-decoration: underline;
+}
+
+.locker-error-retry:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .locker-actions {
   display: flex;
   flex-direction: column;

@@ -13,7 +13,7 @@ How to use this file:
     are BLOCKED until P0 lands.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by opu (Track C complete; rest_core fixes shipped as 0f26e8e on branch qmail; E10 in progress with gpt)
+Last updated: 2026-05-23 by gpt (Track F doc shipped; E8-E22 ready for visual smoke)
 
 Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 
@@ -120,9 +120,10 @@ D      DONE     opu     src/api/themeService.js + 30 Vitest tests.      ~half
                         one-time legacy-shape warning. Vitest 4.1.7
                         added as devDep; `npm test` runs the suite.
                         Ready for P3 integration.
-F      OPEN     -       docs/theme.bem-mapping.md (every current        ~1
-                        class → target BEM name). Phase 4 agents        day
-                        consume this so they skip the naming decision.
+F      DONE     gpt     docs/theme.bem-mapping.md shipped as rules +    ~1
+                        collision audit + open-track block map;         day
+                        migrated files remain the exhaustive source
+                        via local `/* was: ... */` comments.
 
 ================================================================================
 PHASE 4 TRACKS — open after P0 merges (one file per agent, biggest first)
@@ -137,9 +138,9 @@ E4     OPEN     -       wallet/components/tabs/LockerTab.css                  97
 E5     OPEN     -       qmail/screens/AccountPane.css                         935
 E6     OPEN     -       App.css (incl. update-modal extract to its own file)  803
 E7     OPEN     -       screens/ServiceSelectionScreen.css                    679
-E8     OPEN     -       qmail/screens/ComposeModal.css                        662
+E8     IN REVIEW   gpt     qmail/screens/ComposeModal.css                        662
 E9     IN REVIEW   gpt     qmail/screens/EmailListPane.css                       654
-E10    IN PROGRESS gpt     wallet/components/DicewarePasswordCreator.css         654
+E10    IN REVIEW   gpt     wallet/components/DicewarePasswordCreator.css         654
 E11    IN REVIEW   gpt     qmail/screens/ContactsPane.css                        582
 E12    IN REVIEW   gpt     qmail/screens/QMailDashboard.css                      565
 E13    IN REVIEW   gpt     qmail/screens/ReadingPane.css                         516

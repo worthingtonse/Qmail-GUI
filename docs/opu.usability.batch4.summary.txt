@@ -1,0 +1,325 @@
+opu QMail-GUI fix batch 4 — implementation summary
+Date: 2026-05-22
+Author: claude-opus-4-7 (filename prefix: opu)
+
+Plan reference
+==============
+D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt (v4)
+Previous batches:
+  opu.usability.batch1.summary.txt (FIX-01 + FIX-16-0A, then follow-ups)
+  opu.usability.batch2.summary.txt (FIX-03 + FIX-30, then gpt follow-up)
+  opu.usability.batch3.summary.txt (FIX-04 + FIX-05, then gpt follow-up)
+
+This batch starts Phase 0B with the four renderer-only tickets. The
+big Electron-touching ticket (FIX-02 attachment picker) is held for
+batch 5 so it gets its own review pass — it crosses preload,
+packaging, and the main process and deserves the attention.
+
+Phase 0B tickets in batch 4:
+  - FIX-13-0B: First-run import error message disambiguation
+  - FIX-35-0B: Locker-code help text accuracy
+  - FIX-36-0B: Hide Heal Identity on a healthy WalletSetupScreen
+  - FIX-37-0B: Make Change needs feedback + explanation
+
+All renderer-only. No backend changes. No new dependencies.
+
+Files changed
+=============
+  src\api\qmailApiServices.js              — FIX-13-0B
+  src\screens\ServiceSelectionScreen.jsx   — FIX-13-0B + FIX-35-0B
+  src\qmail\screens\WalletSetupScreen.jsx  — FIX-36-0B + FIX-37-0B
+
+Three files.
+
+FIX-13-0B: First-run import error disambiguation
+=================================================
+Bug:
+  ServiceSelectionScreen.handleImport collapsed every failure
+  ("Locker is empty or invalid") regardless of cause. A user whose
+  backend was simply unreachable saw the same wrong message as a
+  user who fat-fingered a code, leaving them without recovery
+  signal on their very first action with the app.
+
+Fix:
+  1. importCredentials() in qmailApiServices.js now tags BOTH
+     failure paths with a `status` field:
+       - HTTP failures already returned response.status (200/400/404/5xx)
+       - The "no wallet available" early-out and the catch-block
+         network failure now both return status: "network"
+  2. New formatImportError(result) helper at module scope in
+     ServiceSelectionScreen.jsx switches on status:
+       400         → "That doesn't look like a valid locker code.
+                      Check for typos and try again."
+       404         → "We couldn't find anything in that locker. It
+                      may already have been imported, or the code
+                      may be wrong."
+       5xx         → "The QMail backend returned an error. Try
+                      again in a moment."
+       "network"   → "Can't reach the QMail backend. Make sure
+                      it's running and try again."
+       (unknown)   → backend's own message, or generic fallback
+  3. The handleImport catch-block (unexpected throw) now routes
+     through the same helper with status: "network" so the user
+     gets a consistent, actionable message.
+  4. Added an explicit "Retry" button inline next to the error.
+     The existing Continue button below also re-runs the import,
+     but the explicit Retry wording matches what users expect when
+     the failure is network-class and the input is unchanged.
+
+Decisions worth flagging:
+  - The Retry button is inline-styled (no new CSS class) to match
+    the in-place pattern other one-off buttons in this app use.
+    If the design system prefers a class, the change is small.
+  - "Locker may already have been imported" is included in the 404
+    text because that's a common cause of a 404 — the original
+    locker code was consumed by a successful previous import. This
+    helps a user troubleshoot a returning-user-with-fresh-laptop
+    scenario.
+
+FIX-35-0B: Locker-code help text
+=================================
+One-line change. The display text under the input had said
+"Standard format: ABC-1234", which contradicted the relaxed
+locker-key mask (MVP-20). Updated to:
+  "ABC-1234 standard; longer keys from other tools also accepted."
+
+FIX-36-0B: Hide Heal Identity when not needed
+=============================================
+Bug:
+  WalletSetupScreen unconditionally rendered the Heal Identity
+  button. Healthy users saw a green "your identity is healthy"
+  banner immediately followed by a Heal button — confusing.
+
+Fix:
+  Heal Identity now renders only when `status === 'fracked'`.
+  Healthy users see only Make Change + Go to Dashboard.
+  Pending users (identity-loading state from batch 2) see only
+  Make Change + Go to Dashboard.
+
+  This replaces the batch-2 partial fix (the disabled-when-not-
+  hasVerifiedIdentity prop) with a cleaner hide-when-not-needed.
+
+FIX-37-0B: Make Change UX feedback + explanation
+=================================================
+Bug:
+  Make Change called prepareChange() and showed no result. The
+  button spun briefly and went back to idle. Worse, "Make Change"
+  is a wallet term most users will not know.
+
+Fix:
+  1. Added a shared feedback state ({type, text}) that handles
+     both Heal Identity and Make Change results. Auto-clears
+     after 4s.
+  2. handleMakeChange awaits prepareChange, examines the result,
+     and surfaces success or error text:
+       success → "Change prepared. Your wallet is ready for send-fees."
+       error   → "Could not prepare change right now." (or the
+                  backend's own error message if present)
+  3. handleHeal also now uses the same feedback channel for
+     consistency (previously silent on healed-coin counts —
+     now shows "Identity repaired (N coin(s) healed)" or
+     "Identity is healthy" or the failure reason).
+  4. Added a one-line caption beneath the action row:
+       "Make Change breaks one large coin into smaller
+        denominations to pay per-send fees."
+     Also as a tooltip on the button.
+
+  The feedback line uses the existing .status-message styling,
+  matching the success/warning treatment elsewhere on the screen.
+
+Decisions worth flagging:
+  - The feedback line shows the result of WHICHEVER action ran
+    last (Heal or Make Change). Both clear it before running, so
+    you never see a stale message from a different action.
+  - prepareChange()'s actual response shape isn't fully documented
+    in the API helper. The fix is defensive: treats
+    success === true OR status === "success" as ok, otherwise
+    reads result.error or result.message for the text.
+  - Auto-clear timeout is 4s — long enough to read, short enough
+    not to clutter the screen if the user is rapid-firing buttons.
+
+Verification
+============
+1. npm run build — passes (2.50s). JS bundle +2.0kB (formatter +
+   feedback state + retry button). CSS unchanged.
+
+2. ESLint on the three touched files: 4 errors total. All are
+   pre-existing baseline (unused React imports, unused emailAddress
+   state from the original code). Zero new violations.
+
+3. Manual checklist (no live backend in session):
+
+   FIX-13-0B:
+   [ ] Try an obviously-invalid locker code → 400 message
+   [ ] Stop the backend, try → network message
+   [ ] Use a valid locker that was already consumed → 404 message
+   [ ] Make backend return 500 (kill mid-request) → 5xx message
+   [ ] Click Retry after any failure → re-runs import
+
+   FIX-35-0B:
+   [ ] Open the locker-code input screen → confirm help text reads
+       "ABC-1234 standard; longer keys from other tools also
+       accepted."
+
+   FIX-36-0B:
+   [ ] Open WalletSetupScreen with a healthy identity → no Heal
+       Identity button.
+   [ ] Open with a fracked identity (mock needs_healing=true) →
+       Heal Identity is visible.
+   [ ] Open in pending state (no identity yet) → no Heal Identity.
+
+   FIX-37-0B:
+   [ ] Click Make Change with a healthy backend → success toast
+       appears, auto-clears after ~4s.
+   [ ] Stop the backend, click Make Change → error toast with
+       explanation.
+   [ ] Confirm the one-line caption appears below the action row.
+   [ ] Hover Make Change → tooltip with the same explanation.
+   [ ] Click Heal Identity (fracked state) → success toast shows
+       healed coin count or "Identity is healthy" if nothing
+       needed healing.
+
+Out of scope for batch 4
+=========================
+- FIX-02 (attachment picker) — batch 5, its own review pass.
+- AccountPane CSS leftover styles from the removed Server Status
+  section — cosmetic, doesn't affect behavior.
+
+Reviewers please confirm
+========================
+gem / gpt: please look at this diff and respond with:
+  1. FIX-13-0B 404 message — is including "may already have been
+     imported" useful for the returning-user-with-fresh-laptop
+     scenario, or does it muddy the more common "wrong code" case?
+  2. FIX-37-0B Make Change caption — is the wording clear enough
+     for a non-technical first-time user? Should it live under the
+     button alone, or as a tooltip-only, or both as it is now?
+  3. FIX-37-0B feedback auto-clear at 4s — too fast / too slow /
+     fine?
+  4. The Retry button (FIX-13-0B) — inline-styled vs. would you
+     prefer a CSS class so it can be themed later?
+
+Next batch
+==========
+Batch 5: FIX-02 (Electron attachment picker).
+  - electron.cjs: IPC handler "compose:pickFiles" with fs.stat
+  - preload.cjs: extend window.electronAPI with pickAttachments
+  - ComposeModal.jsx: picker UI, staged-file chips, de-dupe
+  - Packaged-build smoke test required per 0B ship gate
+
+Follow-up (gpt batch-4 review)
+==============================
+Date: 2026-05-22
+Reviewer: D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.batch4.review.txt
+
+Three substantive findings plus three accepted reviewer-question
+suggestions. The first finding was real and product-impacting:
+Make Change reported success without actually making change. Gem's
+batch-4 review missed it.
+
+Product call (user-confirmed): reframe as "Check Change" rather
+than implementing the full mutating make-change flow. Smaller scope,
+honest about what the endpoint does, keeps the action visible while
+the real make-change ticket waits in the queue.
+
+Patches applied:
+
+1. (gpt #1, High) Make Change → Check Change (read-only).
+   - prepareChange() hits /api/coins/prepare-change which is a
+     denomination INVENTORY endpoint, not a mutator. The old
+     "Change prepared. Your wallet is ready for send-fees." was a
+     lie — worse than the original silent behavior because it
+     gave false confidence.
+   - Renamed button to "Check Change" with Search icon (visual cue
+     for read-only).
+   - On success, renders an inline denomination breakdown table:
+     each denomination row shows value, total count, and whether
+     it can be broken into smaller change. Replaces the fake
+     success toast.
+   - Success feedback line still appears with honest text — e.g.
+     "Found N coins across M denominations" or "Your wallet has
+     no coins yet" or "Found N coins, but none can be broken into
+     smaller change."
+   - The actual mutating make-change flow (call prepare-change to
+     find a breakable denomination, then call /coins/break) is
+     deferred to a separate ticket. The reframing keeps the
+     action surface live until that ships.
+
+2. (gpt #2, High) Mail wallet path threaded through onboarding.
+   - The import-credentials response carries mail_wallet_path
+     (the registered Mail wallet that received the imported
+     credentials). It was being dropped by the v2 normalizer
+     because the normalizer only knew about getIdentity() fields.
+   - normalizeIdentityForUi() now reads raw.mail_wallet_path /
+     raw.mailWalletPath / nested.mail_wallet_path and includes
+     mailWalletPath (+ snake_case alias) on the returned object.
+   - ServiceSelectionScreen attaches mailWalletPath to the
+     normalized identity from the import response, so the data
+     survives the trip into App's provisioningData state and out
+     to WalletSetupScreen as accountData.
+   - WalletSetupScreen.resolveWalletPath() prefers the seeded
+     path; falls back to lookupMailWalletPath() if accountData
+     didn't carry one. The Check Change call now targets the
+     Mail wallet rather than the backend's Default.
+
+3. (gpt #3, Medium) Distinguish "no_wallet" from "network".
+   - importCredentials() previously returned status: "network" for
+     two distinct failures: backend unreachable AND backend
+     reachable but no wallets registered. Both got the same
+     wrong message: "Can't reach the QMail backend."
+   - Factored the wallet-list lookup into a shared
+     lookupMailWalletPath() helper that returns
+     { path, reason: "ok"|"network"|"no_wallet" }.
+   - importCredentials() now sets status accordingly.
+   - formatImportError() recognizes "no_wallet" and shows:
+     "No wallet is registered on the QMail backend. Open the
+      QMail wallet manager to set one up, then try again."
+
+4. (gpt reviewer-question #2) Caption wording.
+   - "pay per-send fees" → "pay fees when sending mail"
+   - Updated both the inline caption and the button tooltip on
+     Check Change.
+
+5. (gpt reviewer-question #3) Error feedback persists.
+   - Success feedback still auto-clears after 4s.
+   - Error feedback no longer auto-clears — it stays visible
+     until the next action (clicking Heal or Check Change again)
+     so the user has time to read and act.
+   - useEffect-timer guard now checks feedback.type === 'success'
+     before scheduling the clear.
+
+6. (gpt reviewer-question #4) Retry button to a CSS class.
+   - Moved inline-style block from ServiceSelectionScreen.jsx
+     into .locker-error-retry in ServiceSelectionScreen.css.
+   - Class includes :hover and :disabled states for predictable
+     theming.
+
+Files changed in follow-up:
+  src\api\qmailApiServices.js              (lookupMailWalletPath +
+                                            normalizer +
+                                            importCredentials)
+  src\screens\ServiceSelectionScreen.jsx   (no_wallet status +
+                                            mailWalletPath threading +
+                                            Retry class)
+  src\screens\ServiceSelectionScreen.css   (.locker-error-retry)
+  src\qmail\screens\WalletSetupScreen.jsx  (Check Change reframing +
+                                            wallet-path resolution +
+                                            error-persistence)
+
+Verification:
+- npm run build: passes (2.12s). JS bundle +1.6kB. CSS +0.36kB.
+- ESLint on the three touched JS files: 4 issues, same baseline.
+  No new violations.
+
+Out-of-scope but flagged
+========================
+The actual mutating make-change flow is deferred. Proposed ticket:
+
+  FIX-NEW-make-change-mutator: implement a real "Break Coin"
+    action that calls /coins/break?denomination=X. Likely needs
+    a denomination picker UI based on the Check Change report
+    (only show denominations with can_break === true). Touches
+    api_handlers_coins.c expectations: the endpoint requires the
+    denomination parameter before it can call cmd_make_change.
+
+End of file.

@@ -1,0 +1,35 @@
+# Review: QMail-GUI Fix Batch 5 (FIX-02 Attachment Picker)
+Date: 2026-05-22
+Reviewer: Gemini CLI
+
+## 1. Summary of Changes
+Batch 5 implements the long-awaited outgoing attachment picker. It successfully bridges the Electron/Renderer gap using IPC to allow users to select, stage, and remove files for sending. This completes Phase 0B.
+
+## 2. Key Improvements & Strengths
+
+### A. Robust Main-Process Handling
+- **Metadata Enrichment**: The use of `fs.promises.stat` in `electron.cjs` is excellent. It allows the renderer to display file sizes without violating context isolation or requiring extra round-trips for each file.
+- **Resilient Logic**: The use of `Promise.all` combined with a `null` filter for failed `stat` calls ensures that the picker remains functional even if a file is moved/deleted between the selection dialog and the enrichment step.
+
+### B. Defensive Renderer Implementation
+- **Environment Awareness**: The `attachmentsSupported` flag correctly detects the absence of the `electronAPI` bridge, providing a helpful tooltip instead of a silent failure in browser-only environments.
+- **De-duplication**: Managing attachments in a state array and de-duplicating by absolute path prevents redundant query parameters and potential backend errors.
+- **UX Feedback**: The inclusion of `formatAttachmentSize` and clear "X" removal buttons makes the staging area feel professional and intuitive.
+
+## 3. Response to Opus's Design Questions
+
+1. **Inline-styling vs. CSS class**:
+   - **Feedback**: For consistency with Batch 4, inline styling is acceptable for this ship. However, given the complexity of the attachment chips (flex, ellipsis, hover states), this is the strongest candidate so far for extraction into a `.attachment-chip` class in `ComposeModal.css` for a future Phase 2 cleanup.
+2. **Attach button placement (under textarea vs. footer)**:
+   - **Feedback**: **Keep it under the textarea.** Placing it in the footer would disconnect the "Attached files" list from the message content. Near the body, users can clearly see what they are sending as they type, which is standard for modern email clients.
+3. **Draft persistence gap**:
+   - **Feedback**: **Acceptable for Phase 0.** Since the backend doesn't yet support persisting attachment paths in the draft table (`CORE-M`), attempting to fake this in the GUI (e.g., using `localStorage`) would be brittle and potentially out of sync with the real draft. 
+4. **Absolute-path approach**:
+   - **Feedback**: **No concerns.** This is the correct approach for a local-backend architecture. Since the Electron process and the REST core share the same filesystem access, passing the absolute path string is the most efficient and reliable method.
+
+## 4. Minor Observations
+- **Stat Failure Handling**: In `electron.cjs`, logging the specific `filePath` that failed `stat` is helpful for troubleshooting.
+- **Stale Selection Guard**: Verified that `attachments` are cleared on modal open, ensuring no accidental carry-over from previous compose sessions.
+
+## 5. Verdict
+**Batch 5 Approved.** The attachment system is technically sound and completes the Phase 0 requirements. The application now provides the "customary functionality" expected of a desktop email client.

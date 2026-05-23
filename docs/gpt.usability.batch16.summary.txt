@@ -1,0 +1,89 @@
+Batch 16 Summary - FIX-39 + FIX-40 + FIX-41
+============================================
+
+Scope
+-----
+Implemented Phase 3 Batch 16:
+- FIX-39: Compose autosave while typing.
+- FIX-40: Persist ComposeModal Advanced Options state.
+- FIX-41: Contact autocomplete for Cc and Bcc, not just To.
+
+Also folded in nearby reviewer bugs:
+- BUG-37: Re-indented handleSaveDraft and removed the duplicate draft-save
+  comment.
+- BUG-38: Kept the network warning visible during Retry so the spinner branch
+  can render.
+- BUG-43: Moved the "valid recipient" parse check into pre-send validation so
+  pure validation failures do not route through onSendFailure.
+
+Changes
+-------
+FIX-39:
+- Added a 5 second debounced autosave timer for recipient, subject,
+  subsubject, and body edits.
+- Autosave calls the existing handleSaveDraft path, preserving the
+  touchedFields guard for to/cc/bcc/subsubject.
+- Autosave skips empty subject+body drafts, closed modals, active sends,
+  post-success send state, and concurrent draft saves.
+- Autosave and saved-indicator timers are cleared on close and unmount.
+- Draft attachments are still not persisted; the existing warning remains.
+
+FIX-40:
+- showAdvanced now initializes from localStorage key
+  qmail.compose.showAdvanced.
+- Toggling Advanced Options persists the value.
+- Compose open/reset paths no longer force Advanced Options closed.
+
+FIX-41:
+- Replaced the To-only contact suggestion state with field-aware recipient
+  helpers for to, cc, and bcc.
+- To, Cc, and Bcc now share the same contact picker button and suggestion
+  list rendering.
+- Contact selection uses autoAddress first, then email, then fullName.
+- Selecting a contact preserves existing recipients and comma-separates the
+  added address; typed partial tokens are replaced by the selected contact.
+- markTouched("to" / "cc" / "bcc") is still preserved.
+
+Adjacent BUG fixes:
+- handleSaveDraft is indented consistently and has one draft-save comment.
+- Network Retry keeps the warning visible while canSend is null, so the
+  RefreshCw spinner is reachable during a re-check.
+- The "Please provide at least one valid recipient address." case now sets
+  the modal error before send state starts, avoiding the dashboard duplicate
+  error toast.
+
+Files Changed
+-------------
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/ComposeModal.css
+- docs/gpt.usability.batch16.summary.txt
+
+Verification
+------------
+PASS: npx eslint src/qmail/screens/ComposeModal.jsx --report-unused-disable-directives --max-warnings 0
+PASS: npm run build
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for ComposeModal.jsx and ComposeModal.css
+PASS: source scan found no stale showContactSuggestions/handleToChange,
+setShowAdvanced(false), old valid-recipient throw path, or hidden
+canSend === false network-warning guard.
+
+Note: the first npm run build attempt hit a transient Vite emitted-asset path
+error after rendering chunks. An immediate npx vite build --debug succeeded,
+and the exact npm run build command passed on rerun.
+
+Manual Verification Notes
+-------------------------
+Pending live app checks:
+- Type in subject/body and confirm a draft autosaves after roughly 5 seconds.
+- Confirm autosave does not run while sending, while the Sent state is visible,
+  or after closing the modal.
+- Open Advanced Options, close compose, reopen, and confirm the expanded state
+  persists.
+- Use contact suggestions on To, Cc, and Bcc; confirm existing comma-separated
+  recipients are preserved.
+- Type only commas/spaces in To and click Send; confirm only the modal error
+  appears, with no dashboard failure toast.
+- Force a RAIDA warning, click Retry, and confirm the Retry icon spins while
+  the re-check is in progress.

@@ -622,3 +622,938 @@ REJECTED-06 — Gemini BUG-3 (partial): "Multiple setInterval loops cause
 ===============================================================================
   END OF REPORT
 ===============================================================================
+
+###############################################################################
+  APPENDIX — BATCH 7 REVIEW OBSERVATIONS (2026-05-22)
+###############################################################################
+
+The following items were noted while reviewing GPT's FIX-15 / FIX-15b
+implementation. None are blocking bugs — code matched the spec and build
+passed — but they're worth tracking for follow-up.
+
+-------------------------------------------------------------------------------
+
+BUG-26 — document.title stays stale after Sign Out
+  File:     src/qmail/screens/QMailDashboard.jsx (useEffect line ~240),
+            src/screens/ServiceSelectionScreen.jsx
+  Severity: LOW
+  Found by: Claude (Batch 7 review)
+
+  QMailDashboard syncs document.title to "QMail - <folder>" via a
+  useEffect on [currentFolder, mailCounts]. When the user signs out,
+  QMailDashboard unmounts and the title is never updated again.
+  ServiceSelectionScreen does not set document.title, so the OS
+  window title remains "QMail - inbox" even though the user is now
+  on the start screen.
+
+  FIX PLAN:
+  1. Either set document.title in ServiceSelectionScreen's mount
+     effect (e.g. "QMail") so the dashboard's last title doesn't
+     linger, OR
+  2. Hoist title management to App.jsx and key it off
+     selectedService.
+
+-------------------------------------------------------------------------------
+
+BUG-27 — skipAutoRestore helpers silently swallow localStorage errors
+  File:     src/qmail/skipAutoRestore.js
+  Severity: LOW
+  Found by: Claude (Batch 7 review)
+
+  Every helper in skipAutoRestore.js wraps localStorage access in a
+  try { ... } catch { return false; }. No diagnostic is logged. In a
+  field bug report where sign-out "didn't stick" between restarts,
+  there's no log breadcrumb to distinguish "localStorage was
+  unavailable" from "the flag was cleared by something else."
+
+  The AccountPane confirm modal does warn the user when
+  isLocalStorageAvailable() returns false, so the user-facing path is
+  correct — this is purely a diagnostics gap.
+
+  FIX PLAN:
+  1. In each catch block, add a console.warn("skipAutoRestore: ...",
+     err) so the failure is visible in DevTools / log capture.
+  2. Leave the return-false contract unchanged so callers still get
+     the graceful degrade behavior.
+
+-------------------------------------------------------------------------------
+
+BUG-28 — package.json electron-builder config was removed alongside
+         Batch 7 work
+  File:     package.json
+  Severity: MEDIUM (release-only)
+  Found by:  Claude (Batch 7 review)
+
+  The working-tree diff for package.json deletes the entire
+  "scripts" block for electron-pack / build-portable / build-all /
+  dist plus the top-level "build" key (appId, productName,
+  directories, files, extraResources, portable, win). These look
+  unrelated to FIX-15 / FIX-15b.
+
+  Without this config, electron-builder cannot produce the portable
+  binaries. If this was a stray edit, restore from main. If
+  intentional (e.g. the build config moved into a separate
+  electron-builder.yml), confirm the replacement file is also in
+  the repo before the next release cut.
+
+  FIX PLAN:
+  1. Confirm intent with whoever did the portable/splash/multi-
+     instance work.
+  2. If unintentional, restore the deleted scripts and "build"
+     block from a previous commit.
+
+###############################################################################
+  END OF APPENDIX
+###############################################################################
+
+###############################################################################
+  APPENDIX — BATCH 8 REVIEW OBSERVATIONS (2026-05-22)
+###############################################################################
+
+The following items were noted while reviewing GPT's FIX-14 / FIX-11a /
+FIX-17 implementation. None are blocking — code matched the spec and
+build passed — but they're worth tracking for follow-up.
+
+-------------------------------------------------------------------------------
+
+BUG-29 — Multi-arrival new-mail toast is not clickable
+  File:     src/qmail/screens/QMailDashboard.jsx (background watcher)
+  Severity: LOW
+  Found by: Claude (Batch 8 review)
+
+  When more than one pending notification arrives in the same 10s
+  poll, the toast falls back to the summary form
+  "N new emails arrived!" and omits targetPendingGuid / targetEmailId.
+  notificationClickable requires one of those fields to be truthy,
+  so the bulk toast renders non-clickable.
+
+  The single-arrival toast IS clickable and focuses the matching
+  pending row. The spec didn't require the bulk form to be clickable,
+  but at minimum a "click to focus inbox" affordance would be useful
+  for the multi-arrival case.
+
+  FIX PLAN:
+  1. When newNotifs.length > 1, attach a sentinel like
+     targetView: 'inbox' to the notification object.
+  2. Extend handleNotificationClick to switch to inbox on that
+     sentinel (without picking a specific row).
+
+-------------------------------------------------------------------------------
+
+BUG-30 — focusPendingMail does not trigger auto-download
+  File:     src/qmail/screens/QMailDashboard.jsx (focusPendingMail)
+  Severity: LOW (UX)
+  Found by: Claude (Batch 8 review)
+
+  Clicking the toast selects the pending row but does NOT call
+  handleDownloadMail. handleSelectEmail's pending branch auto-
+  downloads (line ~663), but focusPendingMail bypasses it via direct
+  setSelectedEmail. So the user has to click the row a second time
+  to actually decrypt.
+
+  The spec says "clicking it focuses the matching pending row" —
+  this is intentional and matches the spec letter. But a one-click
+  "decrypt via toast" UX would feel more polished.
+
+  FIX PLAN:
+  1. After setSelectedEmail(pendingRow), call handleDownloadMail
+     (pendingRow.guid || pendingRow.id) so the toast click both
+     focuses and decrypts.
+  2. Match handleSelectEmail's pending branch semantics so the row
+     transitions consistently regardless of how it was selected.
+
+-------------------------------------------------------------------------------
+
+BUG-31 — loadMailCounts fallback toast can say "from Unknown Sender"
+  File:     src/qmail/screens/QMailDashboard.jsx (loadMailCounts)
+  Severity: LOW
+  Found by: Claude (Batch 8 review)
+
+  When mailCounts.inbox.total grows by 1 AND no pending notification
+  is in flight, the code falls back to getMailList('inbox', 1, 0,
+  'newest') and uses the latest row's sender. If the API responds
+  with an empty list (rare race — backend bumped the count but
+  hasn't indexed the row yet), the toast renders "New mail from
+  Unknown Sender" with no click target.
+
+  FIX PLAN:
+  1. If latest.success is false OR latest.data.emails is empty,
+     skip the toast entirely. The next poll (60s) will retry.
+  2. Optionally surface a generic "New mail arrived" toast without
+     a sender name, but only if a click target is actually present.
+
+###############################################################################
+  END OF BATCH 8 APPENDIX
+###############################################################################
+
+###############################################################################
+  APPENDIX - BATCH 9 OUT-OF-SCOPE OBSERVATIONS (2026-05-22)
+###############################################################################
+
+The following item was noted while implementing FIX-09 / FIX-12. It is
+outside Batch 9 scope and was not changed in this pass.
+
+-------------------------------------------------------------------------------
+
+BUG-32 - Contact delete still uses browser confirm
+  STATUS: RESOLVED (Batch 13+14, FIX-28)
+  File:     src/qmail/screens/ContactsPane.jsx (handleDeleteContact)
+  Severity: LOW (UX)
+  Found by: GPT (Batch 9 implementation)
+
+  ContactsPane.handleDeleteContact still uses window.confirm() before
+  deleting a contact. The rest of the Phase 1 destructive flows have
+  been moving toward in-app confirm modals so the UI can keep consistent
+  styling, focus behavior, disabled states, and error handling.
+
+  This is not a data-loss bug because the backend delete call still waits
+  for explicit confirmation, but it is an out-of-scope UX inconsistency
+  in the contacts screen.
+
+  FIX PLAN:
+  1. Replace window.confirm() with the app's existing in-render confirm
+     modal pattern.
+  2. Keep the delete API call and post-delete loadContacts() behavior
+     unchanged.
+
+###############################################################################
+  END OF BATCH 9 APPENDIX
+###############################################################################
+
+###############################################################################
+  APPENDIX - BATCH 9 REVIEW OBSERVATIONS (2026-05-22)
+###############################################################################
+
+The following items were noted while reviewing GPT's FIX-09 / FIX-12
+implementation. None are blocking — code matched the spec and build
+passed — but they're worth tracking for follow-up.
+
+-------------------------------------------------------------------------------
+
+BUG-33 - Dead description reference in handleAddContact
+  File:     src/qmail/screens/ContactsPane.jsx (handleAddContact)
+  Severity: LOW (code cleanliness)
+  Found by: Claude (Batch 9 review)
+
+  handleAddContact passes `(newContact.description || "").trim()` to
+  addContact, but AddContactModal.handleSave only emits { name,
+  addressOrSn } -- there is no description field in the modal. The
+  reference always coerces undefined -> "", so the behavior is
+  correct (clean empty description, per spec), but the dead field
+  reference is confusing.
+
+  FIX PLAN:
+  1. Either remove the description field from the addContact call,
+     OR
+  2. Add a third "Description" field to AddContactModal when product
+     decides to surface it (the FIX-09 spec explicitly says do NOT
+     add a third field today, so option 1 is the lower-risk move).
+
+-------------------------------------------------------------------------------
+
+BUG-34 - showBuyLockerHint never auto-dismisses
+  File:     src/screens/ServiceSelectionScreen.jsx
+  Severity: LOW (UX)
+  Found by: Claude (Batch 9 review)
+
+  After the user clicks "Buy Locker Code", the hint
+  ("Once you have your code, come back here and tap 'I Have a Locker
+  Code'.") appears below the button and stays on the initial screen
+  for the rest of the session. Navigating to locker-input and back
+  via Back leaves the hint visible.
+
+  This matches the FIX-12 spec letter (the spec calls for an inline
+  hint with no dismissal mechanism), but a small Dismiss affordance
+  would be cleaner once the user has acted on the prompt.
+
+  FIX PLAN (optional polish):
+  1. Add a small X / Dismiss button to .buy-locker-hint that flips
+     showBuyLockerHint back to false.
+  2. Optionally reset the flag on currentStep transitions or after
+     a successful import.
+
+-------------------------------------------------------------------------------
+
+BUG-35 - Name split on " " can yield leading-space last_name
+  File:     src/qmail/screens/ContactsPane.jsx (handleAddContact)
+  Severity: LOW
+  Found by: Claude (Batch 9 review)
+
+  If the user types a name with consecutive spaces ("Alice  Marie"),
+  `name.trim().split(" ")` yields ["Alice", "", "Marie"]. The
+  resulting last_name becomes " Marie" (with a leading space) because
+  nameParts.slice(1).join(" ") preserves the empty middle.
+
+  Pre-existing pattern, not a Batch 9 regression -- but worth tidying
+  the next time ContactsPane is touched.
+
+  FIX PLAN:
+  1. Use split(/\s+/) instead of split(" "), or
+  2. Trim each part after splitting.
+
+###############################################################################
+  END OF BATCH 9 REVIEW APPENDIX
+###############################################################################
+
+###############################################################################
+  APPENDIX - PHASE 1 CLOSEOUT OBSERVATIONS (2026-05-23)
+###############################################################################
+
+The following item was noted while running the Phase 1 ship gate. It is
+not a Phase 1 feature regression, but it affects the repo-level lint gate.
+
+-------------------------------------------------------------------------------
+
+BUG-36 - Full repo ESLint baseline fails
+  File:     Multiple files across src/api, src/components, src/qmail, src/wallet,
+            and vite.config.js
+  Severity: LOW (release hygiene)
+  Found by: GPT (Phase 1 closeout)
+
+  `npm run lint` currently fails with 73 errors and 4 warnings. The
+  failures are broad baseline issues, mostly unused React imports,
+  missing react/prop-types declarations in existing components,
+  react/no-unescaped-entities in wallet screens, and a vite.config.js
+  no-undef warning for process.
+
+  Phase 1 touched-file lint now passes after cleaning ComposeModal.jsx
+  and ReadingPane.jsx, but the repo-level command still cannot be used
+  as a clean ship gate until the wider baseline is addressed.
+
+  FIX PLAN:
+  1. Decide whether this repo intends to enforce prop-types. If not,
+     disable react/prop-types globally or per existing component.
+  2. Remove stale React imports now that the JSX runtime plugin is used.
+  3. Escape JSX text where react/no-unescaped-entities applies.
+  4. Add Node globals/env handling for vite.config.js.
+  5. Re-run `npm run lint` and record a clean baseline.
+
+###############################################################################
+  END OF PHASE 1 CLOSEOUT APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 2 BATCH 10 APPENDIX (FIX-22 + FIX-31)
+###############################################################################
+
+The following items were noted while reviewing Batch 10
+(docs\gpt.usability.batch10.summary.txt). Neither is in scope for the
+Batch 10 patch — both are minor and pre-date Phase 2.
+
+-------------------------------------------------------------------------------
+
+BUG-37 - ComposeModal handleSaveDraft is indented at column 0
+  File:     src/qmail/screens/ComposeModal.jsx, lines 429-496
+  Severity: LOW (cosmetic)
+  Found by: Claude (Phase 2 Batch 10 review)
+
+  handleSaveDraft and its surrounding "Smart draft save/update
+  functionality" comment block are dedented to column 0 inside the
+  ComposeModal component body. The arrow function still closes over
+  the enclosing scope correctly (so it works), and the duplicated
+  comment line just above it ("// Smart draft save/update
+  functionality" appears twice with mismatched leading whitespace) is
+  harmless, but the block is visually jarring next to its 2-space-
+  indented neighbors.
+
+  Pre-dates Batch 10. Worth a one-shot reformat the next time this
+  file is opened for a real change.
+
+  FIX PLAN:
+  1. Re-indent lines 432-496 to two spaces.
+  2. Delete the duplicate "// Smart draft save/update functionality"
+     comment.
+
+-------------------------------------------------------------------------------
+
+BUG-38 - ComposeModal network-warning Retry button has dead spin branch
+  File:     src/qmail/screens/ComposeModal.jsx, lines 907-927
+  Severity: LOW (UX polish)
+  Found by: Claude (Phase 2 Batch 10 review)
+
+  The Retry button inside the network-warning banner reads:
+
+    <button
+      ...
+      onClick={checkNetworkStatus}
+      disabled={isSending || canSend === null}
+    >
+      <RefreshCw
+        size={14}
+        className={canSend === null ? "spinning" : ""}
+      />
+      Retry
+    </button>
+
+  The enclosing block only renders when canSend === false:
+    {networkStatus && canSend === false && (...)}
+
+  checkNetworkStatus() sets canSend back to null at its top. As soon
+  as the user clicks Retry, the banner unmounts entirely until the
+  check resolves to false again — so the disabled={canSend === null}
+  and the "spinning" className are unreachable. The user gets no
+  visual hint that the re-check is in flight; the warning just
+  disappears and may or may not reappear.
+
+  Not a correctness bug — the recheck still runs. But the UI promises
+  a spinner that never spins. Either:
+   (a) Leave the warning banner rendered while canSend === null (and
+       suppress the body text while checking), so the spin actually
+       fires; OR
+   (b) Surface a small "Checking…" toast/inline so the user sees
+       feedback during the recheck.
+
+  Suggest (a) — minimal change, keeps the affordance consistent with
+  the Send button which also goes back to "Checking network…".
+
+  FIX PLAN:
+  1. Change the wrapper guard to `canSend !== true` (or
+     `canSend === false || canSend === null`) AND a "did we ever fail
+      a check?" flag so we don't show the banner on initial open
+      before the first result arrives. The Send button already
+      handles initial-open correctly via canSend === null.
+
+###############################################################################
+  END OF PHASE 2 BATCH 10 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 2 BATCH 11 APPENDIX (FIX-19 + FIX-24 + FIX-27 + FIX-30)
+###############################################################################
+
+The following items were noted while reviewing Batch 11
+(docs\gpt.usability.batch11.summary.txt). Neither is in scope for the
+Batch 11 patch — both are pre-existing or minor UX nits.
+
+-------------------------------------------------------------------------------
+
+BUG-39 - ReadingPane Mark Unread button is unconditional
+  File:     src/qmail/screens/ReadingPane.jsx, lines 252-261
+  Severity: LOW (UX polish)
+  Found by: Claude (Phase 2 Batch 11 review)
+
+  The Mark Unread button (FIX-24) is rendered whenever onMarkAsRead
+  is provided, with no check on the current read state of the
+  selected message. Clicking it on an already-unread message calls
+  handleMarkAsRead(id, false), which is a no-op server-side but
+  presents a confusing affordance.
+
+  Not a Batch 11 regression — the spec explicitly said "Both handlers
+  already exist — pure UI surface." But once unified-notifications
+  (FIX-34) lands, a toast like "Marked as unread" firing for an
+  already-unread message would be noticeably wrong.
+
+  FIX PLAN:
+  1. Gate the button on email.isRead === true (or whatever truthy
+     read-state flag the row carries — check EmailListItem for the
+     authoritative property name).
+  2. Optionally: swap to a "Mark Read" button when the message is
+     already unread, for symmetry. Spec doesn't require it.
+
+-------------------------------------------------------------------------------
+
+BUG-40 - Archive button + "Move to..." dropdown both expose Archive
+  File:     src/qmail/screens/ReadingPane.jsx, lines 156-161, 263-275
+  Severity: LOW (UX polish)
+  Found by: Claude (Phase 2 Batch 11 review)
+
+  When viewing an inbox message, the user sees both:
+    - A dedicated Archive button (FIX-24)
+    - "Archive" as one option in the "Move to..." dropdown
+  Two paths for the same action. Either path works, no behavioral
+  bug, but a small affordance redundancy.
+
+  Spec for FIX-24 doesn't ask to remove "Archive" from moveOptions
+  when the dedicated button is visible. Worth a one-line filter the
+  next time this surface is touched.
+
+  FIX PLAN:
+  1. In the moveOptions filter (line 161), additionally exclude
+     "archive" when currentFolder is one of the folders that exposes
+     the dedicated Archive button (i.e. inbox + starred). Keep
+     "Archive" in the dropdown only for folders that DON'T render
+     the button.
+
+###############################################################################
+  END OF PHASE 2 BATCH 11 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 2 BATCH 12 APPENDIX (FIX-20 + FIX-33 + FIX-34)
+###############################################################################
+
+The following items were noted while reviewing Batch 12
+(docs\gpt.usability.batch12.summary.txt). All three are minor and
+pre-existing or by-design trade-offs — none are in scope for the
+Batch 12 patch.
+
+-------------------------------------------------------------------------------
+
+BUG-41 - Refresh chain double-notifies on loadEmails failure
+  File:     src/qmail/screens/QMailDashboard.jsx, handleRefresh (line
+            687) + loadEmails failure path (line 578)
+  Severity: LOW (UX polish)
+  Found by: Claude (Phase 2 Batch 12 review)
+
+  handleRefresh wraps loadEmails(currentFolder) in runRefreshStep,
+  which catches the !result?.success throw and adds it to the
+  aggregate "Refresh completed with some service errors." warning
+  toast. But loadEmails ALREADY emits its own "Failed to load
+  emails" error toast (line 578) before returning the failed result.
+
+  Result on a "Message list" step failure during Refresh: TWO toasts
+  — the per-step error toast from loadEmails AND the aggregate
+  warning toast from handleRefresh. Other refresh steps
+  (loadMailCounts, getMailNotifications, checkMailNow, echoRaida)
+  don't emit their own toasts, so this is isolated to one step.
+
+  Not a bug introduced by Batch 12 — loadEmails has always emitted
+  its own failure toast. But Batch 12 surfaces the redundancy now
+  that handleRefresh also reports failures.
+
+  FIX PLAN:
+  Either (a) gate loadEmails's internal "Failed to load emails"
+  toast on a `silent` opt-in arg and have runRefreshStep pass
+  silent=true; OR (b) have handleRefresh skip the aggregate toast
+  for steps whose underlying helper already toasts. Option (a) is
+  simpler and keeps the helper self-explanatory at non-refresh
+  call sites.
+
+-------------------------------------------------------------------------------
+
+BUG-42 - pingQMail backwards-compat alias has no callers
+  File:     src/api/qmailApiServices.js:459
+  Severity: LOW (code hygiene)
+  Found by: Claude (Phase 2 Batch 12 review)
+
+  Line 459 keeps `export const pingQMail = peekBeacon;` as a
+  compatibility alias. Grep of src\ shows zero remaining callers —
+  the only references to `pingQMail` are the export itself. Per the
+  project conventions in CLAUDE.md / coding standards
+  ("Avoid backwards-compatibility hacks…"), this alias should be
+  deleted unless there is an out-of-tree consumer.
+
+  The Batch 12 summary explicitly justifies keeping it ("avoid
+  breaking any older imports") — likely a reviewer-call. Logging
+  here so it can be revisited.
+
+  FIX PLAN:
+  1. Confirm there are no out-of-tree consumers (e.g. test files,
+     other repos in the workspace, or dynamic imports by string).
+  2. If safe: delete line 459 and the comment above it.
+
+-------------------------------------------------------------------------------
+
+BUG-43 - markSendFailed fires onSendFailure for client-side validation throws
+  File:     src/qmail/screens/ComposeModal.jsx, handleSend catch
+            block (line 863-866), markSendFailed helper (line 743)
+  Severity: LOW (UX double-notification edge case)
+  Found by: Claude (Phase 2 Batch 12 review)
+
+  The catch block at the bottom of handleSend calls
+  markSendFailed(error.message). markSendFailed calls
+  onSendFailure(failureMessage), which the dashboard wires to
+  showDashboardNotification(message, "error") — a persistent toast.
+
+  Most throws in handleSend's try block ARE legitimate send
+  failures that warrant a dashboard toast (e.g. the network error
+  from sendEmail at line 861). But the throw at line 761 — "Please
+  provide at least one valid recipient address." — is a CLIENT-SIDE
+  validation failure that happens when `to.trim()` is non-empty but
+  parseEmailList(to) yields zero valid addresses (e.g. user typed
+  just ",,,").
+
+  Result: the user sees the validation error TWICE — once as the
+  in-modal red banner (via setError inside markSendFailed) and once
+  as a dashboard toast. The modal is still open, so the toast is
+  pure noise.
+
+  Edge case, but real. Spec for FIX-33 says: "On final failure
+  (timeout OR retry-counter exhausted): push the error to the
+  dashboard-level notification system so it persists if the user
+  closes the modal." Client-side validation isn't a "final failure"
+  in the FIX-33 sense.
+
+  FIX PLAN:
+  1. Move the parseEmailList result check to the same validation
+     section at lines 723-736 (before setIsSending(true)). Return
+     early without going through markSendFailed.
+  2. Alternatively: have markSendFailed accept an
+     `{ notifyDashboard: false }` option and pass it from the
+     validation-throw path.
+
+###############################################################################
+  END OF PHASE 2 BATCH 12 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 2 BATCH 13 APPENDIX (FIX-21 + FIX-25 + FIX-29 + FIX-32)
+###############################################################################
+
+The following items were noted while reviewing Batch 13
+(docs\gpt.usability.batch13.summary.txt). All but BUG-45 are minor
+out-of-scope observations.
+
+-------------------------------------------------------------------------------
+
+BUG-44 - DRD "Add to My Contacts" saved-state is component-local
+  File:     src/qmail/screens/ContactsPane.jsx, lines 26-27, 209-214
+  Severity: LOW (UX)
+  Found by: Claude (Phase 2 Batch 13 review)
+
+  FIX-29 tracks which DRD popular rows have been saved via local
+  state: savingDrdContactId (single in-flight key) and
+  savedDrdContactIds (Set of saved keys). These reset on every
+  ContactsPane unmount.
+
+  Consequences:
+  1. User clicks "Add to My Contacts" → check icon appears.
+  2. User navigates away (Inbox / Account / etc.) and back to
+     Contacts → check icon GONE. The DRD entry shows the un-saved
+     "Add" affordance again even though the contact is in their
+     local list.
+  3. User clicks Add again → handleAddPopularContact runs a fresh
+     addContact() call. Backend may dedupe, may not, may error.
+     Either way the local state-of-the-world is misleading.
+
+  The data needed to derive the saved state correctly is already
+  loaded — the regular `contacts` list has the user-added
+  contacts. The visual "saved" state should be derived from
+  comparing each DRD row's serial_number (or userId) against the
+  user contacts, not held as separate state.
+
+  FIX PLAN:
+  1. Derive `isSavedDrdContact` as
+       contacts.some(c => c.source === "user" && (
+         String(c.id) === String(contact.id) ||
+         normalizedAddress(c.email) === normalizedAddress(contact.email)
+       ))
+     instead of reading from savedDrdContactIds.
+  2. Keep savingDrdContactId for the in-flight spinner (it's
+     ephemeral by design).
+  3. Once derived, also fixes the inverse problem: deleting a
+     contact via the FIX-28 modal correctly re-enables the DRD
+     "Add" button on next view.
+
+-------------------------------------------------------------------------------
+
+BUG-45 - Batch 13 incidentally shipped FIX-28; summary is stale
+  File:     src/qmail/screens/ContactsPane.jsx, handleDeleteContact
+            + handleConfirmDeleteContact (lines 240-292) + delete-
+            confirm modal (lines 337-...)
+  Severity: INFO (process / docs alignment)
+  Found by: Claude (Phase 2 Batch 13 review)
+
+  The Batch 13 summary's Notes section says:
+    "A scan still finds window.confirm in ContactsPane delete.
+     That is expected: replacing it is Batch 14 / FIX-28 and was
+     intentionally left untouched."
+
+  That is incorrect. The implementation actually replaced
+  window.confirm with a full in-app delete-confirm modal
+  (contact-delete-overlay / contact-delete-modal), and added an
+  undo toast via addNotification with a 10s duration and an
+  onClick that calls restoreDeletedContact(contact, payload).
+
+  Grep for window.confirm in ContactsPane.jsx returns zero
+  matches. handleDeleteContact now takes the contact OBJECT
+  (not contactId) and routes through setPendingDeleteContact +
+  handleConfirmDeleteContact.
+
+  This is a positive outcome — FIX-28 is the right design — but
+  it means:
+  1. The Batch 13 summary "Notes" claim is wrong; should be
+     corrected so future readers don't grep for non-existent
+     window.confirm in the wrong batch.
+  2. BUG-32 (logged from Batch 9 review as the trigger for FIX-28)
+     should be marked RESOLVED.
+  3. Batch 14 / FIX-28 is now empty or near-empty. The handoff in
+     docs\opu.phase2.tickets.txt should be updated to note that
+     FIX-28 was folded into Batch 13.
+
+  FIX PLAN (docs only — no code change):
+  1. Append a note to gpt.usability.batch13.summary.txt clarifying
+     that the window.confirm replacement WAS done in this batch.
+  2. Mark BUG-32 RESOLVED in this file.
+  3. Update docs\opu.phase2.tickets.txt: Batch 14 / FIX-28 entry
+     to "Already shipped with Batch 13".
+
+  See related: BUG-32 (Contact delete still uses browser confirm)
+  in the Phase 1 closeout appendix above is now functionally
+  obsolete — but I'm NOT editing it inline; the formal close-out
+  should happen via the BUG-32 entry itself in a docs pass.
+
+-------------------------------------------------------------------------------
+
+BUG-46 - Search "top 50" notice false-positives when total is exactly 50
+  File:     src/qmail/screens/QMailDashboard.jsx:682,
+            src/qmail/screens/EmailListPane.jsx:146-150
+  Severity: LOW (UX honesty)
+  Found by: Claude (Phase 2 Batch 13 review)
+
+  setSearchResultCapHit(transformedEmails.length === SEARCH_RESULT_LIMIT)
+  triggers the "Showing top 50 results. Refine your search to see
+  more." notice whenever the result count is exactly 50.
+
+  When there happen to be EXACTLY 50 actual matches (no truncation),
+  the notice lies — there is nothing more to find. This is
+  acknowledged in the FIX-25 spec ("When result.length === 50...")
+  as the cheapest heuristic available until CORE-K (search
+  pagination) lands.
+
+  Worth logging so anyone running the manual checklist who
+  contrives a 50-message search and sees the notice doesn't file
+  it as a bug.
+
+  FIX PLAN:
+  Blocked on CORE-K. Full contract + GUI-side patch ready to
+  land in docs\opu.fix25-bug46.core-k.ticket.txt. Once CORE-K
+  ships the has_more bool, replace the exact-50 heuristic with
+  `setSearchResultCapHit(result.data.hasMore)` and swap the cap-
+  notice copy to "More results available." The same patch also
+  wires real Previous/Next pagination through the existing widget,
+  so the cap notice's "Refine your search" suggestion can become
+  "Use Next to keep browsing."
+
+###############################################################################
+  END OF PHASE 2 BATCH 13 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 2 BATCH 14 APPENDIX (FIX-28)
+###############################################################################
+
+Batch 14 (gpt.usability.batch14.summary.txt) completes FIX-28 by
+adding the .contact-delete-* CSS rules to ContactsPane.css. The
+JSX/logic for FIX-28 had already landed with Batch 13 (incidentally
+or out-of-order — see BUG-45 in the Batch 13 appendix). The two
+batches together implement the ticket fully.
+
+Net result: BUG-32 (Phase 1 Batch 9 appendix) is now functionally
+resolved. Recommend a docs-only follow-up to mark BUG-32 RESOLVED
+in this file.
+
+The following two items were noted while reviewing Batch 14; both
+are minor and out of scope for the patch.
+
+-------------------------------------------------------------------------------
+
+BUG-47 - Undo-notification onClick can fire after ContactsPane unmount
+  File:     src/qmail/screens/ContactsPane.jsx, handleConfirmDelete-
+            Contact (lines 283-286) + restoreDeletedContact
+            (lines 226-239)
+  Severity: LOW (React dev warning, no functional impact)
+  Found by: Claude (Phase 2 Batch 14 review)
+
+  After a successful delete, the code calls:
+    addNotification(`${contact.name} deleted. Click to undo.`, "success", {
+      duration: 10000,
+      onClick: () => restoreDeletedContact(contact, payload.data),
+    });
+
+  The toast lives in the NotificationProvider (App.jsx scope) and
+  survives a ContactsPane unmount. If the user navigates to
+  Inbox / Account / etc. within the 10-second window and clicks
+  Undo:
+   - restoreDeletedContact runs in the closure.
+   - It calls addContact() — fine, idempotent backend call.
+   - Then calls loadContacts() → setContacts(...) on an unmounted
+     component.
+
+  React 18 silently drops the setState (no warning in production,
+  one-time dev warning in older builds). The contact IS restored
+  backend-side — next time ContactsPane mounts, loadContacts on
+  mount picks it up. So functionally correct, but cosmetically
+  noisy.
+
+  FIX PLAN:
+  1. Move restoreDeletedContact to a helper that calls addContact
+     directly and emits showSuccess/showError, WITHOUT touching
+     ContactsPane state. The next remount of ContactsPane will
+     re-fetch contacts via its mount-effect anyway.
+  2. OR: track a mountedRef in ContactsPane and gate the
+     setContacts call inside loadContacts on mountedRef.current.
+
+-------------------------------------------------------------------------------
+
+BUG-48 - Inline delete-error breaks the unified-notification pattern
+  File:     src/qmail/screens/ContactsPane.jsx, handleConfirmDelete-
+            Contact (lines 267-271, 275-277, 287-288)
+  Severity: LOW (consistency)
+  Found by: Claude (Phase 2 Batch 14 review)
+
+  All other error paths in ContactsPane (and across the Phase 2
+  codebase post-FIX-34) route through the global notification
+  provider via showError(). The delete-confirm flow is the lone
+  holdout — it uses local deleteContactError state and renders an
+  inline div inside the delete-confirm modal:
+
+    setDeleteContactError(payload.error || ...);   // line 268
+    setDeleteContactError(`Failed to delete contact: ${result.error}`);  // line 276
+    setDeleteContactError(`Error deleting contact: ${err.message}`);     // line 288
+
+  Inline-error-in-modal is a defensible UX choice for the
+  "preparation failed, modal still open" case — but it's
+  inconsistent with the rest of the unified system that FIX-34
+  rolled out. Worth a follow-up to either:
+   (a) Route delete errors through showError + close the modal,
+       OR
+   (b) Document this as an intentional exception (preparation
+       errors stay in-modal because the user is mid-flow and
+       hasn't finalized the action).
+
+  FIX PLAN:
+  Decision-only. Either (a) refactor to showError, or (b) add a
+  one-line comment above setDeleteContactError explaining the
+  inline-error exception.
+
+###############################################################################
+  END OF PHASE 2 BATCH 14 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 3 BATCH 16 APPENDIX (FIX-39 / FIX-40 / FIX-41 + BUG-37/38/43)
+###############################################################################
+
+The following item was observed while reviewing GPT's Batch 16
+implementation. It does not block the patch.
+
+-------------------------------------------------------------------------------
+
+BUG-49 - Compose showAdvanced persistence effect writes on first mount
+  File:     src/qmail/screens/ComposeModal.jsx, lines 405-414
+  Severity: LOW (hygiene)
+  Status:   RESOLVED 2026-05-23 by adding a first-run ref guard to
+            the persistence effect.
+  Found by: Claude Opus 4.7 (Phase 3 Batch 16 review)
+
+  FIX-40's persistence is implemented as:
+
+    const [showAdvanced, setShowAdvanced] = useState(readStoredShowAdvanced);
+    ...
+    useEffect(() => {
+      try {
+        window.localStorage.setItem(
+          COMPOSE_ADVANCED_STORAGE_KEY,
+          showAdvanced ? "true" : "false",
+        );
+      } catch { /* ignore */ }
+    }, [showAdvanced]);
+
+  The effect fires on the FIRST mount of every ComposeModal lifecycle
+  and writes whatever readStoredShowAdvanced() just returned back
+  into localStorage. The written value equals the value just read,
+  so this is a no-op write at the storage layer and a no-op
+  behaviorally.
+
+  Why it's worth a follow-up: if a future change adds side effects
+  to this effect (e.g. analytics for "advanced opened/closed", a
+  telemetry counter, a debounced sync to a profile endpoint), the
+  no-op write will fire one spurious "opened to last-known state"
+  event per modal mount. Better to skip the first write now while
+  the cost is zero.
+
+  FIX PLAN:
+  Decision-only. Two reasonable shapes:
+   (a) Track an initialMount ref and skip the write when
+       initialMount.current is true:
+         const initialMount = useRef(true);
+         useEffect(() => {
+           if (initialMount.current) {
+             initialMount.current = false;
+             return;
+           }
+           window.localStorage.setItem(...);
+         }, [showAdvanced]);
+   (b) Move the localStorage write into the toggle button's onClick
+       handler directly. The useEffect goes away entirely.
+
+  Option (b) is the simpler shape if the only mutation is the
+  toggle button (it is, today). Option (a) is more robust if other
+  code paths might setShowAdvanced in the future.
+
+###############################################################################
+  END OF PHASE 3 BATCH 16 APPENDIX
+###############################################################################
+
+
+###############################################################################
+  PHASE 3 BATCH 17 APPENDIX (FIX-42 / FIX-43 / FIX-45 + BUG-44/47/48)
+###############################################################################
+
+The following item was observed while reviewing GPT's Batch 17
+implementation. It does not block the patch.
+
+-------------------------------------------------------------------------------
+
+BUG-50 - handleConfirmDeleteContact loadContacts may setState after unmount
+  File:     src/qmail/screens/ContactsPane.jsx, handleConfirmDelete-
+            Contact (line 384-425), specifically the await
+            loadContacts() at line 414
+  Severity: LOW (cosmetic / future-proofing)
+  Status:   RESOLVED 2026-05-23 by adding an isMountedRef guard to
+            loadContacts, loadPopularContacts, and the in-flight
+            delete path in handleConfirmDeleteContact. Two adjacent
+            functions (handleLookupContact, handleAddPopularContact)
+            have post-await setState calls without gates; the race
+            window is tiny and the user impact is zero today, so
+            they are left ungated and tracked here for next-pass
+            cleanup.
+  Found by: Claude Opus 4.7 (Phase 3 Batch 17 review)
+
+  handleConfirmDeleteContact awaits loadContacts() after a
+  successful backend delete. loadContacts calls setContacts and
+  setUserContacts. If the user navigates AWAY from ContactsPane
+  while the delete + reload is mid-flight (the Cancel button is
+  gated by isDeletingContact, but route changes outside the modal
+  are NOT gated), the setContacts call fires on an unmounted
+  component.
+
+  React 18 silently drops the state update, so today there's zero
+  user-visible impact. But:
+    - A future React upgrade (or a Strict-Mode roundtrip) could
+      promote this to a noisy console warning.
+    - If anyone later adds a useEffect that subscribes to contacts
+      / userContacts at the parent layer, the late state update
+      could spook downstream consumers.
+
+  This is the SAME shape as the old BUG-47 issue (undo onClick
+  setContacts after unmount), now isolated to the in-flight delete
+  path. BUG-47 was resolved by removing the loadContacts call from
+  restoreDeletedContact. The same trick is harder here because
+  the in-modal delete legitimately wants to refresh the visible
+  list on success — we just need to gate the local state mutation
+  on a mountedRef.
+
+  FIX PLAN:
+  Decision-only. Suggested shape:
+
+    const isMountedRef = useRef(true);
+    useEffect(() => {
+      isMountedRef.current = true;
+      return () => { isMountedRef.current = false; };
+    }, []);
+
+  Then inside loadContacts, gate every setState on
+  isMountedRef.current. (Or: pull loadContacts out of
+  handleConfirmDeleteContact entirely and rely on the next
+  ContactsPane mount or a "Refresh" press to repopulate; that's
+  the BUG-47-style shape, applied to the delete flow.)
+
+  Pre-existing concern (NOT introduced by Batch 17):
+    AccountPane.css does not have a dedicated rule for
+    .balance-card.suspect (the Limbo wallet card uses this class
+    at AccountPane.jsx:452). The card renders with the base
+    .balance-card styling only — no semantic gradient/border.
+    This pre-dates Batch 17. Logging here only as a note; if you
+    file a ticket for it, it deserves its own BUG number.
+
+###############################################################################
+  END OF PHASE 3 BATCH 17 APPENDIX
+###############################################################################

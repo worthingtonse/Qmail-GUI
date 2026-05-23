@@ -1,0 +1,113 @@
+Opus Batch 6 fixes (post-GPT review)
+Date: 2026-05-22
+Tickets: FIX-05.5, FIX-06, FIX-07 (Batch 6 follow-ups)
+
+Reviewed
+--------
+- docs\gpt.phase1.handoff.txt
+- docs\opu.usability.batch6.summary.txt
+- docs\gpt.usability.batch6.review.txt
+- src\qmail\screens\ComposeModal.jsx
+- src\qmail\screens\QMailDashboard.jsx
+- src\qmail\screens\ReadingPane.jsx
+- src\api\qmailApiServices.js
+
+Starting state
+--------------
+GPT's Batch 6 review (gpt.usability.batch6.review.txt) had already:
+- Removed the duplicate parseEmailList declaration that broke the build.
+- Hardened Reply All own-address filtering (multiple identity forms,
+  case-insensitive de-dup, angle-bracket-wrapped address normalization).
+- Preserved to/cc/bcc/subsubject aliases through getEmailById.
+- Disabled Reply All when no stored recipient list is available.
+- Guarded Forward against undownloaded messages in QMailDashboard.
+- Added autoAddress/auto_address aliases to normalizeIdentityForUi.
+
+Build was already PASSING.
+
+Fixes applied in this pass
+--------------------------
+1. ComposeModal reply / replyAll / forward body construction crashed if
+   sourceEmail.body was null/undefined even when isDownloaded was true.
+   - selectedEmail can briefly hold an isDownloaded=true row with an
+     empty/missing body (e.g. between list hydration and the
+     getEmailById merge in handleSelectEmail).
+   - `sourceEmail.body.replace(/\n/g, "\n> ")` on null throws and
+     leaves the modal stuck on a blank body.
+   - Fix: coerce to `(sourceEmail.body || "").replace(...)` in all three
+     branches and store the safe value in an `originalBody` local.
+
+2. Forward header rendered "From: undefined <addr>" when sourceEmail
+   had no `sender` display name.
+   - The composed header used `${sourceEmail.sender} <${addr}>`
+     unconditionally.
+   - Fix: fall back to "Unknown" for the display name and OMIT the
+     angle-bracketed address entirely when no address is available
+     (renders "From: Unknown" instead of "From: Unknown <>").
+
+3. Reply / Reply All wrote `undefined` into the quoted-body header when
+   `sourceEmail.timestamp` was missing.
+   - Same defensive coercion: `${sourceEmail.timestamp || ""}`.
+   - Reply also now falls back to sourceEmail.from when neither sender
+     nor senderEmail is set (was missing the `from` fallback that the
+     forward branch already had).
+
+4. sendProgress and showAdvanced reset was scoped to the "new" branch
+   only; reply / replyAll / forward / draft branches inherited stale
+   state when the modal was reopened in a different mode without a
+   page reload.
+   - Reopening compose after a send-progress message left the prior
+     status text visible until the next user action.
+   - The Advanced Options pane stayed expanded across modal opens.
+   - Fix: hoist `setSendProgress("")` and `setShowAdvanced(false)` out
+     of the new-message branch and run them unconditionally at the end
+     of the mounting useEffect, alongside the other modal-wide resets
+     (setAttachments, setError, etc.) that were already mode-agnostic.
+
+Files changed
+-------------
+- src\qmail\screens\ComposeModal.jsx
+  - reply, replyAll, forward body builders now defensive against
+    null body / missing sender / missing timestamp.
+  - sendProgress and showAdvanced reset hoisted out of the "new" branch.
+
+Behaviour preserved
+-------------------
+- Reply / Reply All subject "Re:" de-doubling (case-insensitive).
+- Forward subject "Fwd:" de-doubling (case-insensitive).
+- Reply All own-address filtering via identityAddressForms (still
+  covers serialNumber, address, autoAddress, prettyAddress,
+  email_address, raw aliases, and nested raw.identity.*).
+- Reply All Cc de-duplication.
+- Forward To is blank.
+- Reply All / Forward gated honestly when recipient data missing /
+  message undownloaded (QMailDashboard guards + ReadingPane disabled
+  buttons with tooltips).
+- composeContext shape and prop contract unchanged.
+
+Verification
+------------
+- npm run build : PASS
+- node --check electron.cjs : PASS
+- node --check preload.cjs : PASS
+
+Open items / things NOT changed in scope
+----------------------------------------
+- handleReply / handleReplyAll / handleForward in QMailDashboard
+  capture `selectedEmail` at click time. If the user clicks Reply
+  before the post-select getEmailById merge completes, the quoted
+  body uses the 100-char preview rather than the full message.
+  This is a pre-existing race outside Batch 6 scope; flagged for
+  follow-up.
+- handleForward does not run convertSnToEmail on a numeric senderEmail,
+  so the forwarded header can show a bare serial number instead of a
+  resolved address. Pre-existing; not Batch 6.
+- loadDraftIntoCompose in ComposeModal is dead code (defined but never
+  called). Left alone to avoid scope creep.
+- No new ESLint baseline categories introduced; existing prop-types /
+  no-unused-vars noise remains as flagged in gpt.usability.batch6.review.
+
+Next steps
+----------
+Per Phase 1 plan, Batch 7 is next: FIX-15 + FIX-15b (durable Sign Out
+and re-entry). These must ship together.

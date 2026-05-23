@@ -1,0 +1,266 @@
+gpt feedback on opu QMail-GUI usability fix plan
+Date: 2026-05-21
+Reviewer prefix: gpt
+Reviewed plan:
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt
+
+Summary
+=======
+The plan is directionally sound. The phase structure, explicit file targets,
+edge cases, and manual verification steps make it much more executable than a
+flat findings list. I agree with the first-order priorities: pending download
+hydration, identity/profile truthfulness, draft hydration, Sent persistence,
+attachments, dead controls, and the account/status cleanup.
+
+I would accept the plan with revisions. The main changes needed are:
+
+  - Separate truly GUI-only work from backend/product-contract work more
+    strictly.
+  - Tighten identity data flow through App -> QMail -> QMailDashboard.
+  - Avoid mutating API calls as health checks.
+  - Clarify a few tickets where the proposed implementation and current code
+    shape do not line up.
+  - Add build/lint and a small regression checklist to each shipped phase.
+
+High-impact feedback
+====================
+
+1. FIX-03 needs to include the missing App/QMail data path.
+
+   The plan says QMailDashboard should seed userAccount from the imported
+   identity, but App.jsx currently renders:
+
+     <QMail />
+
+   and QMail.jsx renders:
+
+     <QMailDashboard />
+
+   So provisioningData/initValues will still be dropped unless the ticket also
+   changes App.jsx and QMail.jsx to pass the identity through. This is not just
+   a cleanup detail; it is required for FIX-03 to work.
+
+   Also, getIdentity() does not return email_address or pretty_address. It
+   returns fields such as address, serial_number, registered, and a nested
+   identity object. Add a small normalizeIdentityForUi() helper or normalize in
+   one place before passing data to WalletSetupScreen, QMailDashboard, and
+   AccountPane.
+
+   One more product decision belongs here: current App.jsx sends every
+   configured identity to SERVICES.PROVISIONING on startup. If WalletSetupScreen
+   is only a first-run screen, returning users should probably go straight to
+   QMail after identity restore.
+
+2. FIX-02 attachment picker should use the existing preload namespace.
+
+   preload.cjs already exposes window.electronAPI. The plan proposes adding
+   window.qmail.pickAttachments. That creates a second renderer bridge for no
+   benefit. Prefer:
+
+     window.electronAPI.pickAttachments()
+
+   and expose it from preload.cjs through the existing contextBridge object.
+
+   The IPC handler should return objects, not just paths:
+
+     { path, name, size }
+
+   dialog.showOpenDialog only returns file paths. If the UI wants size chips,
+   electron.cjs should stat the selected files in the main process and return
+   size there. Also handle canceled dialogs explicitly and keep the browser
+   fallback disabled as the plan says.
+
+   I would consider making attachments Phase 0B or Phase 1. It is important,
+   but it touches Electron, preload, renderer, packaged build behavior, and
+   backend filesystem access. That is higher risk than the other Phase 0
+   tickets.
+
+3. FIX-04 draft hydration currently describes two different UI models.
+
+   The plan says:
+
+     - Do not open ComposeModal immediately.
+     - Then show a spinner inside ComposeModal while loadingDraft is true.
+
+   Pick one model. The smaller change is to hydrate in QMailDashboard before
+   opening ComposeModal, show a dashboard/list-level loading state, and only
+   mount ComposeModal once the full draft is available. If the spinner should
+   live inside ComposeModal, move the fetch into ComposeModal and pass only the
+   draft id. Mixing both patterns will create awkward state and makes it easier
+   to allow editing before hydration finishes.
+
+   Also, the "delete original draft after successful send" part depends on a
+   real deleteDraft endpoint/helper. That should be made explicit as a
+   dependency, not assumed.
+
+4. FIX-05 should not use version-check as service health.
+
+   checkVersion() calls /api/system/version-check and is currently used for
+   update availability. It is not a service-health source. For AccountPane
+   health, either remove the duplicate section or derive the display from
+   getServers()/raida echo plus /api/qmail/local/status. If a version string is
+   useful, show it as version metadata, not as the authority for healthy vs
+   degraded.
+
+5. FIX-10 must not call the heal endpoint as a dry-run unless backend guarantees
+   that mode.
+
+   POST /api/qmail/raida/identity/heal is a mutating endpoint by name and by
+   current usage. The plan says to call it in dry-run mode "if the backend
+   supports it." That support should be a hard prerequisite, not an optional
+   implementation detail. Until CORE-F exists, drive the warning only from a
+   non-mutating identity-health field or hide the banner rather than guessing
+   from wallet fracked counts.
+
+6. FIX-11 subject_hint is a product/security contract, not just a UI fix.
+
+   Adding a sender-provided subject_hint may be useful, but it changes the
+   privacy semantics of encrypted mail because a pre-download subject hint is
+   intentionally visible. Treat this as a backend/product decision. In the GUI
+   now, improve pending-row distinction with safe existing metadata such as
+   sender SN, timestamp, notification id/guid, or arrival order.
+
+7. FIX-14 "Empty Trash" cannot delete only the visible page.
+
+   The proposed client-side loop over current trash items is acceptable only if
+   the button says "Delete visible messages." If the UI says "Empty Trash", it
+   must either page through all trash results or call a backend batch endpoint.
+   Otherwise users with more than one page of trash will see a false success.
+
+8. FIX-15 needs an explicit session model.
+
+   AccountPane cannot call setSelectedService today without a new prop path:
+
+     App -> QMail -> QMailDashboard -> AccountPane
+
+   Also decide whether Sign Out is session-only or persistent. A session-only
+   sign out will be undone on restart because App.checkIdentity() will find the
+   identity and auto-enter provisioning/QMail again. If durable sign-out is
+   expected, add a local "skip auto restore" flag and clear it when the user
+   imports/proceeds again. If not, label it honestly as "Return to start screen"
+   or similar.
+
+Medium-impact feedback
+======================
+
+9. FIX-06 and FIX-07 should use an explicit compose mode.
+
+   Rather than overloading replyTo with a "forward variant", add a small
+   composeContext object:
+
+     { mode: "new" | "reply" | "replyAll" | "forward", sourceEmail }
+
+   ComposeModal can then derive subject/body/recipient behavior from mode. This
+   reduces branching bugs as Forward, Reply All, and draft editing start to
+   share the same modal.
+
+10. FIX-07 Reply All depends on full recipient data.
+
+   The plan should say where To/Cc/Bcc come from. If the local DB row does not
+   include complete recipient lists, Reply All should be hidden or degraded to
+   Reply with an explanation. Own-address filtering should compare every form
+   the app uses: serial number, address, auto_address, and pretty/display
+   address where applicable.
+
+11. FIX-08 is primarily CORE-A, not a GUI ticket.
+
+   The plan correctly flags Sent persistence as backend-heavy, but it still
+   places the ticket in the GUI iteration. Treat the GUI part as an acceptance
+   check until CORE-A is implemented. Do not create fake Sent rows in the GUI
+   unless the backend explicitly provides a supported local persistence API for
+   that.
+
+12. FIX-09 should not add duplicate contact fields.
+
+   AddContactModal already asks for an email address. Rework that input into
+   "QMail address or serial number" rather than adding a third field with
+   overlapping meaning. If reverse lookup is unavailable, the first shippable
+   version should require serial number and clearly say so. Otherwise the modal
+   will still create invalid contacts.
+
+13. FIX-17 toast preview should be based on pending notifications when possible.
+
+   Fetching latest inbox row after mailCounts grows may miss the actual new
+   item if the message is still pending/encrypted and not yet in the inbox DB
+   list. Prefer using getMailNotifications() data for pending mail, and use
+   getMailList('inbox', 1, 0, 'newest') only for already-downloaded rows.
+
+14. FIX-18 Starred likely needs backend support.
+
+   The preferred model, "Starred is a virtual view backed by is_starred", is the
+   right UX. But if /db/messages/list cannot filter by starred=true, the GUI
+   cannot implement it correctly across pagination by local filtering. Add a
+   backend dependency for a starred list/filter endpoint or accept the less
+   ideal folder model until that exists.
+
+15. FIX-20 should standardize beacon semantics.
+
+   qmailApiServices.pingQMail() currently calls GET /qmail/net/beacon/peek.
+   The plan alternates between POST /beacon/ping and GET /beacon/peek. Pick one
+   based on backend semantics:
+
+     - Check Mail now: likely POST /api/qmail/net/beacon/ping if it actively
+       asks RAIDA for new tells.
+     - Inspect current pending state: GET /api/qmail/net/beacon/peek.
+
+   Then name the helper accordingly.
+
+16. FIX-23 should be blocked until a deleteDraft contract is confirmed.
+
+   The plan names POST /api/qmail/db/drafts/delete?email_id=..., but the current
+   GUI service file has create/update/list only. If the backend endpoint exists,
+   add the helper. If it does not, this belongs in backend tickets. Do not
+   simulate draft deletion by overwriting the draft with empty fields.
+
+17. FIX-31 has ComposeModal fallout.
+
+   Removing getParityServer() is correct, but ComposeModal.checkNetworkStatus()
+   currently calls it as part of send preflight. The plan should tie parity
+   removal to the send-gating ticket so ComposeModal is not left importing a
+   deleted helper.
+
+Sequencing recommendation
+=========================
+I would slightly revise the phase order:
+
+  Phase 0A:
+    FIX-01 pending download hydration
+    FIX-03 identity propagation and John Doe removal path
+    FIX-04 draft hydration, without draft delete unless endpoint exists
+    FIX-05 remove or correct static healthy AccountPane status
+    FIX-16 hide dead AccountPane controls
+
+  Phase 0B:
+    FIX-02 attachment picker, because it touches Electron/preload/package
+    behavior
+    FIX-13 import error messages
+    FIX-35/FIX-36/FIX-37 small onboarding copy/setup feedback fixes
+
+  Phase 1:
+    Forward, Reply All, Empty Trash, Sign Out, contact schema, send gating, and
+    notification/actionability improvements.
+
+  Backend-dependent track:
+    Sent persistence, new identity creation, reverse SN lookup, subject_hint,
+    identity health, starred filter, and draft delete.
+
+Verification additions
+======================
+The manual verification steps are good. Add these to every phase:
+
+  - npm run build
+  - npm run lint, if the current lint baseline is expected to pass
+  - Electron smoke test for any ticket touching electron.cjs or preload.cjs
+  - Browser/Vite smoke test for any ticket with a disabled Electron-only path
+
+For Phase 0, also verify returning-user startup. The current code can route a
+configured identity to WalletSetupScreen every launch; if that is changed, it
+needs a regression check.
+
+Final recommendation
+====================
+Use the plan, but revise it before implementation. The strongest parts are the
+pending-message, identity, draft, AccountPane, and dead-control tickets. The
+riskiest parts are attachment IPC, identity-health detection, Sent persistence,
+subject hints, Starred virtual view, and draft deletion because they either
+cross process/backend boundaries or need product semantics decided first.

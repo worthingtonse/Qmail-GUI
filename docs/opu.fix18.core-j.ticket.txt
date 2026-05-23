@@ -1,0 +1,385 @@
+FIX-18 / CORE-J — Starred filter on the messages list endpoint
+================================================================
+Author: Claude Opus 4.7 (Phase 3 reviewer)
+Date:   2026-05-23
+Status: OPEN — backend work required before GUI can ship the Starred view.
+
+Audience
+--------
+- Backend owner (rest_core / qmail_db).
+- Phase 3+ GUI implementer who will land the Starred view once
+  the backend ships.
+
+This is a focused review/spec doc for one ticket. The high-level
+plan is in docs\opu.usability.fix.plan.txt — search for "FIX-18"
+and "CORE-J." This file documents the contract more precisely
+than the plan, lists the GUI-side patch waiting on the backend,
+and records the diagnostic walk that turned "FIX-18 looked
+unblocked" into "FIX-18 still needs CORE-J."
+
+
+TL;DR
+-----
+1. Today the backend exposes TWO completely separate "Starred"
+   concepts:
+     (a) `is_starred` — a per-row column. Toggled by /qmail/star.
+         Independent of folder. This is what the star icon does.
+     (b) `folder=4` — a folder integer 0-5. Set only by an
+         explicit Move action. NOT touched by /qmail/star.
+   The list endpoint /api/qmail/db/messages/list?folder=4 returns
+   rows whose `folder` column is 4 — NOT rows whose `is_starred`
+   flag is set.
+
+2. "Show me my starred mail" needs the cross-folder is_starred=1
+   query, which no SQL or HTTP path currently exposes.
+
+3. We are asking the backend to add an optional `starred=true`
+   filter param to /api/qmail/db/messages/list. Cross-folder.
+
+4. While that's pending, the GUI removes "Move to Starred" from
+   the ReadingPane Move dropdown so the existing UX doesn't lie
+   to users about how Star works. The star icon stays as the
+   canonical action.
+
+The recommended approach is Option A (additive filter param).
+Option B (repurpose folder=4 to mean "is_starred=1") would also
+work but is invasive — see the Rejected Alternatives section.
+
+
+Diagnostic walk (what I learned grepping rest_core)
+---------------------------------------------------
+Files inspected:
+  D:\Code\src\C\rest_core\api_src\api_handlers_qmail_inbox.c
+  D:\Code\src\C\rest_core\api_src\api_handlers_qmail_folders.c
+  D:\Code\src\C\rest_core\src\qmail\qmail_db.c
+  D:\Code\src\JavaScript\Qmail-GUI\src\api\qmailApiServices.js
+
+1. /api/qmail/db/messages/list routes to api_handle_qmail_inbox
+   (api_handlers.c:108) which accepts folder, limit, offset, sort.
+
+2. api_handle_qmail_inbox parses sort=newest|unread|fee|starred
+   (inbox.c:36-41). sort=starred orders the CURRENT folder by
+   is_starred DESC, received_timestamp DESC. It does NOT filter
+   across folders.
+
+3. qmail_db_email_list_sorted (qmail_db.c:915-998) hard-codes
+   the WHERE clause:
+     WHERE folder = ? AND is_trashed = (0 or 1)
+   No is_starred condition. No way to express "any folder."
+
+4. The star endpoint /api/qmail/star sets is_starred via
+   qmail_db_email_mark_star (qmail_db.c:812-830):
+     UPDATE qmail_emails SET is_starred = ? WHERE email_id = ?
+   It does NOT touch the folder column. So the row stays in
+   whatever folder it was in.
+
+5. The move endpoint /api/qmail/move sets folder via
+   qmail_db_email_move. It does NOT touch is_starred. So
+   moving to folder=4 puts a row "in Starred" by folder, but
+   leaves is_starred=0.
+
+6. Both /folders/list and /folders/counts already enumerate
+   `starred` as folder index 4 alongside the other five
+   (folders.c:39, 92). The folder index 4 is real and the GUI
+   has been ready to render it for some time
+   (NavigationPane.jsx:31,45; QMailDashboard.jsx:1632).
+   It just hasn't had useful contents.
+
+So the surface area that LOOKS like it should make starred work
+is mostly built — but the SQL and the route handler don't have a
+way to ask "give me all rows where is_starred=1, regardless of
+folder." That's the gap CORE-J needs to fill.
+
+
+Proposed contract — Option A (recommended)
+------------------------------------------
+Endpoint:
+  GET /api/qmail/db/messages/list
+
+Existing params unchanged:
+  folder  int    0-5     (optional when starred=true; see below)
+  limit   int    1-200   default 50
+  offset  int    0+      default 0
+  sort    string         newest | unread | fee | starred
+
+New param:
+  starred boolean        true | false
+                         When omitted or false: existing behavior.
+                         When true: filter is_starred=1 cross-folder.
+
+Behavior when starred=true:
+  - WHERE clause becomes:
+      is_starred = 1 AND is_trashed = 0
+    (and OPTIONALLY:  AND folder = ? if the GUI passed one)
+  - `folder` becomes optional. If absent, all non-trash folders
+    are scanned. If present and valid, results are scoped to
+    that folder AND is_starred=1.
+  - sort respects the existing modes; sort=starred under
+    starred=true is redundant but should not error.
+  - Response shape unchanged — same { emails, count, folder,
+    limit, offset, total_in_folder, unread_count } shape.
+      * `folder` in the response is the requested folder if one
+        was passed; if folder was omitted, return -1 or omit the
+        key. The GUI will treat a missing/-1 folder as the
+        cross-folder Starred view.
+      * `total_in_folder` becomes "total starred rows across all
+        non-trash folders" when folder was omitted. The field
+        name is a bit awkward — see Naming below.
+
+What "Starred" means going forward:
+  - Star icon (existing): toggles is_starred. SOLE canonical
+    action for "this message is starred."
+  - Starred nav entry (new behavior): filters by is_starred=1
+    cross-folder. NOT a literal folder.
+  - Move dropdown: no longer offers "Starred." (The GUI-side
+    change in this batch removes it.) folder=4 stops being a
+    user-facing concept.
+
+What to do with existing rows where folder=4:
+  Migration question for the backend owner. Two reasonable
+  paths:
+    (i)  Leave them alone. They're invisible until they're
+         opened, moved, or starred. Worst case they're a small
+         amount of stranded data.
+    (ii) One-shot migration on schema upgrade: for every row
+         where folder=4, set is_starred=1 and move it back to
+         its previous folder. Requires either remembering the
+         pre-move folder (we don't) or defaulting to inbox.
+  Recommendation: (i). The risk of mis-attributing a row to
+  "inbox" when the user explicitly moved it to "Starred" is
+  worse than leaving 0-5 stranded rows that the user can clean
+  up themselves once the new UI lands.
+
+Naming for the response field when folder is omitted:
+  Three options:
+    (1) Keep `total_in_folder`. It's slightly inaccurate but the
+        GUI already reads from it. Lowest churn.
+    (2) Add a new key `total_matching` that mirrors
+        `total_in_folder` semantics under starred=true. GUI
+        prefers it if present, falls back to total_in_folder.
+    (3) Rename `total_in_folder` → `total_matching` everywhere.
+        Breaks every existing client.
+  Recommendation: (1). The semantic drift is small.
+
+SQL sketch:
+  Replace qmail_db_email_list_sorted's hard-coded WHERE with a
+  predicate builder. Pseudocode:
+
+    char where[256];
+    int  p = 0;
+
+    /* is_trashed handling stays the same — folder=3 means
+     * trashed, otherwise non-trashed. */
+    if (folder_filter == 3) {
+        p += snprintf(where + p, sizeof(where) - p,
+                      "is_trashed = 1");
+    } else {
+        p += snprintf(where + p, sizeof(where) - p,
+                      "is_trashed = 0");
+    }
+
+    if (starred_filter) {
+        p += snprintf(where + p, sizeof(where) - p,
+                      " AND is_starred = 1");
+    }
+
+    if (folder_filter >= 0 && folder_filter != 3) {
+        p += snprintf(where + p, sizeof(where) - p,
+                      " AND folder = ?");
+    }
+
+  Bind only what you used.
+
+  Count query gets the same WHERE.
+
+Auth / scope:
+  No new auth surface. Inherits whatever protects the existing
+  list endpoint.
+
+Error cases (return HTTP 400):
+  - starred is present but not parseable as a boolean.
+  - folder is out of range AND starred is not true. (When
+    starred is true, folder being absent or invalid is
+    permitted — treated as "any folder.")
+
+
+Rejected alternatives
+---------------------
+Option B — Repurpose folder=4
+  Change qmail_db_email_list_sorted(folder=4) to mean
+  "is_starred=1 across all folders." Change /qmail/move to
+  set is_starred=1 when folder=4 is passed. Change /qmail/star
+  to keep working as-is.
+
+  Why this was rejected:
+  - Two endpoints converge on one column from different
+    directions: /qmail/star and /qmail/move both writing
+    is_starred. Maintainable if disciplined, brittle in
+    practice.
+  - Any client (today or future) that passes folder=4 expecting
+    a real folder gets surprising behavior.
+  - The folder ENUM in the response still ships folder=4 for
+    rows that have been moved there — those rows now disappear
+    from the response (because they're filtered by is_starred,
+    not folder). Data exists in the DB but is no longer
+    returned by any endpoint.
+  - Migration is messy. See Option A's discussion of folder=4
+    rows.
+
+  Option B IS simpler from the GUI side: no new param. But the
+  cleanup work on the backend is more invasive than Option A's
+  additive filter.
+
+Option C — Dedicated /qmail/db/messages/starred endpoint
+  Mirror /qmail/db/messages/list but with a hard-coded
+  is_starred=1 predicate. Same limit/offset/sort.
+
+  Why this was rejected:
+  - Doubles the surface area for what is fundamentally one
+    predicate.
+  - Forces the GUI to special-case the URL based on which view
+    is active. The Option A approach lets getMailList stay a
+    single function.
+
+  Option C is fine if Option A is rejected for orthogonal
+  reasons. Not the preferred shape.
+
+
+GUI-side patch (ready to land once Option A ships)
+--------------------------------------------------
+This is small. Three files.
+
+src/api/qmailApiServices.js
+  - Extend getMailList signature with an optional starred flag:
+      export const getMailList = async (
+        folder = "inbox",
+        limit = 50,
+        offset = 0,
+        sort = "newest",
+        starred = false,
+      ) => { ... }
+  - When starred is truthy, append &starred=true to the URL.
+  - When starred is truthy AND folder is the literal string
+    "starred", OMIT &folder=... from the URL so the backend
+    interprets it as cross-folder. (Or pass folder=0; the
+    backend will still apply is_starred=1.)
+  - Response transform unchanged. emails[].folder already comes
+    back from the row's own folder column.
+
+src/qmail/screens/QMailDashboard.jsx
+  - In loadEmails, when folder === "starred", switch to the
+    starred-filter mode:
+        const result = await getMailList(
+          "starred", EMAILS_PER_PAGE, offset, sortMode, true,
+        );
+  - The transform at line 565-602 (folder-list branch) stays
+    the same — but the `folder` field on each emails[] row
+    comes from the BACKEND row, not from the "starred" view
+    name, because in the Starred view a row's true folder is
+    still inbox/sent/archive/etc. The existing code at line
+    600 sets `folder: folder` (the requested folder, not the
+    row's folder). Change to:
+        folder: email.folder != null
+          ? folderIdToName(email.folder)
+          : folder
+  - The same fix is needed in handleSortChange (line 657-679).
+  - isTrashed gate at line 588-590 / 601 stays correct — the
+    backend filters is_trashed=0 so no trash rows arrive in
+    the Starred view.
+  - INITIAL_MAIL_COUNTS (line 97-102) should add starred and
+    archive:
+        starred: { unread: 0, total: 0 },
+        archive: { unread: 0, total: 0 },
+    The backend's /folders/counts already ships these; the
+    INITIAL_MAIL_COUNTS map is just the SSR/empty-state seed.
+
+src/qmail/screens/ReadingPane.jsx (this batch — interim)
+  - Remove the { value: "starred", label: "Starred" } entry
+    from moveOptions. Star icon stays the canonical action.
+  - This is the "until-CORE-J" GUI cleanup specified in
+    opu.usability.fix.plan.txt FIX-18.
+
+src/qmail/screens/QMailDashboard.jsx (this batch — interim)
+  - Fallback folders array at line 450-455 (when /folders/list
+    fails) is currently inbox/sent/drafts/trash only. Optional
+    cleanup: leave the fallback alone — adding "starred" and
+    "archive" to the fallback is only relevant if the backend
+    list call fails AND the user navigates around, which is
+    very rare. Defer to ship-gate.
+
+Estimated effort for the after-CORE-J patch:
+  ~30 LOC of net new logic + a small test of the empty-starred-
+  list case (which previously was inhabited only by folder=4
+  rows). Probably one batch in the FIX-18 dedicated patch.
+
+
+Verification (after Option A ships)
+-----------------------------------
+Manual checks against a live backend:
+
+  1. Star a message from inbox via the star icon. Confirm:
+       - The row in inbox now has a filled star.
+       - Navigating to Starred shows that row.
+       - The row's "folder" badge in the Starred view still
+         says "inbox" (or whatever its actual folder is).
+       - Unstarring removes it from the Starred view but keeps
+         it in inbox.
+
+  2. Star messages across multiple folders (inbox, sent,
+     archive). Navigating to Starred shows all of them with
+     correct folder badges.
+
+  3. Send a message to trash, then star it from the trash
+     view (if the UI permits). Confirm it does NOT appear in
+     the Starred view (because is_trashed=1 filters it out).
+     If the UI doesn't permit starring from trash, that's also
+     fine — note it as a follow-up.
+
+  4. Pagination: star >50 messages. Confirm page 1 shows the
+     first 50, page 2 shows the next batch, total count matches.
+
+  5. Sort: change sort mode while in the Starred view.
+       - sort=newest      — chronological.
+       - sort=unread      — unread first.
+       - sort=fee         — highest fee first.
+       - sort=starred     — redundant but should not error;
+                            ordering by is_starred DESC when
+                            every row has is_starred=1 is a no-op.
+
+  6. Move dropdown no longer shows Starred (post-batch).
+     The star icon is the only star action.
+
+  7. /folders/counts.starred — does it report cross-folder
+     is_starred=1, or rows where folder=4? This file does NOT
+     spec a change to the counts endpoint. After Option A
+     ships, the GUI's mailCounts.starred badge will reflect
+     whatever the counts endpoint returns. If the backend
+     owner wants Mail Counts to follow the is_starred=1
+     semantics too, that's a one-line follow-up — flag it in
+     the same patch.
+
+
+Schedule
+--------
+- This file documents the contract.
+- The interim GUI cleanup (Move-to-Starred removed from the
+  ReadingPane dropdown) lands as part of the same batch that
+  ships this doc.
+- The full Starred view ships after Option A.
+- No timeline commitment. CORE-J is HARD per the original
+  plan, but the implementation is genuinely small — one SQL
+  predicate change + one param parse + one optional-folder
+  validation tweak. Maybe a day of backend work plus tests.
+
+
+Files touched by this batch (GUI-side, interim cleanup)
+------------------------------------------------------
+- src/qmail/screens/ReadingPane.jsx — remove Starred from
+  moveOptions.
+- docs/opu.fix18.core-j.ticket.txt — this file (new).
+- docs/opu.usability.fix.plan.txt — refresh the FIX-18 +
+  CORE-J entries to point here.
+
+No backend changes in this batch. CORE-J remains OPEN.
+
+End of file.

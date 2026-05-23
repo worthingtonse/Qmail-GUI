@@ -1,0 +1,447 @@
+Opus QMail-GUI Phase 3 handoff (reviewer perspective)
+Date: 2026-05-22
+Author: Claude Opus 4.7 — reviewer for Phase 2 Batches 10-14
+
+Purpose
+-------
+This handoff is for the next Opus session after context is cleared.
+It complements gpt.phase3.handoff.txt (the implementer's handoff,
+written the same day) by recording the REVIEWER-side insights that
+would be lost otherwise:
+
+  - which Batch 10-14 review judgments are mine vs. spec-mandated,
+  - the BUG-37..48 ledger I authored (so next-session can read it
+    without re-deriving),
+  - sequencing oddities + docs that are now stale,
+  - the docs-only follow-ups I recommended but did not execute,
+  - reviewer-perspective gotchas that I observed but GPT didn't.
+
+Read gpt.phase3.handoff.txt FIRST. That covers tickets, batches,
+backend dependencies, and the implementer's preferred Phase 3
+batch order. This file does NOT re-state that material — it adds
+to it.
+
+Project root: D:\Code\src\JavaScript\Qmail-GUI\
+
+Master plan source of truth:
+  docs\opu.usability.fix.plan.txt
+
+Phase 3 backlog extract (FIX-38 .. FIX-47):
+  Inline in opu.usability.fix.plan.txt lines 1377-1424. There is
+  NO dedicated opu.phase3.tickets.txt — only the master-plan
+  block. If a tickets extract is helpful, that's a good first
+  small task in the next session.
+
+
+Phase 2 Status Snapshot
+-----------------------
+GUI-side: COMPLETE through Batch 14.
+
+Per-batch review verdicts (all APPROVED, no code fixes required):
+  Batch 10 — opu.usability.batch10.fixes.txt
+  Batch 11 — opu.usability.batch11.fixes.txt
+  Batch 12 — opu.usability.batch12.fixes.txt
+  Batch 13 — opu.usability.batch13.fixes.txt
+  Batch 14 — opu.usability.batch14.fixes.txt
+
+Verification gates run for every batch:
+  PASS  npm run build               (vite, ~2.1s, dist ~390 KB)
+  PASS  per-file ESLint (--max-warnings 0)
+  PASS  node --check electron.cjs + preload.cjs
+  Live-backend manual walk: NOT exercised in any review. Still
+  required before ship-gate signoff. See bottom of
+  opu.phase2.tickets.txt.
+
+Backend-blocked (do NOT ship GUI-only):
+  FIX-08 ↔ CORE-A  (Sent persistence)
+  FIX-10 ↔ CORE-F  (identity health)
+  FIX-18 ↔ CORE-J  (starred filter)         HARD
+  FIX-23 ↔ CORE-H  (deleteDraft)            HARD
+  FIX-26 ↔ CORE-E  (upload_and_tell stages) optional
+
+
+Documentation Stale State (act on these EARLY in next session)
+--------------------------------------------------------------
+These three docs disagree with the actual code state. Fix
+docs-only first to avoid wasted research later.
+
+1. BUG-32 (cla.bugs.txt line 798) is now FUNCTIONALLY RESOLVED.
+   FIX-28 (in-app delete-confirm + undo) landed across Batch 13
+   (JSX) and Batch 14 (CSS). The BUG-32 entry still describes
+   the window.confirm symptom as if it were live.
+   ACTION: append a "STATUS: RESOLVED (Batch 13+14, FIX-28)"
+   line to BUG-32. Do NOT delete it — keep the historical
+   record.
+
+2. opu.phase2.tickets.txt (line 72-75) lists Batch 14 as
+   "FIX-28 ... Standalone or foldable into Batch 13 if the
+   reviewer is willing." That foldable-into-13 prediction came
+   true in practice: the JSX shipped in Batch 13's ContactsPane
+   changes (ContactsPane.jsx mtime 22:21:14 on 2026-05-22) and
+   the CSS shipped in Batch 14 (ContactsPane.css mtime
+   22:25:18). The Batch 13 summary's "Notes" section
+   incorrectly claimed window.confirm remained.
+   ACTION: add a single closing line to opu.phase2.tickets.txt
+   noting that FIX-28 split across Batch 13 (JSX) + Batch 14
+   (CSS) and is now complete.
+
+3. gpt.usability.batch13.summary.txt "Notes" section: the line
+   "A scan still finds window.confirm in ContactsPane delete..."
+   is wrong. Grep confirms zero window.confirm in src\. Do NOT
+   edit the GPT summary in-place (it's the implementer's
+   record); just be aware when reading it.
+
+
+BUG-37 .. BUG-48 — Reviewer Bug Ledger
+--------------------------------------
+All entries live in docs\cla.bugs.txt with grep-able BUG-NN
+headers. Severities: all LOW or INFO. None block Phase 2 ship.
+Several are good candidates for Phase 3 batches.
+
+  Severity legend used: LOW = polish / hygiene; INFO = no-action
+  / process-and-docs only.
+
+  BUG-37  LOW   ComposeModal.jsx handleSaveDraft dedented to col 0
+                 with a duplicated // Smart draft save/update
+                 comment. Pre-dates Batch 10. Fold into the next
+                 ComposeModal touch (BATCH 16 candidate per GPT's
+                 ordering).
+
+  BUG-38  LOW   Network-warning Retry button's spinning className
+                 is unreachable (`canSend === null` never holds
+                 while `canSend === false` gates the banner).
+                 Functional, just no spinner feedback during the
+                 recheck. Suggested fix: change wrapper guard or
+                 keep the banner visible during recheck.
+
+  BUG-39  LOW   ReadingPane Mark Unread button is unconditional;
+                 click on an already-unread message is a no-op
+                 but a misleading affordance. Becomes louder once
+                 the unified notification system fires a "Marked
+                 as unread" toast for an already-unread message.
+                 Suggested fix: gate on email.isRead.
+
+  BUG-40  LOW   Inbox view shows BOTH the dedicated Archive
+                 button AND "Archive" in the Move-to... dropdown.
+                 Two paths for the same action. Suggested fix:
+                 filter "archive" out of moveOptions when the
+                 button is rendered.
+
+  BUG-41  LOW   Refresh chain double-notifies on loadEmails
+                 failure: loadEmails emits its own "Failed to
+                 load emails" error toast (pre-existing), and
+                 handleRefresh also emits the aggregate
+                 "Refresh completed with some service errors."
+                 warning. Other refresh steps don't double-emit.
+                 Suggested fix: silent opt-in arg on loadEmails.
+
+  BUG-42  LOW   pingQMail backwards-compat alias has zero
+                 callers in src\. GPT's Batch 12 summary
+                 explicitly kept it intentionally; project
+                 conventions discourage backwards-compat shims.
+                 SEE FIX-47 — this is exactly the question that
+                 ticket addresses. Resolve as part of FIX-47.
+
+  BUG-43  LOW   markSendFailed routes the client-side
+                 "Please provide at least one valid recipient
+                 address." throw through onSendFailure → dashboard
+                 error toast. Result: double-notification (red
+                 modal banner + dashboard toast) for a pure
+                 validation error while the modal is still open.
+                 Edge case (user typed only commas / whitespace).
+                 Suggested fix: move parseEmailList result check
+                 into the pre-isSending validation block at the
+                 top of handleSend.
+
+  BUG-44  LOW   DRD "Add to My Contacts" saved-state is
+                 component-local. Lost on remount, so the check
+                 icon disappears even when the contact is
+                 persisted. Suggested fix: derive
+                 isSavedDrdContact from the contacts list itself
+                 (the data is already loaded). Also fixes the
+                 inverse: deleting a contact via the FIX-28 modal
+                 will correctly re-enable the DRD "Add" button on
+                 next view.
+
+  BUG-45  INFO  Batch 13 incidentally shipped FIX-28 (JSX); Batch
+                 14 completed it (CSS). The Batch 13 summary's
+                 "Notes" section is wrong about window.confirm.
+                 Resolution: docs-only — see "Documentation
+                 Stale State" section above.
+
+  BUG-46  LOW   Search "Showing top 50 results" notice
+                 false-positives when there are exactly 50 actual
+                 matches. Spec-acknowledged; blocked on CORE-K
+                 (search pagination). No fix until then.
+
+  BUG-47  LOW   ContactsPane undo-notification onClick closure
+                 calls restoreDeletedContact → loadContacts →
+                 setContacts. If the user navigates away from
+                 ContactsPane within the 10s undo window and
+                 clicks Undo, setContacts fires on an unmounted
+                 component. React 18 silently drops it.
+                 Functional (contact IS restored), cosmetic noise
+                 only. Suggested fix: skip local loadContacts;
+                 next mount-time fetch picks it up.
+
+  BUG-48  LOW   ContactsPane delete-flow uses local
+                 deleteContactError + inline modal display while
+                 every other error path post-FIX-34 uses
+                 showError() from NotificationProvider.
+                 Inconsistent. Defensible inline-keeps-user-in-
+                 context choice. Decision-only fix: either route
+                 through showError + close modal, OR add a
+                 one-line comment explaining the exception.
+
+
+Cross-Reference: BUGS → Phase 3 Tickets
+---------------------------------------
+Several BUG-NN entries map naturally to existing Phase 3
+tickets. Picking these up satisfies BOTH the ticket and the
+bug. Bias toward this approach during Phase 3 to keep the
+ledger from growing.
+
+  FIX-38 (page reset before API call)  → no BUG mapping.
+  FIX-39 (compose autosave)            → no BUG mapping.
+                                          NOTE: BUG-37 (handle-
+                                          SaveDraft indentation)
+                                          is in the same file
+                                          and can be quietly
+                                          fixed in passing —
+                                          ComposeModal opens for
+                                          this ticket.
+  FIX-40 (persist showAdvanced)        → no BUG mapping.
+  FIX-41 (CC/BCC autocomplete)         → no BUG mapping.
+                                          Spec dependency: FIX-09
+                                          schema already shipped
+                                          Phase 1.
+  FIX-42 (SN ↔ email lookup)           → BUG-44 logic adjacent
+                                          (both compare contact
+                                          fields to determine
+                                          "already present" — if
+                                          FIX-42 builds a
+                                          normalize-and-compare
+                                          helper, reuse it for
+                                          BUG-44).
+  FIX-43 (folder-icons default map)    → no BUG mapping.
+  FIX-44 (pageSize as prop)            → no BUG mapping.
+  FIX-45 (rename balance-card classes) → no BUG mapping.
+  FIX-46 (italic empty-body placeholder) → no BUG mapping.
+  FIX-47 (pingQMail decision)          → BUG-42. SAME issue.
+                                          Resolve together.
+
+
+BUGs to bundle with each batch (recommended)
+--------------------------------------------
+Aligns with GPT's recommended batch order (Batch 15-17):
+
+  Batch 15 (list / dashboard polish):
+    FIX-38, FIX-44, FIX-46, FIX-47
+    + BUG-42 (resolved by FIX-47)
+    + BUG-41 (loadEmails double-toast — Refresh-chain neighbor)
+    + BUG-39 (ReadingPane Mark Unread gating — small)
+    + BUG-40 (Archive dropdown filter — small)
+
+  Batch 16 (compose polish):
+    FIX-39, FIX-40, FIX-41
+    + BUG-37 (handleSaveDraft indentation — quietly while in file)
+    + BUG-38 (network-warning Retry visibility — small)
+    + BUG-43 (markSendFailed validation-throw routing — small)
+
+  Batch 17 (contacts / nav / account):
+    FIX-42, FIX-43, FIX-45
+    + BUG-44 (DRD saved-state — natural fit with FIX-42 helper)
+    + BUG-47 (undo onClick after unmount — natural fit)
+    + BUG-48 (delete-error pattern — decision-only)
+
+  Leave open until backend lands:
+    BUG-46 (waits on CORE-K).
+
+This bundling keeps each Phase 3 batch a self-contained file
+sweep instead of scattered touches.
+
+
+Reviewer-Perspective Gotchas For Phase 3
+----------------------------------------
+Things I noticed across the five-batch review that aren't in
+GPT's handoff and would bite the next reviewer/implementer:
+
+1. ComposeModal.jsx is 1300+ lines and STILL has stale commented
+   code (the old handleSend at lines 631-718). FIX-39 (autosave)
+   will touch this file heavily. Resist the temptation to delete
+   the commented block in the same patch — separate cleanup
+   commit if at all.
+
+2. The dashboard's showDashboardNotification() shim is the
+   correct entry point for ALL toast emissions from
+   QMailDashboard. Do NOT call addNotification directly from new
+   handlers — you'll bypass the clickable-payload translation
+   (targetPendingGuid → focusPendingMail; targetEmailId →
+   focusInboxEmail). FIX-17's clickable-pending-toast contract
+   is the most fragile cross-cutting concern in the app.
+
+3. NotificationProvider's addNotification signature is
+   (message, type, optionsOrDuration). The third arg accepts
+   either a number (legacy duration) OR an options object with
+   onClick / duration / timestamp / target*. Spread options
+   FIRST in the object literal (before id/message/type) so
+   callers can't override generated fields. Pattern is already
+   established — follow it.
+
+4. cancelledRef contract in ComposeModal handleSend MUST survive
+   any refactor. The send-poll loop has FIVE cancellation gates
+   (loop condition + after sleep + before onSend dispatch + at
+   loop exit + before fallback onSend). FIX-39 (autosave) is
+   parallel work but uses similar timer/cleanup logic — don't
+   confuse the two refs.
+
+5. ContactsPane has two distinct error states (`error` for
+   global pane errors, `deleteContactError` for in-modal delete
+   errors) and uses both `setError` and `showError(...)` from
+   useNotification. The pattern is inconsistent (see BUG-48).
+   Touch carefully.
+
+6. AccountPane's loading gate (line 273: `if (loading &&
+   raidaServers.length === 0) return spinner`) means the
+   Profile section's "Loading..." placeholder (FIX-30) is only
+   visible if RAIDA servers have ALREADY loaded but userAccount
+   hasn't. Sequence-sensitive — test against actual mount
+   timing if anyone files an "I never see Loading…" bug.
+
+7. EmailListPane's search-cap notice (FIX-25) renders ONLY when
+   searchQuery.trim() && searchResultCapHit && !isLoading.
+   Three-way guard exists because earlier prototypes flashed the
+   notice during in-flight searches. Don't simplify to a
+   two-way guard.
+
+8. The CONTACT delete payload is built BEFORE the destructive
+   delete (ContactsPane.jsx:261). This is intentional defensive
+   ordering — buildContactPayload calls resolveAddressOrSn which
+   can fail. Don't reorder, even though it looks like
+   premature work.
+
+9. NavigationPane gets a raidaEchoSnapshot from Refresh (Batch
+   12 wiring). If FIX-47 wires checkForNewMail back in or adds a
+   "last checked" indicator, that timestamp should come from the
+   SAME Refresh path — don't add a second network call.
+
+10. Repo-wide `npm run lint` STILL fails on baseline debt
+    (BUG-36). Use ONLY per-file lint as a Phase 3 gate. The
+    baseline includes wallet/, vite.config.js, SenderAvatar.jsx,
+    WalletSetupScreen.jsx, useGlassSounds.js.
+
+
+Theming Work — DELIBERATELY EXCLUDED
+------------------------------------
+There are three theme planning docs in docs\:
+  gem.theme.plan.txt    (2026-05-22 22:03)
+  gpt.theme.plan.txt    (2026-05-22 22:21)
+  opu.theme.plan.txt    (2026-05-22 23:04, 71 KB)
+  theme.status.txt      (2026-05-22 23:04)
+
+User instruction when reviewing Batch 13 (verbatim): "Note that
+we are planning on how to improving the theming but you do not
+have to worry about this now."
+
+Theming is OUT OF SCOPE for Phase 3 usability batches. If the
+next session is asked to do theming work, it's a separate
+workstream — read those four docs as the starting point, NOT the
+fix.plan.txt.
+
+
+Working Conventions (consolidated)
+----------------------------------
+- Default to no comments. Only when WHY is non-obvious.
+- normalizeIdentityForUi returns BOTH camelCase AND snake_case.
+- "Coming Soon" controls are visibly disabled, not silently
+  no-op'd.
+- Do NOT synthesize server state in the GUI.
+- Per-file ESLint is the lint gate. npm run lint is broken.
+- ContextRef + cancelledRef contracts must survive refactors —
+  these are the highest-blast-radius patterns.
+- Use the unified NotificationProvider (showError / showSuccess
+  / showInfo) for all new toasts. Use
+  QMailDashboard.showDashboardNotification when the toast
+  carries clickable-pending payloads.
+- Worktree has many dirty files — never reset/checkout/revert
+  unrelated files. Use focused git diff per touched file.
+
+
+Verification Commands (reproduce reviewer setup)
+------------------------------------------------
+  cd D:/Code/src/JavaScript/Qmail-GUI
+
+  npm run build
+
+  ./node_modules/.bin/eslint <touched.jsx> <touched.js> \
+    --report-unused-disable-directives --max-warnings 0
+
+  node --check electron.cjs
+  node --check preload.cjs
+
+  # git inspection (the worktree needs safe.directory):
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' status --short
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' diff --check
+
+
+Expected Output Pattern For Phase 3 Reviews
+-------------------------------------------
+Match the established Phase 2 review-file shape:
+
+  docs\opu.usability.batchN.fixes.txt
+
+Sections:
+  - Reviewed Files
+  - Verdict (APPROVED / fixes required, with note count)
+  - Spec Verification Checklist (per FIX in the batch)
+  - Build / Lint Status
+  - Reviewer-Focus Answers (responses to GPT's Reviewer Focus
+    notes, if any)
+  - Out-of-Scope Observations (BUG-NN logged in cla.bugs.txt)
+  - Regression Checklist (handoff/Phase 1+2 coverage)
+  - Next Target
+
+Out-of-scope bugs append to cla.bugs.txt with a new
+###############################################################################
+  PHASE 3 BATCH N APPENDIX (FIX-... )
+###############################################################################
+block. Next BUG number to use is BUG-49.
+
+
+Live Manual Verification Backlog
+--------------------------------
+NOT done in my reviews. Must run end-to-end before ship-gate.
+Lifted from opu.phase2.tickets.txt lines 396-432:
+
+  Compose / send: open + send + warning-with-Retry + Send anyway
+    + buttons stay disabled through 1500ms + flaky-network
+    retry + persistent failure surfaces in dashboard after close.
+
+  Reading-pane polish: dangerous attachment chip + tooltip +
+    confirm modal + filename preserved. Mark Unread toggles dot
+    back. Archive moves. No "John Doe" anywhere.
+
+  Network / notifications: Refresh runs the whole chain under
+    one spinner. One notification style across panes. Clickable
+    pending toast still focuses pending row.
+
+  Small UX: pending-mail manual decrypt. Search 50-hit notice.
+    DRD "Add to My Contacts" + autocomplete after. AccountPane
+    Server Details all 25. ContactsPane delete modal + undo.
+
+
+Next Session — Recommended Opening Moves
+----------------------------------------
+1. Read THIS file first (you wrote it — reviewer-side context).
+2. Read gpt.phase3.handoff.txt (implementer-side context).
+3. Apply the three docs-only fixes under "Documentation Stale
+   State" above (BUG-32 status line, Batch 14 closing line in
+   tickets file). Five-minute task.
+4. Walk the manual verification backlog OR start Phase 3
+   Batch 15 implementation per GPT's batch order.
+5. If implementing Batch 15: re-read the relevant BUG-NN
+   entries in cla.bugs.txt (BUG-39, 40, 41, 42 — see the
+   bundling section above) and fold them into the implementation
+   patches rather than logging more bugs.
+
+End of file.

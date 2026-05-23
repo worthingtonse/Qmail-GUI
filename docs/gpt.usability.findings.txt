@@ -1,0 +1,718 @@
+GPT QMail-GUI usability/API-completeness findings
+Date: 2026-05-21
+Model prefix used for filename: gpt
+
+Scope
+-----
+Reviewed the current QMail GUI source under:
+
+  D:\Code\src\JavaScript\Qmail-GUI\
+
+Primary files reviewed:
+
+  src\api\qmailApiServices.js
+  src\App.jsx
+  src\screens\ServiceSelectionScreen.jsx
+  src\qmail\QMail.jsx
+  src\qmail\screens\WalletSetupScreen.jsx
+  src\qmail\screens\QMailDashboard.jsx
+  src\qmail\screens\ComposeModal.jsx
+  src\qmail\screens\EmailListPane.jsx
+  src\qmail\screens\EmailListItem.jsx
+  src\qmail\screens\ReadingPane.jsx
+  src\qmail\screens\ContactsPane.jsx
+  src\qmail\screens\AddContactModal.jsx
+  src\qmail\screens\NavigationPane.jsx
+  src\qmail\screens\AccountPane.jsx
+
+Compared against:
+
+  D:\Code\src\PHP\cloudcoin.org-main\qmail-commands\
+  D:\Code\src\PHP\cloudcoin.org-main\qmail-reference-content.php
+  D:\Code\src\C\rest_core\api_src\
+  D:\Code\src\C\rest_core\src\qmail\
+  D:\Code\src\C\rest_core\docs\bugs-to-fix.txt
+  D:\Code\src\C\rest_core\docs\gpt.gui.findings
+  D:\Code\src\C\rest_core\docs\gem.gui.findings
+  D:\Code\src\C\rest_core\docs\opu.gui.findings
+
+I did not start a live client. This is a static user-workflow audit.
+
+Cross-model comparison update
+-----------------------------
+After comparing this report with gem.usability.findings.txt and
+opu.usability.findings.txt, I kept the original API-completeness findings and
+expanded them with the missing user-facing workflow gaps called out by the
+other reports. The main additions are onboarding/new-identity gaps, missing
+message actions, compose/send feedback issues, account/session controls, and
+notification behavior.
+
+Bottom line
+-----------
+The GUI is much closer to the current QMail API than the older GUI/API
+findings. The main send endpoint, duration parameter, task polling, Mail-wallet
+credential import preference, RAIDA status aliases, Sync Directory removal, and
+duration default have all been addressed.
+
+However, a normal user still cannot rely on the GUI as a complete email client.
+The largest remaining problems are user-workflow mismatches: first-run identity
+state is not verified/displayed correctly and there is no in-GUI new-identity
+path, pending message download does not load the stored body after the backend
+decrypts it, sent mail is not saved into Sent, drafts cannot be reopened with
+full content/recipients, core mail actions such as Forward/Reply All/Empty
+Trash are missing, starred mail is split between a flag and a folder, contacts
+cannot be reliably created from the visible form, outgoing local-file
+attachments have no UI path, and account/status/notification surfaces still
+present static or non-actionable state.
+
+Findings
+--------
+
+1. High: first-run import does not verify or display the imported QMail identity.
+
+   User workflow affected:
+     A first-time user enters a locker code and expects to land in a working
+     account showing their QMail address and identity health.
+
+   Missing/broken customary behavior:
+     After import, an email client should verify that the account identity is
+     actually registered and should display the real address. The GUI trusts the
+     import response and proceeds to WalletSetupScreen, but that response does
+     not contain the fields WalletSetupScreen renders.
+
+   GUI files/functions involved:
+     ServiceSelectionScreen.jsx handleImport calls importCredentials() and then
+     onSelectService('qmail', result.data).
+
+     WalletSetupScreen.jsx reads accountData.email_address,
+     accountData.pretty_address, and accountData.needs_healing.
+
+     App.jsx only calls getIdentity() on startup, not immediately after a
+     successful locker import.
+
+     QMailDashboard.jsx accepts initValues but does not use them; QMail.jsx does
+     not pass provisioning data into QMailDashboard.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/raida/locker/import-credentials
+       GET /api/qmail/local/identity/get
+       GET /api/qmail/local/identity/exists
+
+     The import endpoint currently returns operation/count/path fields such as
+     coins_found, coins_saved, wallet_path, and mail_wallet_path. It does not
+     return email_address or pretty_address.
+
+   Suggested fix:
+     After importCredentials() succeeds, call /api/qmail/local/identity/get or
+     /api/qmail/local/identity/exists before advancing. Pass the verified
+     identity into the provisioning/dashboard views. Remove the fake John Doe
+     default from QMailDashboard/AccountPane or replace it with live identity
+     state.
+
+2. Critical: pending encrypted-message download does not load the readable body.
+
+   User workflow affected:
+     A user sees a pending encrypted message, clicks it, and expects to read it.
+
+   Missing/broken customary behavior:
+     The backend download call decrypts/stores the message and returns the local
+     email_id, but the GUI treats the same response as if it already contained
+     the final body and attachments. The selected message can become a
+     "downloaded" pending item with an empty body and no attachment list. The
+     pending rows are also all rendered as generic "Encrypted Message" items,
+     so multiple new messages are hard to distinguish before download.
+
+   GUI files/functions involved:
+     QMailDashboard.jsx handleSelectEmail auto-calls handleDownloadMail() for
+     pending messages.
+
+     QMailDashboard.jsx handleDownloadMail() calls downloadEmailContent(), then
+     reads responseData.body and responseData.attachments.
+
+     QMailDashboard.jsx maps pending notifications to generic list rows; the
+     reading pane then also shows a manual Download Message button, creating an
+     unclear auto-download/manual-download split.
+
+     qmailApiServices.js downloadEmailContent() correctly calls:
+       POST /api/qmail/net/messages/download?file_guid=...
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST /api/qmail/net/messages/download?file_guid=...
+       GET  /api/qmail/db/messages/get?email_id=...
+       GET  /api/qmail/db/attachments/list?email_id=...
+
+     The backend download handler returns fields including email_id, subject,
+     sender_sn, stripes_downloaded, and stripes_recovered. The full body is then
+     available through /db/messages/get.
+
+   Suggested fix:
+     After a successful download, use responseData.email_id to call
+     getEmailById(email_id) and getEmailAttachments(email_id), update
+     selectedEmail to that stored message, and refresh counts/list. Keep the
+     pending item selected only while the download is actually in progress. Use
+     any available sender/subject/timestamp metadata in the pending row, and
+     make one download control the source of truth.
+
+3. High: Sent is exposed as a normal folder, but successful sends do not create
+   a sent-mail row.
+
+   User workflow affected:
+     A user sends a message and later opens Sent to confirm what was sent.
+
+   Missing/broken customary behavior:
+     A sent message should appear in Sent. The GUI refreshes wallet/drafts/counts
+     after send, but there is no GUI step or evident backend send path that saves
+     the sent body into qmail_emails with folder=Sent.
+
+   GUI files/functions involved:
+     ComposeModal.jsx handleSend calls sendEmail().
+
+     QMailDashboard.jsx handleSendEmail closes compose and refreshes counts.
+
+     NavigationPane.jsx exposes Sent as a folder from /db/folders/list.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST /api/qmail/net/messages/upload_and_tell
+       GET  /api/qmail/db/messages/list?folder=1
+
+     In the reviewed rest_core source, receive saves inbox messages through the
+     local DB, but the upload_and_tell/send path appears to write receipts, not a
+     Sent-folder message row.
+
+   Suggested fix:
+     Decide whether Sent should be backed by qmail_emails or receipt files. If
+     qmail_emails is the intended mailbox model, save a sent copy after
+     upload_and_tell starts or completes. If receipts are the intended source,
+     add a GUI/API adapter that renders Sent from receipts.
+
+4. High: outgoing attachments are API-plumbed but unavailable to users.
+
+   User workflow affected:
+     A user composes mail and wants to attach a local file.
+
+   Missing/broken customary behavior:
+     Compose has no file picker, no attachment list, no remove action, and no
+     upload/stage flow. ComposeModal always sends attachments: [].
+
+   GUI files/functions involved:
+     ComposeModal.jsx imports Paperclip but does not render an attachment
+     picker. handleSend builds emailData.attachments: [].
+
+     qmailApiServices.js sendEmail() appends repeatable attachment_file_path
+     values if attachments are present.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST /api/qmail/net/messages/upload_and_tell
+       repeatable attachment_file_path=<server-side path>
+
+     Missing/unclear for GUI:
+       A browser-safe way to stage local files into server-side paths accepted by
+       upload_and_tell.
+
+   Suggested fix:
+     Add a supported staging/upload endpoint or desktop file-path bridge, then
+     add Compose controls for choosing, listing, and removing attachments. Do not
+     expose a Paperclip affordance until it can actually attach files.
+
+5. High: saved drafts cannot be reopened with their full content and recipients.
+
+   User workflow affected:
+     A user saves a draft, opens Drafts later, edits it, and sends or saves it.
+
+   Missing/broken customary behavior:
+     Draft list rows only carry preview metadata. The GUI opens ComposeModal
+     directly from the list row, so body, to, cc, and bcc are often empty. Saving
+     from that compose session can overwrite the draft with incomplete data.
+
+   GUI files/functions involved:
+     QMailDashboard.jsx loadEmails('drafts') maps getDrafts() rows to draft
+     list items and uses draft.body/draft.to/draft.cc when present.
+
+     QMailDashboard.jsx handleSelectEmail opens ComposeModal for isDraft without
+     fetching /db/messages/get.
+
+     ComposeModal.jsx initializes fields from editDraft.body/to/cc/bcc.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET  /api/qmail/db/drafts/list
+       GET  /api/qmail/db/messages/get?email_id=...
+       POST /api/qmail/db/drafts/update?email_id=...
+
+     /db/drafts/list is intentionally preview-oriented. It returns email_id/id,
+     subject, body_preview, timestamps, recipient_count, and star state, not the
+     full body or recipient addresses.
+
+   Suggested fix:
+     When a draft is selected, call /db/messages/get for the draft email_id and
+     load full subject/body/recipient fields before opening ComposeModal. After
+     sending an edited draft, either delete/move the draft or mark it as sent so
+     it does not remain as a stale draft.
+
+6. Medium: Starred is modeled as both a flag and a folder, so star actions do
+   not reliably populate the Starred view.
+
+   User workflow affected:
+     A user clicks the star icon and expects the message to appear in Starred.
+
+   Missing/broken customary behavior:
+     Starred mail should be one coherent virtual view. The GUI toggles
+     is_starred via set-star, but folder navigation maps "starred" to folder ID
+     4 and lists /db/messages/list?folder=4. Those are different concepts in
+     the current code path.
+
+   GUI files/functions involved:
+     qmailApiServices.js folderNameToId maps starred -> 4.
+
+     qmailApiServices.js starEmail() calls /db/messages/set-star.
+
+     QMailDashboard.jsx handleToggleStar updates email.starred but does not move
+     the message to folder 4.
+
+     ReadingPane.jsx also offers "Move to Starred" as a folder move.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST/GET /api/qmail/db/messages/set-star?email_id=...&starred=...
+       GET      /api/qmail/db/messages/list?folder=4
+       POST     /api/qmail/db/messages/move?email_id=...&folder=4
+
+   Suggested fix:
+     Pick one model. Prefer making Starred a virtual view backed by is_starred
+     and adding an API/list mode for starred=true, or make set-star also maintain
+     folder/count semantics. Avoid exposing "Move to Starred" if starring is a
+     flag.
+
+7. Medium: contacts can be listed, but add/search/autocomplete are not enough
+   for normal recipient discovery.
+
+   User workflow affected:
+     A user wants to find a recipient, save them, and use them in compose.
+
+   Missing/broken customary behavior:
+     Add Contact asks for name and "Email Address", but the backend create API
+     requires a real serial_number. The GUI sends serial_number "0" when the form
+     does not provide one, which the backend rejects as invalid. Search text says
+     it searches DRD aliases, but loadContacts() fetches /contacts/list and
+     filters client-side. Compose suggestions only use local contacts and only
+     fill the To field.
+
+   GUI files/functions involved:
+     AddContactModal.jsx collects only name and email.
+
+     ContactsPane.jsx handleAddContact sends newContact.serial_number || "0".
+
+     ContactsPane.jsx searchTerm calls getContacts(searchTerm), which filters
+     local contacts client-side.
+
+     ComposeModal.jsx loadContacts()/handleContactSelect only use getContacts()
+     and replace the whole To field.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET  /api/qmail/db/contacts/list
+       POST /api/qmail/db/contacts/create?serial_number=...
+       DELETE /api/qmail/db/contacts/delete?serial_number=...
+       GET  /api/qmail/db/contacts/list-popular
+       GET  /api/qmail/local/address/from-sn?sn=...
+
+     There is no current GUI flow that converts a pasted QMail address to the
+     required serial_number before creating a contact.
+
+   Suggested fix:
+     Add an address/SN parser or lookup flow before contacts/create. For search,
+     either relabel it as local-contact search or wire a real DRD/user search.
+     In compose, support suggestions for To/CC/BCC and preserve already-entered
+     comma-separated recipients when selecting a suggestion.
+
+8. Medium: email search exists, but the UI scope/pagination are misleading.
+
+   User workflow affected:
+     A user searches a mailbox with more than 50 matches or searches inside one
+     visible folder.
+
+   Missing/broken customary behavior:
+     The placeholder says "Search inbox" or the current folder name, but
+     searchEmails() queries /db/messages/search across the mailbox. Search
+     results overwrite the current list without updating totalEmailCount, and no
+     search offset/pagination is provided.
+
+   GUI files/functions involved:
+     EmailListPane.jsx renders folder-scoped placeholder text.
+
+     QMailDashboard.jsx handleSearch() calls searchEmails(query, 50, 0), but
+     qmailApiServices.searchEmails() accepts only query and limit. It does not
+     update totalEmailCount from result.count.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/db/messages/search?query=...&limit=...
+
+     Missing for full UI:
+       Offset/pagination support is not documented for search.
+
+   Suggested fix:
+     Make the UI label honest ("Search all mail") or add folder filtering if the
+     API supports it. Reset pagination during search and display result count.
+     If large mailboxes matter, add backend offset support or a "show more"
+     strategy.
+
+9. Medium: account/status view misrepresents service, identity, and removed
+   parity behavior.
+
+   User workflow affected:
+     A user opens Wallet/Account to understand whether QMail is healthy enough
+     to send and receive.
+
+   Missing/broken customary behavior:
+     Status should distinguish service process health, RAIDA availability,
+     wallet funding, QMail identity health, and removed/unsupported features.
+     AccountPane hardcodes service health to healthy/version 1.0.0, renders fake
+     profile data from QMailDashboard, shows a Parity Server Configuration
+     section even though getParityServer() always returns failure, and keeps
+     account/security/settings controls that only mutate local state or
+     console.log. There is also no Sign Out or Switch Identity action, and the
+     repair warning is based on fracked wallet coins rather than a direct QMail
+     identity-health signal.
+
+   GUI files/functions involved:
+     QMailDashboard.jsx initializes userAccount to John Doe.
+
+     AccountPane.jsx initializes serverHealth to static healthy data.
+
+     AccountPane.jsx renders Parity Server Configuration while
+     qmailApiServices.js getParityServer() returns "Parity server endpoint
+     removed".
+
+     AccountPane.jsx handleSecurityAction only console.logs; accountSettings are
+     local-only toggles.
+
+     AccountPane.jsx shows Server Details with raidaServers.slice(0, 10), while
+     the service has 25 RAIDA statuses elsewhere.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/local/identity/get
+       GET /api/qmail/local/identity/exists
+       GET /api/qmail/local/status
+       GET /api/raida/echo
+       GET /api/wallets/balance
+       POST /api/qmail/raida/identity/heal
+
+     Removed:
+       Parity server endpoint.
+
+   Suggested fix:
+     Replace the static account view with live identity and health calls. Remove
+     or hide the parity section and no-op account/security actions. If
+     healWallet() is meant to heal the Mail identity coin, ensure the GUI or
+     backend targets the registered Mail wallet, not the Default wallet. Add an
+     explicit Sign Out/Switch Identity flow or hide account switching language
+     until it exists.
+
+10. Medium: "Check Connection" does not force a QMail beacon check.
+
+   User workflow affected:
+     A user expects Refresh/Check Connection to check for new mail now.
+
+   Missing/broken customary behavior:
+     The dashboard polls local pending notifications every 10 seconds, but the
+     manual refresh path reloads local folders/counts and RAIDA echo only. The
+     old pingQMail()/beacon peek flow is commented out, so the visible refresh
+     control does not explicitly ask RAIDA for new tells.
+
+   GUI files/functions involved:
+     QMailDashboard.jsx fetchNotifications() polls getMailNotifications().
+
+     QMailDashboard.jsx checkForNewMail() using pingQMail() is commented out.
+
+     QMailDashboard.jsx handleRefresh() calls loadEmails/loadDrafts/loadCounts.
+
+     NavigationPane.jsx labels the button "Check Connection".
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET  /api/qmail/db/notifications/list
+       GET  /api/qmail/net/beacon/peek
+       POST /api/qmail/net/beacon/ping
+
+   Suggested fix:
+     Add a clear "Check Mail" action that calls beacon/peek or beacon/ping, then
+     refreshes pending notifications and inbox counts. Keep "Check Connection"
+     for RAIDA echo if that is still useful, but do not conflate the two.
+
+11. Medium: incoming attachment display exists, but safety and filename handling
+   are incomplete.
+
+   User workflow affected:
+     A user reads a message with attachments and downloads files safely.
+
+   Missing/broken customary behavior:
+     The GUI shows attachment names/sizes and downloads by attachment_id, but it
+     ignores the backend dangerous flag and does not pass the known attachment
+     name into downloadMailAttachment(). If Content-Disposition is unavailable,
+     the helper falls back to "downloaded_file" even though the UI had the name.
+
+   GUI files/functions involved:
+     ReadingPane.jsx renders attachments but does not display dangerous/warning
+     metadata.
+
+     QMailDashboard.jsx handleDownloadAttachment(emailId, attachmentIndex,
+     attachmentName) calls downloadMailAttachment(emailId, attachmentIndex)
+     without the attachmentName argument.
+
+     qmailApiServices.js getEmailAttachments() maps attachment_id/name/extension
+     /size but drops dangerous and warning.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/db/attachments/list?email_id=...
+       GET /api/qmail/db/attachments/get?email_id=...&attachment_id=...
+
+     The attachments list docs include dangerous and warning metadata.
+
+   Suggested fix:
+     Preserve dangerous/warning fields in getEmailAttachments(), show a clear
+     warning before dangerous downloads, and pass attachmentName as
+     downloadMailAttachment(..., defaultFilename).
+
+12. Low/Medium: send preflight is useful but still optimistic at modal open and
+   does not use wallet/cost context.
+
+   User workflow affected:
+     A user opens Compose when RAIDA availability or wallet funding is not good
+     enough.
+
+   Missing/broken customary behavior:
+     The Send button should remain disabled until the preflight completes. It
+     currently starts with canSend=true and only disables after checkNetworkStatus()
+     finishes with insufficient RAIDA servers or an error. The current send path
+     also no longer checks walletBalance before submit; users learn about funding
+     issues only from backend errors. The >= 6 RAIDA preflight is also a hard
+     client gate with no retry or "try anyway" path, even though the backend is
+     the final authority on whether the send can complete.
+
+   GUI files/functions involved:
+     ComposeModal.jsx initializes canSend to true.
+
+     ComposeModal.jsx checkNetworkStatus() calls getServers() and removed
+     getParityServer(), then gates on availableServers >= 6.
+
+     ComposeModal.jsx has an older wallet-balance precheck in commented code.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/local/status
+       GET /api/raida/echo
+       GET /api/wallets/balance
+       POST /api/qmail/net/messages/upload_and_tell
+
+   Suggested fix:
+     Initialize canSend=false until network status is known. Consider surfacing
+     wallet balance/estimated send cost before submit, while still relying on
+     upload_and_tell as the final authority. Add a retry/recheck path and make
+     the reason for a disabled Send button explicit.
+
+13. High: first-run onboarding lacks a real new-identity path and has misleading
+   import/setup feedback.
+
+   User workflow affected:
+     A user without an existing locker code opens the app and expects to create
+     or recover a QMail identity from inside the product.
+
+   Missing/broken customary behavior:
+     The initial screen offers "I Have a Locker Code" and "Buy Locker Code";
+     there is no in-GUI create-identity flow. The locker input accepts any
+     non-empty key, but the help text still says "Standard format: ABC-1234".
+     Import errors collapse different failure modes into one short message.
+     WalletSetupScreen also exposes Heal Identity and Make Change without
+     contextual result feedback; Heal Identity is shown even when the identity
+     is already marked healthy.
+
+   GUI files/functions involved:
+     ServiceSelectionScreen.jsx renderInitialScreen only offers locker import
+     or an external register URL.
+
+     ServiceSelectionScreen.jsx handleImport surfaces result.error or a generic
+     fallback, and the help text still describes the old ABC-1234 format.
+
+     WalletSetupScreen.jsx handleHeal() and handleMakeChange() set a spinner but
+     do not show detailed success/failure output.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET /api/qmail/raida/locker/import-credentials
+       GET /api/qmail/local/identity/get
+       POST /api/qmail/raida/identity/heal
+       GET /api/coins/prepare-change
+
+     Missing/unclear for GUI:
+       A documented create/register identity endpoint exposed through the GUI.
+
+   Suggested fix:
+     Either add a first-class create/recover identity flow or label registration
+     as an external prerequisite. Split import errors by status/failure type,
+     update locker-key help text to match accepted input, and make wallet setup
+     actions show real backend outcomes.
+
+14. High: expected message-level actions are missing or buried.
+
+   User workflow affected:
+     A user reading mail expects to forward, reply all, mark unread, archive,
+     and empty trash without learning folder implementation details.
+
+   Missing/broken customary behavior:
+     ReadingPane has a Reply button but no Forward or Reply All action. Mark
+     unread is available from list-state behavior elsewhere but not from the
+     reading pane. Archive is only available through the "Move to..." dropdown,
+     even though Archive is a first-class folder in navigation. Trash supports
+     per-message permanent delete, but there is no Empty Trash/Permanent Delete
+     All action.
+
+   GUI files/functions involved:
+     ReadingPane.jsx imports Forward and Archive icons, renders Reply and a move
+     dropdown, but does not render Forward, Reply All, Mark Unread, or a direct
+     Archive button.
+
+     QMailDashboard.jsx has handleReply(), handleMoveEmail(), and per-message
+     delete handlers, but no forward/reply-all/empty-trash handlers.
+
+     qmailApiServices.js has per-message trash/delete wrappers, but no visible
+     empty-trash wrapper in the GUI service layer.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST /api/qmail/db/messages/move?email_id=...&folder=...
+       POST /api/qmail/db/messages/set-read?email_id=...&is_read=...
+       DELETE /api/qmail/db/messages/trash?email_id=...
+       DELETE /api/qmail/db/messages/delete?email_id=...
+
+     Missing/unclear for GUI:
+       A bulk empty-trash endpoint, if the backend supports one.
+
+   Suggested fix:
+     Add Forward and Reply All compose modes, expose Mark Unread/Archive as
+     direct reading-pane actions, and add Empty Trash if the backend has or can
+     grow a bulk delete endpoint. Until bulk delete exists, show a clear
+     per-message-only limitation.
+
+15. Medium: compose recipient hints and send progress do not match normal email
+   expectations.
+
+   User workflow affected:
+     A user enters recipients and sends mail over an unreliable RAIDA/network
+     connection.
+
+   Missing/broken customary behavior:
+     The To placeholder says "write address here", while CC/BCC placeholders
+     show serial-number-looking examples. Contact autocomplete only fills To.
+     During send, task polling can continue indefinitely until the modal is
+     closed; failure state lives inside the modal, so closing it can erase the
+     only visible failure. After a successful send from an edited draft, the
+     draft cleanup path is still not clearly implemented.
+
+   GUI files/functions involved:
+     ComposeModal.jsx placeholders for To/CC/BCC use inconsistent address
+     examples.
+
+     ComposeModal.jsx suggestions only use the active To field.
+
+     ComposeModal.jsx handleSend() loops on getTaskStatus() while
+     !cancelledRef.current and has no explicit timeout.
+
+     QMailDashboard.jsx handleSendEmail() refreshes counts but does not
+     explicitly delete/move the edited draft.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       POST /api/qmail/net/messages/upload_and_tell
+       GET  /api/system/tasks?task_id=...
+       POST /api/qmail/db/drafts/update?email_id=...
+
+   Suggested fix:
+     Use one clear recipient format across To/CC/BCC, support suggestions for
+     each recipient field without replacing existing comma-separated entries,
+     add a client-side send timeout/retry affordance, persist send failures
+     outside the modal, and delete or move the source draft after a successful
+     send.
+
+16. Medium: mail notifications are generic, non-actionable, and visually
+   fragmented.
+
+   User workflow affected:
+     A user wants to know when new mail arrived, what it is, and how to act on a
+     failed or pending send/receive operation.
+
+   Missing/broken customary behavior:
+     New-mail notification text only says that N emails arrived; it does not
+     show sender/subject preview or click through to the pending/downloadable
+     item. The old checkForNewMail()/pingQMail flow is commented out, so arrival
+     depends on local notification polling rather than a clear user-triggered
+     beacon check. The app also uses multiple notification surfaces with
+     different visual styles.
+
+   GUI files/functions involved:
+     QMailDashboard.jsx fetchNotifications() polls every 10 seconds and shows a
+     short notification popup.
+
+     QMailDashboard.jsx checkForNewMail()/pingQMail code is commented out.
+
+     ComposeModal.jsx displays send progress and failure inside the modal,
+     while QMailDashboard.jsx has a separate notification popup.
+
+   Backend/API call that exists or is missing:
+     Exists:
+       GET  /api/qmail/db/notifications/list
+       GET  /api/qmail/net/beacon/peek
+       POST /api/qmail/net/beacon/ping
+       GET  /api/system/tasks?task_id=...
+
+   Suggested fix:
+     Make new-mail notifications actionable and tied to the pending message row.
+     Consolidate notification styling/state, add persistent send-failure
+     visibility, and connect manual "Check Mail" behavior to the beacon API.
+
+Positive coverage observed
+--------------------------
+These areas are wired well enough at the static-review level:
+
+  - Compose can send To/CC/BCC, subject, body, and duration through
+    /api/qmail/net/messages/upload_and_tell.
+  - sendEmail() uses the current duration parameter and supports repeatable
+    attachment_file_path values if the caller ever provides server-side paths.
+  - Compose polls /api/system/tasks?task_id=... and surfaces backend task
+    message/progress/error state.
+  - Inbox/Sent/Drafts/Trash/Starred/Archive navigation is present.
+  - Folder list/count, list pagination, unread/read toggle, move, trash,
+    permanent delete, and archive move APIs are present.
+  - Selecting an already-downloaded message fetches full body and attachments
+    with /db/messages/get and /db/attachments/list.
+  - Single-recipient Reply flow resolves numeric sender serials through
+    /local/address/from-sn and quotes the original body when it has been
+    downloaded.
+  - Contacts list/delete and popular contacts have API wrappers.
+  - Sync Directory is no longer visible and QMailDashboard no longer runs the
+    unsupported syncData() stub at startup.
+
+Recommended fix order
+---------------------
+1. Fix pending download/read: after /net/messages/download, fetch the returned
+   email_id with /db/messages/get and /db/attachments/list.
+2. Fix first-run identity verification, live account/profile display, and the
+   missing new-identity/onboarding path.
+3. Decide and implement Sent-folder persistence or Sent-from-receipts rendering.
+4. Fix draft reopen/edit so full body and recipients are loaded before compose,
+   and clean up edited drafts after successful send.
+5. Add a real attachment selection/staging flow for outgoing mail.
+6. Add Forward, Reply All, direct Archive/Mark Unread, and Empty Trash behavior.
+7. Make Starred one coherent virtual view or one coherent folder behavior.
+8. Fix contacts add/search/autocomplete around real serial_number/address data.
+9. Replace static/dead account status panels with live identity, RAIDA, wallet,
+   session, and feature-capability state.
+10. Add a manual "Check Mail" beacon action separate from RAIDA connection check
+    and make new-mail/send-failure notifications actionable.
+11. Preserve attachment warning metadata and improve download filenames.

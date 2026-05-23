@@ -1,0 +1,84 @@
+Opus Batch 9 review (post-GPT implementation)
+Date: 2026-05-22
+Tickets: FIX-09, FIX-12
+
+Reviewed
+--------
+- docs\gpt.usability.batch9.summary.txt
+- src\api\qmailApiServices.js  (resolveAddressOrSn, CONTACT_ADDRESS_OR_SN_ERROR,
+   getContacts serial-number fallback)
+- src\qmail\screens\AddContactModal.jsx  (two-field form, inline errors)
+- src\qmail\screens\AddContactModal.css
+- src\qmail\screens\ContactsPane.jsx  (handleAddContact rewrites)
+- src\screens\ServiceSelectionScreen.jsx  (Buy Locker Code hint)
+- src\screens\ServiceSelectionScreen.css
+
+Verdict
+-------
+No code fixes required. The Batch 9 implementation matches the FIX-09
+and FIX-12 specs, builds clean, and handles the edge cases the plan
+called out.
+
+Spec verification — FIX-09 (Add Contact schema fix)
+----------------------------------------------------
+[x] AddContactModal renamed "Email Address" → "QMail address or
+    serial number" (line 90). Two fields only (Name/Alias +
+    Address-or-SN); no third description field per spec.
+[x] resolveAddressOrSn(input) helper:
+    - /^\d+$/ → treated as serial number, success path returns
+      both serial_number and serialNumber aliases.
+    - Email-shaped input → rejected with the verbatim required
+      error string ("Please enter a serial number (or a QMail
+      address once the lookup service is available).").
+    - Other input → same error.
+[x] ContactsPane.handleAddContact:
+    - Resolves the input via resolveAddressOrSn BEFORE addContact.
+    - On resolve failure: returns { success:false, error } so the
+      modal surfaces the inline error and stays open. No
+      serial_number=0 row created.
+    - On success: passes the REAL serial_number, first/last name,
+      and a clean description (no address stuffed into description).
+[x] CONTACT_ADDRESS_OR_SN_ERROR exported as a named constant so
+    AddContactModal and the helper share a single source of truth.
+[x] getContacts() falls back to String(serialNumber) for autoAddress
+    when the backend hasn't yet returned an auto_address — SN-only
+    contacts still surface in Compose autocomplete and search.
+[x] Modal close-on-success path: handleAddContact awaits
+    loadContacts() then setIsAddContactOpen(false), so the list
+    refresh completes before the modal closes (no stale flash).
+
+Spec verification — FIX-12 (Buy Locker Code onboarding hint)
+------------------------------------------------------------
+[x] handleBuyLockerCode opens the registration page in a new tab
+    with noopener,noreferrer (defense-in-depth against window.opener).
+[x] After click, the inline hint renders below the Buy Locker Code
+    button: "Once you have your code, come back here and tap 'I Have
+    a Locker Code'." (verbatim from spec).
+[x] Scoped CSS class (.buy-locker-hint) so styling doesn't leak.
+
+Build / lint
+------------
+- npm run build : PASS (1754 modules transformed)
+
+Out-of-scope observations
+-------------------------
+- ContactsPane.handleAddContact references newContact.description, but
+  AddContactModal never sends a description field — the value is always
+  undefined and coerced to "". Dead-but-harmless. Worth tidying when
+  AddContactModal is next touched.
+- showBuyLockerHint never auto-dismisses. If the user clicks Buy → goes
+  to locker-input → clicks Back, the hint is still showing on the
+  initial screen. Acceptable per spec (it's a reminder, not a toast),
+  but a Dismiss affordance would be cleaner.
+- handleDeleteContact still uses window.confirm() (already flagged by
+  GPT as BUG-32; carried forward to Batch 10+ Contacts polish).
+
+These observations have been appended to docs\cla.bugs.txt where
+they're new (the window.confirm note is already there as BUG-32).
+
+Next steps
+----------
+Phase 1 batches 6 through 9 are now landed and reviewed. Per the
+master plan, the remaining FIX-08 (Sent persistence) and FIX-10
+(Repair Now) are backend-blocked on CORE-A and CORE-F. Phase 1
+GUI work is effectively closed pending those backend tickets.

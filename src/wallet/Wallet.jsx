@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import '../App.css';
 import WelcomeScreen from './components/WelcomeScreen';
 import USBCheckScreen from './components/USBCheckScreen';
@@ -16,7 +16,6 @@ DASHBOARD: 'dashboard'
 function Wallet() {
 const [currentScreen, setCurrentScreen] = useState(SCREENS.WELCOME);
 const [isUSBDrive, setIsUSBDrive] = useState(false);
-const [isAuthenticated, setIsAuthenticated] = useState(false);
 
 // BUG-10 FIX (review): Call REST API directly instead of IPC middleman
 useEffect(() => {
@@ -47,7 +46,6 @@ setCurrentScreen(SCREENS.PASSWORD);
 };
 
 const handlePasswordSuccess = () => {
-setIsAuthenticated(true);
 setCurrentScreen(SCREENS.DASHBOARD);
 };
 

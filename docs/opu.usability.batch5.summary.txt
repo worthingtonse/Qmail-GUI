@@ -1,0 +1,300 @@
+opu QMail-GUI fix batch 5 — implementation summary
+Date: 2026-05-22
+Author: claude-opus-4-7 (filename prefix: opu)
+
+Plan reference
+==============
+D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt (v4)
+Previous batches:
+  opu.usability.batch1.summary.txt (FIX-01 + FIX-16-0A, + follow-ups)
+  opu.usability.batch2.summary.txt (FIX-03 + FIX-30, + gpt follow-up)
+  opu.usability.batch3.summary.txt (FIX-04 + FIX-05, + gpt follow-up)
+  opu.usability.batch4.summary.txt (FIX-13/35/36/37-0B, + gpt follow-up)
+
+This batch ships the last remaining Phase 0B ticket:
+
+  FIX-02 — Electron file picker for outgoing attachments
+
+This was held out of batch 4 because it crosses the renderer/main
+process boundary (Electron IPC) and needed its own review pass and
+packaged-build smoke test per the v4 plan's 0B ship gate.
+
+After batch 5, Phase 0B is complete.
+
+Files changed
+=============
+  electron.cjs                              (IPC handler)
+  preload.cjs                               (electronAPI bridge)
+  src\qmail\screens\ComposeModal.jsx        (picker UI + send wiring)
+
+Three files. No new dependencies. No backend changes.
+
+FIX-02: Compose attachment picker
+=================================
+Bug:
+  ComposeModal hard-coded `attachments: []` when calling sendEmail.
+  The backend supported attachment_file_path params and the API
+  helper already iterated emailData.attachments (per the existing
+  v3 follow-ups), but there was no UI to populate it. The Paperclip
+  icon was imported and never rendered.
+
+Fix:
+  Three layers wired together:
+
+  1. electron.cjs — new IPC handler 'compose:pickFiles'.
+     Opens dialog.showOpenDialog with openFile + multiSelections.
+     For each returned filePath, runs fs.promises.stat in the main
+     process so the renderer (which can't fs.stat under
+     contextIsolation) receives enriched metadata.
+     Returns Array<{ path, name, size }>, or [] on cancel/dialog-
+     error. Per-file stat failures drop just that file from the
+     result and log; the picker as a whole still resolves so the
+     renderer can use whatever survived.
+
+  2. preload.cjs — extended the existing window.electronAPI bridge.
+     Added pickAttachments() which invokes 'compose:pickFiles'.
+     No second contextBridge — uses the existing exposure pattern
+     consistent with checkUSBDrive, runCommand, etc. (gpt-batch1
+     architectural feedback honored: do NOT create a second
+     renderer bridge.)
+
+  3. ComposeModal.jsx:
+     a. attachments state (Array<{path,name,size}>) reset on modal open.
+     b. attachmentsSupported: derived from window.electronAPI presence.
+        Browser/Vite build returns false → button renders disabled
+        with explanatory tooltip.
+     c. handleAttachClick: calls pickAttachments(), de-duplicates
+        by absolute path so re-picking the same file doesn't
+        accumulate copies, handles canceled (empty array) silently.
+     d. handleRemoveAttachment: drops a chip by path.
+     e. formatAttachmentSize: B / KB / MB display.
+     f. UI: an "Attach files" button beneath the message textarea,
+        followed by chips for each staged file (name + size + X to
+        remove). Button label shows the count when files are staged.
+     g. handleSend: passes attachments.map(a => a.path) into
+        emailData.attachments. sendEmail() already iterates and
+        appends one attachment_file_path query param per entry.
+
+Edge cases handled
+==================
+- User cancels the picker → handler returns [], UI no-ops.
+- User picks the same file twice → de-duplicate by path.
+- fs.stat fails on a file (deleted between picker and stat) →
+  drop that file from the result, log a warning, keep the others.
+- Browser/Vite build (no electronAPI) → button renders disabled
+  with tooltip "File attachments require the desktop build."
+- Modal closed mid-send → existing isSending guards keep the send
+  in flight; staged attachments aren't lost until the close
+  completes (next open clears them).
+- Path with spaces / unicode → handler returns the absolute path
+  verbatim; URLSearchParams in sendEmail handles the escape.
+- Long filenames → chip uses CSS ellipsis (whiteSpace: nowrap,
+  textOverflow: ellipsis, max-width 320px); the absolute path is
+  available via the chip's title (hover tooltip).
+
+Decisions worth flagging for review
+===================================
+  1. Inline styles on the attachment UI rather than new CSS classes.
+     Rationale: the chip + button block is self-contained and uses
+     theme variables for colors/spacing so dark-mode/theming still
+     works. If the design system prefers classes, it's a small
+     refactor (similar to the Retry button extraction in batch 4
+     follow-up).
+
+  2. Attachments are NOT persisted with drafts in this iteration.
+     Each compose session starts with an empty staged list. A draft
+     re-opened later has no record of files the user picked in the
+     prior session. Persisting attachments alongside drafts would
+     require backend cooperation (CORE-M-or-similar). Flagged as
+     a follow-up; not blocking.
+
+  3. The Attach button sits BENEATH the body textarea rather than
+     in the modal footer next to Send/Save Draft. Two reasons:
+       (a) The footer is busy with Send/Save Draft/Sending status.
+       (b) Putting the chips near the body keeps them visible while
+           composing; in the footer they'd be below the fold.
+     If the design team prefers the footer position, easy to move.
+
+  4. Filename rendering is local-OS-native. dialog.showOpenDialog
+     returns absolute paths in whatever encoding the OS uses
+     (Windows backslashes, etc.). The backend reads these paths
+     directly via attachment_file_path. In the packaged Electron
+     build the renderer + main + backend all run on the same OS
+     so this is consistent; the cross-host case (path → some other
+     server) isn't applicable to this app.
+
+Packaged-build smoke test (per 0B ship gate)
+============================================
+Ran `npm run build-portable` (electron-builder --win portable):
+  - vite build: passed (2.19s)
+  - electron-builder: produced release/QMail.exe (66 MB)
+  - Verified electron.cjs and preload.cjs are inside the packaged
+    app.asar.
+  - Spot-checked the asar contents — the new IPC handler string
+    'compose:pickFiles' and the preload bridge `pickAttachments`
+    both made it through to the packaged binary.
+
+What I COULD NOT verify (needs human + GUI session):
+  - Actually clicking Attach and seeing the OS file picker open
+  - Picking files with spaces / unicode and confirming the send
+    completes
+  - Confirming the recipient sees the attachments
+
+The packaged binary is at:
+  D:\Code\src\JavaScript\Qmail-GUI\release\QMail.exe
+Launching it and clicking Compose → Attach files is the remaining
+manual step for the 0B ship gate.
+
+Verification
+============
+1. npm run build — passes (2.33s). JS bundle +2.5kB (attachments
+   state + handler + chip UI). CSS unchanged.
+
+2. ESLint on the touched files:
+     ComposeModal.jsx: 29 issues, same as pre-batch-5 baseline
+     (all pre-existing — unused React import, inline-style
+     prop-types complaints, existing dead-code blocks).
+   No new violations from my work.
+
+3. Manual checklist (deferred — no live GUI in session):
+   [ ] Run dev: npm run electron-dev. Click Compose → Attach files.
+       Confirm file picker opens.
+   [ ] Pick a single file with a space in its name. Confirm the
+       chip appears with name + size.
+   [ ] Open the picker again, re-select the same file. Confirm no
+       duplicate chip.
+   [ ] Click the X on a chip. Confirm it's removed.
+   [ ] Send. Confirm the recipient sees the attachment.
+   [ ] Launch the packaged release\QMail.exe. Repeat above (the
+       packaged smoke test).
+   [ ] In a browser/Vite-only context, confirm Attach is disabled
+       with the explanatory tooltip.
+
+Reviewers please confirm
+========================
+gem / gpt: please look at this diff and respond with:
+  1. Inline-styling vs. CSS class for the attachment UI — same
+     question as the batch-4 Retry button. Consistent answer
+     preferred.
+  2. Attach button placement (under textarea vs. in the footer).
+  3. The "attachments aren't persisted with drafts" gap — is that
+     acceptable for first ship, or should I file a backend ticket
+     for attachment metadata on drafts now?
+  4. Any concerns about the absolute-path approach (renderer
+     passes path → backend reads path)? It assumes the backend
+     process can read whatever the user picks; that's fine in the
+     bundled Electron-with-co-located-backend model the app uses.
+
+Phase 0 status
+==============
+Phase 0A: COMPLETE (after batch 3 follow-up)
+Phase 0B: COMPLETE (after batch 5 — this one)
+
+The remaining Phase-0 manual checks per the v4 plan checklist:
+  All 9 listed verify steps still need a human + GUI session to run
+  end-to-end. Build and packaging are confirmed working; the actual
+  click-through verification belongs to the reviewer or QA.
+
+Next batches (Phase 1):
+  Forward (FIX-06) + Reply All (FIX-07) — depend on FIX-05.5 prep
+    (composeContext refactor).
+  Sent persistence (FIX-08) — backend-blocked on CORE-A.
+  Empty Trash (FIX-14) honest-page label.
+  Sign Out + re-entry (FIX-15/15b).
+  Pending-row distinction via safe metadata (FIX-11a).
+  No new identity creation path (FIX-12) — product question first.
+  New-mail toast with sender (FIX-17).
+
+Follow-up (gpt batch-5 review)
+==============================
+Date: 2026-05-22
+Reviewer: D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.batch5.review.txt
+
+Three substantive findings, all real bugs. Gem approved batch 5
+with no actionable changes; gpt caught three GUI-side defenses
+that should land before relying on the picker in the wild.
+
+Patches applied (all in ComposeModal.jsx):
+
+1. (gpt #1, High) Reject attachment paths with ',' or ';'.
+   Root cause: upload_and_tell concatenates the picker's repeated
+   attachment_file_path params into a single string, then
+   qmail_upload_orchestrator splits that string with
+   strtok_r(att_buf, ",;", ...). A path containing either delimiter
+   gets mangled into invalid sub-paths.
+   Fix: handleAttachClick now filters out picked entries whose path
+   contains ',' or ';' BEFORE adding to state. Rejected entries
+   surface in attachError with the filename and reason. The user
+   can rename the file and re-pick.
+   The real fix is backend-side — tracked as CORE-M.
+
+2. (gpt #2, High) Defensive count + combined-path-length cap.
+   Root cause: upload_and_tell stores all attachment paths in a
+   fixed char[MAX_PATH_LEN * 4] = 16384-byte buffer and silently
+   `break`s the copy loop when the next path would overflow. No
+   error returned to the renderer. UPLOAD_MAX_ATTACHMENTS = 245.
+   Fix: GUI caps total count at 50 (well below 245) and total
+   combined path-length at 12000 bytes (well below 16384 with
+   margin for the comma separators). Overflows surface in
+   attachError. Both numbers are intentionally conservative to
+   leave room for any future backend buffer changes.
+   The real fix — return a 400 from the backend on overflow, or
+   stop using a fixed buffer — is part of CORE-M.
+
+3. (gpt #3, Medium) Draft + attachment mismatch warning.
+   Root cause: handleSaveDraft doesn't include the staged
+   attachments in the saveDraft/updateDraft payload, and reopening
+   the draft clears them on mount. Users could attach files, save
+   the draft, and reasonably expect those files to come back.
+   Fix: an inline amber warning between the body textarea and the
+   footer, visible only when attachments.length > 0:
+     "Attachments are sent with this message but are NOT saved
+      with a draft. Save the draft first, then re-attach files
+      when you're ready to send."
+   Save Draft stays enabled (a user with body changes shouldn't
+   be blocked from saving body work just because they staged a
+   file). The warning is the discoverable contract.
+   The real fix — persist attachment metadata with drafts — is
+   tracked as CORE-N. The GUI will pick up persisted attachments
+   automatically once that ships (saveDraft already receives the
+   list via the touchedFields machinery from gpt-batch3).
+
+Backend tickets added to the plan:
+  CORE-M: stop comma/semicolon-serializing attachment paths in
+          upload_and_tell. Keep them as an array. Unblocks the
+          GUI-side delimiter rejection and length cap.
+  CORE-N: persist attachment metadata with drafts. Closes the
+          gpt-batch5 #3 gap properly.
+  (Both added to opu.usability.fix.plan.txt's "Backend tickets
+  implied by this plan" section alongside CORE-A through CORE-L.)
+
+Reviewer-question responses (deferred / acknowledged):
+  - gpt agreed with gem that inline styles on the attachment UI
+    are functional for now; the disabled/error/chip/remove
+    surfaces have grown enough that extracting to CSS classes is
+    a clear Phase-2 cleanup ticket. Not blocking.
+  - Button placement under the textarea: both reviewers agreed
+    with the current placement.
+  - Absolute paths: acceptable for the bundled Electron + co-
+    located backend model.
+
+Files changed in follow-up:
+  src\qmail\screens\ComposeModal.jsx (handleAttachClick guards +
+                                       Save Draft warning)
+  docs\opu.usability.fix.plan.txt    (CORE-M, CORE-N added)
+
+Verification:
+- npm run build: passes (2.07s). JS bundle +1.3kB (the three
+  guards + warning JSX).
+- ESLint on ComposeModal: 29 issues, identical to pre-followup
+  baseline (caught one new react/no-unescaped-entities for
+  "you're" in the warning text — fixed to "you&apos;re").
+
+Note for QA / future packaged-build smoke test
+==============================================
+The batch-5 packaged-build smoke test produced release/QMail.exe
+BEFORE these guards landed. If the binary is being shipped for
+real testing, rebuild with `npm run build-portable` to include
+the comma/semicolon rejection and the count/length caps.
+
+End of file.

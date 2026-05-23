@@ -4,280 +4,201 @@
 /* The AddContactModal uses the same base modal styles from ComposeModal.css */
 /* This file contains specific styles and overrides for the add contact functionality */
 
+/* was: .add-contact-modal */
 .add-contact-modal {
-  max-width: 500px;
-  min-width: 400px;
+  max-width: 31.25rem;
+  min-width: 25rem;
 }
 
-.add-contact-modal .compose-modal-body {
+/* was: .add-contact-modal .compose-modal-body */
+.add-contact-modal__body {
   min-height: auto;
   padding: var(--space-xl);
 }
 
-/* ==================== CONTACT FORM FIELDS ==================== */
-.add-contact-modal .form-group {
-  margin-bottom: var(--space-lg);
+/* was: .add-contact-modal .compose-modal-header h3 */
+.add-contact-modal__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
-.add-contact-modal .form-group:last-child {
-  margin-bottom: 0;
+/* was: .add-contact-modal .form-group */
+.add-contact-modal__fields {
+  display: grid;
+  gap: var(--space-lg);
 }
 
-.add-contact-modal .form-group label {
+/* was: .add-contact-modal .form-group label */
+.add-contact-modal__label {
   font-weight: 600;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  margin-bottom: var(--space-sm);
-  display: block;
 }
 
-.add-contact-modal .form-group input {
+/* was: .add-contact-modal .form-group input */
+.add-contact-modal__input {
   width: 100%;
   padding: var(--space-md);
   background-color: var(--card-bg);
   border: 1px solid var(--border-medium);
   color: var(--text-primary);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-base);
-  transition: all var(--transition-base);
+  font-size: var(--font-size-md);
+  transition:
+    border-color calc(250ms * var(--motion-scale)) ease,
+    box-shadow calc(250ms * var(--motion-scale)) ease,
+    background-color calc(250ms * var(--motion-scale)) ease;
 }
 
-.add-contact-modal .form-group input:focus {
+.add-contact-modal__input:focus {
   outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 0 3px var(--status-info-bg);
   background-color: var(--card-hover);
 }
 
-.add-contact-modal .form-group input::placeholder {
+.add-contact-modal__input::placeholder {
   color: var(--text-muted);
   font-style: italic;
 }
 
-/* ==================== CONTACT NAME FIELD ==================== */
-#contact-name {
-  font-weight: 500;
-}
-
-/* ==================== CONTACT EMAIL FIELD ==================== */
-#contact-email {
+/* was: #contact-address-or-sn */
+.add-contact-modal__input--mono {
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: var(--font-size-sm);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
-/* ==================== SAVE BUTTON ==================== */
-.add-contact-modal .compose-modal-footer {
+/* was: .add-contact-modal .form-group input.error */
+.add-contact-modal__input--error {
+  border-color: var(--status-error);
+  box-shadow: 0 0 0 3px var(--status-error-bg);
+}
+
+/* was: .add-contact-error */
+.add-contact-modal__error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius-md);
+  background-color: var(--status-error-bg);
+  color: var(--status-error);
+  font-size: var(--font-size-sm);
+}
+
+.add-contact-modal__error svg {
+  flex-shrink: 0;
+}
+
+/* was: .field-hint */
+.add-contact-modal__field-hint {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+/* was: .add-contact-modal .compose-modal-footer */
+.add-contact-modal__footer {
   padding: var(--space-lg) var(--space-xl);
   justify-content: flex-end;
 }
 
-.add-contact-modal .send-button {
-  background-color: var(--accent-success);
-  color: white;
+/* was: .add-contact-modal .send-button */
+.add-contact-modal__save-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-width: 8.75rem;
   padding: var(--space-md) var(--space-xl);
+  background: linear-gradient(135deg, var(--accent-success) 0%, var(--status-success) 100%);
+  color: var(--secondary-bg);
   font-weight: 600;
   border-radius: var(--radius-md);
-  transition: all var(--transition-base);
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  min-width: 140px;
-  justify-content: center;
+  box-shadow: var(--shadow-md), var(--glow-success);
+  transition:
+    transform calc(250ms * var(--motion-scale)) ease,
+    box-shadow calc(250ms * var(--motion-scale)) ease,
+    border-color calc(250ms * var(--motion-scale)) ease;
 }
 
-.add-contact-modal .send-button:hover:not(:disabled) {
-  background-color: #059669;
+.add-contact-modal__save-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg), var(--glow-success);
 }
 
-.add-contact-modal .send-button:disabled {
+.add-contact-modal__save-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
-.add-contact-modal .send-button svg {
+.add-contact-modal__save-button svg {
   width: 16px;
   height: 16px;
 }
 
-/* ==================== MODAL HEADER CUSTOMIZATION ==================== */
-.add-contact-modal .compose-modal-header h3 {
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-/* ==================== VALIDATION STYLES ==================== */
-.add-contact-modal .form-group input.error {
-  border-color: var(--accent-danger);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-}
-
-.add-contact-modal .form-group input.success {
-  border-color: var(--accent-success);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-.error-message {
-  color: var(--accent-danger);
-  font-size: var(--font-size-xs);
-  margin-top: var(--space-xs);
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-.success-message {
-  color: var(--accent-success);
-  font-size: var(--font-size-xs);
-  margin-top: var(--space-xs);
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-/* ==================== FIELD HINTS ==================== */
-.field-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  margin-top: var(--space-xs);
-  line-height: 1.4;
-}
-
-.field-hint.email-hint {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  background-color: var(--card-bg);
-  padding: var(--space-sm);
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--accent-secondary);
-}
-
 /* ==================== RESPONSIVE DESIGN ==================== */
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .add-contact-modal {
     max-width: 100%;
     min-width: 0;
     margin: var(--space-md);
   }
 
-  .add-contact-modal .compose-modal-body {
+  .add-contact-modal__body {
     padding: var(--space-lg);
   }
 
-  .add-contact-modal .compose-modal-footer {
+  .add-contact-modal__footer {
     padding: var(--space-lg);
   }
 
-  .add-contact-modal .send-button {
+  .add-contact-modal__save-button {
     width: 100%;
   }
-}
 
-@media (max-width: 480px) {
-  .add-contact-modal {
-    margin: var(--space-sm);
-    border-radius: var(--radius-md);
-  }
-
-  .add-contact-modal .compose-modal-body,
-  .add-contact-modal .compose-modal-header,
-  .add-contact-modal .compose-modal-footer {
-    padding: var(--space-md);
-  }
-
-  .add-contact-modal .compose-modal-header h3 {
+  .add-contact-modal__title {
     font-size: var(--font-size-lg);
-  }
-
-  .field-hint.email-hint {
-    padding: var(--space-sm);
-    font-size: 10px;
   }
 }
 
 /* ==================== ACCESSIBILITY ENHANCEMENTS ==================== */
-.add-contact-modal .form-group input:focus {
+.add-contact-modal__input:focus {
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 }
 
-.add-contact-modal .send-button:focus {
+.add-contact-modal__save-button:focus {
   outline: 2px solid var(--accent-success);
   outline-offset: 2px;
 }
 
-/* ==================== ANIMATION FOR SUCCESS STATE ==================== */
-@keyframes successPulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-  }
-}
-
-.add-contact-modal .send-button.success-state {
-  animation: successPulse 1s ease-out;
-}
-
-/* ==================== LOADING STATE ==================== */
-.add-contact-modal .send-button.loading {
-  position: relative;
-  color: transparent;
-}
-
-.add-contact-modal .send-button.loading::after {
-  content: "";
-  position: absolute;
-  width: 16px;
-  height: 16px;
-  top: 50%;
-  left: 50%;
-  margin-left: -8px;
-  margin-top: -8px;
-  border: 2px solid transparent;
-  border-top: 2px solid currentColor;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  color: white;
-}
-
 /* ==================== HIGH CONTRAST SUPPORT ==================== */
 @media (prefers-contrast: high) {
-  .add-contact-modal .form-group input {
+  .add-contact-modal__input {
     border: 2px solid var(--text-primary);
   }
 
-  .add-contact-modal .form-group input:focus {
+  .add-contact-modal__input:focus {
     border: 2px solid var(--accent-primary);
     outline: 2px solid var(--accent-primary);
   }
 
-  .add-contact-modal .send-button {
-    border: 2px solid var(--accent-success);
+  .add-contact-modal__save-button {
+    border: 2px solid var(--status-success);
   }
 }
 
 /* ==================== REDUCED MOTION SUPPORT ==================== */
 @media (prefers-reduced-motion: reduce) {
-  .add-contact-modal .send-button,
-  .add-contact-modal .form-group input {
+  .add-contact-modal__save-button,
+  .add-contact-modal__input {
     transition: none;
-  }
-
-  .add-contact-modal .send-button.success-state {
-    animation: none;
-  }
-
-  .add-contact-modal .send-button.loading::after {
-    animation: none;
   }
 }

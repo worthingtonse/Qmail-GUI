@@ -5,78 +5,63 @@
   min-height: 100vh;
   padding: var(--space-xl);
   position: relative;
+  background: var(--primary-bg);
+  color: var(--text-primary);
 }
 
-.usb-check-container {
+/* was: .usb-check-container */
+.usb-check-screen__card {
   background: var(--glass-bg-strong);
   backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
   border-radius: var(--radius-2xl);
   padding: var(--space-2xl);
-  max-width: 700px;
+  max-width: 43.75rem;
   width: 100%;
   box-shadow: var(--shadow-xl);
   text-align: center;
   position: relative;
   overflow: hidden;
-  
-  /* Animation */
   opacity: 0;
   transform: scale(0.95);
-  animation: popIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: usb-check-screen-pop-in calc(500ms * var(--motion-scale)) cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
-/* Glass shimmer effect */
-/* .usb-check-container::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.03),
-    transparent
-  ); */
-  /* animation: shimmer 3s infinite; */
-/* } */
-
-/* Icon Containers */
-.warning-icon,
-.success-icon {
-  margin-bottom: var(--space-xl);
+/* was: .warning-icon, .success-icon */
+.usb-check-screen__header {
   position: relative;
   z-index: 1;
+}
+
+.usb-check-screen__icon {
+  margin-bottom: var(--space-xl);
+  position: relative;
   display: inline-block;
 }
 
-.warning-icon svg,
-.success-icon svg {
-  width: 96px;
-  height: 96px;
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3));
-  transition: transform var(--transition-base);
+.usb-check-screen__icon-svg {
+  width: 6rem;
+  height: 6rem;
+  transition: transform calc(250ms * var(--motion-scale)) ease;
 }
 
-.usb-check-container:hover .warning-icon svg,
-.usb-check-container:hover .success-icon svg {
+.usb-check-screen__card:hover .usb-check-screen__icon-svg {
   transform: scale(1.05);
 }
 
-.warning-icon svg {
-  stroke: var(--accent-error);
-  stroke-width: 2;
+.usb-check-screen__icon--warning {
+  color: var(--status-error);
 }
 
-.success-icon svg {
-  stroke: var(--accent-success);
-  stroke-width: 2;
-  animation: checkBounce 0.6s ease-out 0.3s;
+.usb-check-screen__icon--success {
+  color: var(--status-success);
 }
 
-@keyframes checkBounce {
+.usb-check-screen__icon--success .usb-check-screen__icon-svg {
+  animation: usb-check-screen-bounce calc(600ms * var(--motion-scale)) ease-out calc(300ms * var(--motion-scale));
+}
+
+@keyframes usb-check-screen-bounce {
   0%, 100% {
     transform: scale(1);
   }
@@ -85,33 +70,33 @@
   }
 }
 
-/* Pulsing glow for warning */
-.warning-icon::after {
+/* was: .warning-icon::after */
+.usb-check-screen__icon--warning::after {
   content: '';
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 120px;
-  height: 120px;
-  background: radial-gradient(circle, rgba(248, 113, 113, 0.2), transparent 70%);
+  width: 7.5rem;
+  height: 7.5rem;
+  background: radial-gradient(circle, var(--status-error-bg), transparent 70%);
   transform: translate(-50%, -50%);
-  animation: pulse 2s ease-in-out infinite;
+  animation: usb-check-screen-pulse calc(2s * var(--motion-scale)) ease-in-out infinite;
   z-index: -1;
 }
 
-.success-icon::after {
+.usb-check-screen__icon--success::after {
   content: '';
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 120px;
-  height: 120px;
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.2), transparent 70%);
+  width: 7.5rem;
+  height: 7.5rem;
+  background: radial-gradient(circle, var(--status-success-bg), transparent 70%);
   transform: translate(-50%, -50%);
   z-index: -1;
 }
 
-@keyframes pulse {
+@keyframes usb-check-screen-pulse {
   0%, 100% {
     opacity: 0.6;
     transform: translate(-50%, -50%) scale(1);
@@ -122,8 +107,10 @@
   }
 }
 
-.usb-check-container h2 {
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
+/* was: .usb-check-container h2 */
+.usb-check-screen__title {
+  margin: 0;
+  font-size: var(--font-size-2xl);
   margin-bottom: var(--space-xl);
   color: var(--text-primary);
   font-weight: 600;
@@ -132,9 +119,8 @@
   letter-spacing: -0.02em;
 }
 
-/* Message Cards */
-.warning-message,
-.success-message {
+/* was: .warning-message, .success-message */
+.usb-check-screen__message {
   text-align: left;
   margin: var(--space-xl) 0;
   background: var(--card-bg);
@@ -146,43 +132,39 @@
   z-index: 1;
 }
 
-.warning-message {
-  border-left: 4px solid var(--accent-error);
-  background: linear-gradient(135deg, rgba(248, 113, 113, 0.05), rgba(248, 113, 113, 0.02));
+.usb-check-screen__message--warning {
+  border-left: 4px solid var(--status-error);
+  background: linear-gradient(135deg, var(--status-error-bg), var(--card-bg));
 }
 
-.success-message {
-  border-left: 4px solid var(--accent-success);
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.05), rgba(52, 211, 153, 0.02));
+.usb-check-screen__message--success {
+  border-left: 4px solid var(--status-success);
+  background: linear-gradient(135deg, var(--status-success-bg), var(--card-bg));
 }
 
-.warning-message p,
-.success-message p {
-  font-size: 1rem;
+.usb-check-screen__message p {
+  margin: 0 0 var(--space-md);
+  font-size: var(--font-size-md);
   line-height: 1.8;
   color: var(--text-secondary);
-  margin-bottom: var(--space-md);
 }
 
-.warning-message p:last-child,
-.success-message p:last-child {
+.usb-check-screen__message p:last-child {
   margin-bottom: 0;
 }
 
-.warning-message p:first-child {
+.usb-check-screen__message--warning p:first-child {
   font-weight: 600;
-  color: var(--accent-error);
-  font-size: 1.05rem;
+  color: var(--status-error);
 }
 
-.success-message p:first-child {
+.usb-check-screen__message--success p:first-child {
   font-weight: 600;
-  color: var(--accent-success);
-  font-size: 1.05rem;
+  color: var(--status-success);
 }
 
-/* Action Buttons */
-.actions {
+/* was: .actions */
+.usb-check-screen__actions {
   margin-top: var(--space-2xl);
   display: flex;
   gap: var(--space-md);
@@ -192,23 +174,25 @@
   z-index: 1;
 }
 
-.exit-button {
-  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
-  color: white;
-  padding: 16px 36px;
-  font-size: 1.125rem;
+/* was: .exit-button, .continue-button */
+.usb-check-screen__button {
+  min-width: 10rem;
+  padding: var(--space-md) var(--space-xl);
+  font-size: var(--font-size-lg);
   font-weight: 600;
   border-radius: var(--radius-lg);
-  min-width: 160px;
-  box-shadow: var(--shadow-md);
-  transition: all var(--transition-base);
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
   position: relative;
   overflow: hidden;
+  transition:
+    transform calc(250ms * var(--motion-scale)) ease,
+    box-shadow calc(250ms * var(--motion-scale)) ease,
+    border-color calc(250ms * var(--motion-scale)) ease,
+    background calc(250ms * var(--motion-scale)) ease;
 }
 
-.exit-button::before {
+.usb-check-screen__button::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -216,96 +200,102 @@
   width: 0;
   height: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--border-strong);
   transform: translate(-50%, -50%);
-  transition: width var(--transition-smooth), height var(--transition-smooth);
+  transition:
+    width calc(400ms * var(--motion-scale)) cubic-bezier(0.34, 1.56, 0.64, 1),
+    height calc(400ms * var(--motion-scale)) cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.exit-button:hover::before {
+.usb-check-screen__button:hover::before {
   width: 300px;
   height: 300px;
 }
 
-.exit-button:hover {
+.usb-check-screen__button:hover {
   transform: translateY(-3px);
+}
+
+.usb-check-screen__button:active {
+  transform: translateY(-1px);
+}
+
+.usb-check-screen__button--exit {
+  background: linear-gradient(135deg, var(--status-error) 0%, var(--accent-error) 100%);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.usb-check-screen__button--exit:hover {
   box-shadow: var(--shadow-xl);
 }
 
-.exit-button:active {
-  transform: translateY(-1px);
-}
-
-.continue-button {
-  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
-  color: white;
-  padding: 16px 36px;
-  font-size: 1.125rem;
-  font-weight: 600;
-  border-radius: var(--radius-lg);
-  min-width: 160px;
+.usb-check-screen__button--continue {
+  background: linear-gradient(135deg, var(--status-success) 0%, var(--accent-success) 100%);
+  color: var(--secondary-bg);
   box-shadow: var(--shadow-md), var(--glow-success);
-  transition: all var(--transition-base);
-  border: none;
-  cursor: pointer;
-  position: relative;
-  overflow: hidden;
 }
 
-.continue-button::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  transform: translate(-50%, -50%);
-  transition: width var(--transition-smooth), height var(--transition-smooth);
-}
-
-.continue-button:hover::before {
-  width: 300px;
-  height: 300px;
-}
-
-.continue-button:hover {
-  transform: translateY(-3px);
+.usb-check-screen__button--continue:hover {
   box-shadow: var(--shadow-xl), var(--glow-success);
 }
 
-.continue-button:active {
-  transform: translateY(-1px);
+[data-theme="high-contrast"] .usb-check-screen__button {
+  background: var(--secondary-bg);
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
 }
 
-/* Responsive Design */
 @media (max-width: 640px) {
-  .usb-check-container {
+  .usb-check-screen__card {
     padding: var(--space-xl) var(--space-lg);
   }
-  
-  .warning-icon svg,
-  .success-icon svg {
-    width: 72px;
-    height: 72px;
+
+  .usb-check-screen__icon-svg {
+    width: 4.5rem;
+    height: 4.5rem;
   }
-  
-  .usb-check-container h2 {
-    font-size: 1.5rem;
+
+  .usb-check-screen__title {
+    font-size: var(--font-size-xl);
   }
-  
-  .warning-message p,
-  .success-message p {
-    font-size: 0.95rem;
+
+  .usb-check-screen__message p {
+    font-size: var(--font-size-sm);
   }
-  
-  .actions {
+
+  .usb-check-screen__actions {
     flex-direction: column;
   }
-  
-  .exit-button,
-  .continue-button {
+
+  .usb-check-screen__button {
     width: 100%;
-    min-width: unset;
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usb-check-screen__card {
+    opacity: 1;
+    transform: none;
+  }
+
+  .usb-check-screen__button::before,
+  .usb-check-screen__icon--warning::after,
+  .usb-check-screen__icon--success .usb-check-screen__icon-svg {
+    animation: none;
+  }
+}
+
+@keyframes usb-check-screen-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
 }

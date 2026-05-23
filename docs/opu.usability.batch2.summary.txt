@@ -1,0 +1,449 @@
+opu QMail-GUI fix batch 2 — implementation summary
+Date: 2026-05-21
+Author: claude-opus-4-7 (filename prefix: opu)
+
+Plan reference
+==============
+D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt (v4)
+Previous batch: opu.usability.batch1.summary.txt (FIX-01 + FIX-16-0A)
+
+This batch implements two tightly coupled tickets from Phase 0A:
+  - FIX-03: First-run identity is never verified; App→QMail→
+            QMailDashboard prop chain is broken end-to-end.
+  - FIX-30: Remove the "John Doe / john.doe@qmail.cloud" placeholder
+            identity.
+
+These two are conjoined in practice — FIX-30 is the visible symptom
+that FIX-03's plumbing repair eliminates. Doing them together is
+correct.
+
+Scope guardrails — what's in this batch:
+  - normalizeIdentityForUi() helper added to qmailApiServices.js
+  - App.jsx: route returning users straight to QMAIL; pass
+    initialIdentity into <QMail>
+  - QMail.jsx: forward initialIdentity to QMailDashboard
+  - ServiceSelectionScreen.jsx: verify identity after import via
+    getIdentity() + normalizeIdentityForUi(), with one retry
+  - QMailDashboard.jsx: replace John Doe default with initialIdentity
+    prop; mount-time effect retries getIdentity() if null
+  - WalletSetupScreen.jsx: friendly placeholders when accountData
+    fields are missing
+
+Files changed
+=============
+  src\api\qmailApiServices.js              — new helper
+  src\App.jsx                              — checkIdentity + render
+  src\qmail\QMail.jsx                      — prop forwarding
+  src\qmail\screens\QMailDashboard.jsx     — userAccount + effect
+  src\qmail\screens\WalletSetupScreen.jsx  — safe reads
+  src\screens\ServiceSelectionScreen.jsx   — post-import verify
+
+Six files. No new dependencies. No backend changes.
+
+normalizeIdentityForUi helper
+=============================
+Lives in src\api\qmailApiServices.js (right above hasId).
+
+Design choices worth flagging:
+1. Returns BOTH camelCase (preferred for new code) AND snake_case
+   aliases (existing consumers read pretty_address, serial_number,
+   etc.). This was the explicit v4 plan instruction: "Centralizing
+   the construction prevents every consumer from inventing its own
+   field-name guesses" and "Returning both shapes means a missed
+   consumer still works."
+
+2. Default domain is "qmail.cloud" — the backend response does not
+   carry a domain, but existing consumers (AccountPane:460) read
+   `${userAccount.address}@${userAccount.domain}` so something has
+   to fill the gap. Exposed as opts.defaultDomain in case callers
+   want to override.
+
+3. needs_healing defaults to false. The backend has no
+   identity-health field yet (CORE-F is the HARD prerequisite per
+   FIX-10). Surfacing false here is honest: we don't know the
+   identity health, and the v3/v4 plan said don't synthesize it
+   from wallet folder counts.
+
+4. Safe with null input: returns null. Callers can check.
+
+5. Handles BOTH the getIdentity() response shape (address,
+   serial_number, registered, identity{...}) AND the import-
+   credentials response (coins_found, coins_saved, wallet_path,
+   mail_wallet_path). The latter doesn't carry identity fields, so
+   if you pass it directly, the result will be sparse — callers
+   should call getIdentity() first and normalize that, which is
+   exactly what ServiceSelectionScreen now does.
+
+Identity propagation flow (after batch 2)
+=========================================
+
+Returning user (auto-restore):
+  App.useEffect → App.checkIdentity
+    getIdentity() succeeds with configured=true
+    → normalizeIdentityForUi(raw)
+    → setProvisioningData(normalized)
+    → setSelectedService(QMAIL)        # was PROVISIONING in v1
+  App.renderService → <QMail initialIdentity={provisioningData} />
+  QMail.jsx → <QMailDashboard initialIdentity={...} />
+  QMailDashboard:
+    useState(initialIdentity || null)
+    Mount-time useEffect: if null, retry getIdentity() once.
+
+has_id fallback (coins on disk but identity not yet visible):
+  App.checkIdentity
+    getIdentity() returns null or configured=false
+    hasId() returns {has_id: true}
+    → setProvisioningData(null)
+    → setSelectedService(QMAIL)
+  QMailDashboard mount-time useEffect picks up null userAccount
+  and retries getIdentity() once.
+
+First-run import:
+  ServiceSelectionScreen.handleImport
+    importCredentials() succeeds → response has no identity fields
+    → getIdentity() (retry once on configured=false)
+    → normalizeIdentityForUi(raw)
+    → onSelectService('qmail', normalized)
+  App.handleSelectService('qmail', data):
+    setProvisioningData(data) → setSelectedService(PROVISIONING)
+  PROVISIONING → <WalletSetupScreen accountData={normalized} />
+    User sees their real address in the welcome screen.
+    Clicks "Go to Dashboard" → setSelectedService(QMAIL)
+  At this point provisioningData is still set, so <QMail> receives
+  it as initialIdentity and QMailDashboard mounts with the real
+  identity already in state.
+
+No identity at all:
+  App.checkIdentity finds nothing → SERVICES.NONE
+  ServiceSelectionScreen renders normally.
+
+Product decision baked in
+=========================
+"Returning users with a configured identity should go STRAIGHT to
+QMAIL, not bounce through WalletSetupScreen on every launch.
+WalletSetupScreen remains the first-run-only screen."
+
+Previous behavior: every restart went configured-user → PROVISIONING
+→ user clicks Go to Dashboard → QMAIL. Annoying and adds a step.
+New behavior: configured users land straight on the dashboard.
+WalletSetupScreen is now reached only via post-import flow.
+
+Decisions worth flagging for review
+===================================
+1. Three-tier identity loading sequence:
+     props (initialIdentity)  →  mount-time getIdentity()  →  null
+   QMailDashboard initial state is `initialIdentity || null`. The
+   mount-time useEffect retries getIdentity() once if state is null.
+   If that retry also fails, userAccount stays null. AccountPane
+   already handles a missing userAccount gracefully (the Profile
+   section just doesn't render — see line 460-ish: `{userAccount &&
+   (...)}`). No new "Loading…" placeholder was added, on the
+   reasoning that the existing conditional render is already the
+   right UX (don't show profile until you have one).
+   --> Reviewer: confirm "don't render the Profile section" is
+       acceptable, or should I add an explicit "Loading…" state?
+
+2. Snake_case aliases in normalizeIdentityForUi.
+   This means callers can keep reading `userAccount.pretty_address`
+   and it works. No consumer was updated to read camelCase in this
+   batch except WalletSetupScreen (which I touched anyway) and
+   QMailDashboard's draft-mapper (which I touched anyway). Other
+   consumers like AccountPane still read snake_case and that's
+   fine.
+   --> Reviewer: is this acceptable as a permanent shape, or do you
+       want a follow-up ticket to migrate consumers to camelCase?
+       My recommendation: leave it; the indirection has zero cost
+       and avoids a flag-day migration.
+
+3. handleSelectService('qmail', data) still routes to PROVISIONING.
+   The service argument is currently ignored when `data` is
+   provided. After this batch, the ONLY caller passing data is the
+   post-import flow in ServiceSelectionScreen, and PROVISIONING is
+   the right destination. If a future caller wanted to skip
+   WalletSetupScreen (e.g. a "Continue with existing local
+   identity" button from FIX-15b), App.handleSelectService would
+   need to honor the service argument. Flagged for FIX-15b.
+
+4. Mount-time retry is single-shot, not a polling loop.
+   The v4 plan says "retry once after 500ms" for the
+   ServiceSelectionScreen import-then-identity flow, which I did.
+   For the QMailDashboard mount-time fallback, I only retry once
+   (the initial call). Reasoning: if the backend is slow enough
+   that getIdentity() fails twice, the user is going to notice
+   either way; layering more retries pushes the failure deeper
+   into the load and makes "Loading identity…" feel broken. The
+   user can refresh manually if needed (Refresh button is right
+   there in NavigationPane).
+   --> Reviewer: ok to leave at single-shot, or want a 2-3 retry
+       loop here too?
+
+5. WalletSetupScreen renders "—" when prettyAddress is missing and
+   "Welcome!" (no name) when greetingName is empty. Simple
+   placeholders, no spinner. Matches the v4 plan's "Show "—"
+   placeholders for any missing field; don't crash on null"
+   guidance.
+
+6. handleAccountUpdate spread-on-null guard:
+   Before: `setUserAccount((prev) => ({ ...prev, ...newAccountDetails }))`
+   After:  `setUserAccount((prev) => ({ ...(prev || {}), ...newAccountDetails }))`
+   AccountPane fires this on profile edits; if it ever fires before
+   identity hydration completes, we don't want to crash.
+
+Edge cases handled
+==================
+- Configured user restart → straight to QMAIL with seeded identity
+- has_id fallback (coins on disk, identity lagged) → QMAIL, mount-
+  time retry fills userAccount
+- Successful import + backend lags on identity registration →
+  ServiceSelectionScreen retries once after 500ms, advances even
+  if still null (toast-less; the dashboard's own retry covers it)
+- Import succeeds but identity never appears → user lands on
+  WalletSetupScreen with "Welcome!" greeting (no name) and "—"
+  address badge. Not great, but not crashed. They can proceed to
+  the dashboard which will keep trying.
+- handleAccountUpdate fires before userAccount is set → spread-
+  on-null guarded
+- userAccount.email read in draft mapper (line 303) → uses
+  prettyAddress with sensible fallback chain
+
+Out-of-scope / not done in this batch
+=====================================
+- FIX-13-0B (first-run import error messages) is still pending.
+  ServiceSelectionScreen still surfaces a single error string
+  regardless of cause. Phase 0B work.
+- FIX-04 (draft hydration) — separate ticket.
+- FIX-05 (static healthy server status) — separate ticket. (FIX-10's
+  Repair Now banner already gone from batch 1 follow-up.)
+- FIX-15 / FIX-15b (Sign Out + re-entry) — Phase 1.
+- "Loading identity…" spinner placeholder in AccountPane while
+  userAccount is null. Currently uses AccountPane's existing
+  `{userAccount && ...}` conditional, which silently hides the
+  profile until ready. See decision #1 above.
+
+Verification
+============
+1. npm run build — passes (2.27s). JS bundle +0.5kB (helper +
+   useEffect + prop threading), CSS unchanged from batch 1.
+
+2. ESLint on the six changed files:
+     Before this batch: ~20 issues across these files
+     After this batch:  14 issues
+   Net: -6 violations (removed handleRepairIdentity, repairing
+   state, dead Trash2/icon imports as part of cleanup work that
+   landed earlier; the actual batch-2 delta is no new errors).
+   The remaining 14 are pre-existing baseline (unused React import,
+   missing prop-types, etc.).
+
+3. Manual checklist not run (no live backend in session).
+   Verification steps from the plan, mapped to this batch:
+
+   FIX-03:
+   [ ] Cold start with no identity. Import a valid locker code.
+       Confirm WalletSetupScreen shows the real address (not blank).
+   [ ] Land on dashboard. Open Account > Profile. Confirm real
+       serial number.
+   [ ] Restart the app with an existing identity. Confirm it boots
+       STRAIGHT into QMAIL, no flash of WalletSetupScreen.
+   [ ] Throughout (1)-(3), confirm the RAIDA dot grid stays
+       interactive (no blocking on identity load).
+
+   FIX-30:
+   [ ] No "John Doe" anywhere in the UI at any point during steps
+       1-3 above.
+
+Reviewers please confirm
+========================
+gem / gpt: please look at this diff and respond with:
+  - The four decisions flagged in "Decisions worth flagging" above:
+      1. No explicit Loading state for userAccount=null
+      2. Permanent snake_case aliases (acceptable as long-term shape?)
+      3. handleSelectService service-arg-still-ignored
+      4. Single-shot mount-time retry
+  - Any edge cases I missed in the identity load sequence.
+  - Whether the "advance even when normalized is null" branch in
+    ServiceSelectionScreen is correct, or should I hard-block on
+    "couldn't verify identity" (with a Retry button)?
+
+Next batch (if this one passes review)
+======================================
+Phase 0A is nearly complete after batch 2. Remaining:
+  - FIX-04 (draft hydrate-before-mount)
+  - FIX-05 (remove static healthy AccountPane Server Status)
+
+Both are smaller than batch 2. Plan to do them together as batch 3.
+
+After that, Phase 0B (FIX-02 attachments + FIX-13-0B import errors
++ FIX-35/36/37-0B copy fixes).
+
+Follow-up (gpt batch-2 review)
+==============================
+Date: 2026-05-21
+Reviewer: D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.batch2.review.txt
+
+Five findings, four code-level. All actionable, all genuine bugs.
+Gem's review was a clean approval — no conflicts.
+
+Patches applied:
+
+1. (gpt #1, High) Normalizer no longer double-stamps domains.
+   Before: `${address}@${domain}` was applied to a raw address that
+     already contained '@'. Returning user with backend address
+     "Alice.Admin@Developer.C25.Giga" became
+     "Alice.Admin@Developer.C25.Giga@qmail.cloud".
+   After: if rawAddress.includes("@"), use it AS-IS as prettyAddress.
+     The returned `address` field is now the local-part-only (before
+     @) and `domain` is derived from the email tail. Bare local-part
+     inputs (no @) still get synthesized as `local@defaultDomain`.
+
+2. (gpt #2, High) initialIdentity gated on configured=true.
+   Three coordinated changes:
+   a. ServiceSelectionScreen.handleImport now passes the normalized
+      identity ONLY if normalized.configured === true; otherwise
+      passes null. No more raw import metadata downstream.
+   b. App.handleSelectService now honors the `service` argument
+      (was always routing to PROVISIONING when data was truthy,
+      QMAIL when null). Now reads service to decide route, so the
+      post-import flow can pass null + 'provisioning' to still
+      reach WalletSetupScreen.
+   c. ServiceSelectionScreen passes 'provisioning' (not 'qmail')
+      so the user always sees the welcome screen, identity-loaded
+      or not.
+   d. QMailDashboard initial userAccount state is
+      `initialIdentity?.configured ? initialIdentity : null` so
+      the mount-time retry actually fires for unconfigured inputs.
+
+3. (gpt #3, Medium) WalletSetupScreen no longer falsely claims
+   healthy/verified.
+   Derives `hasVerifiedIdentity = configured && serial > 0 &&
+   prettyAddress`. Status becomes a tri-state ('pending' | 'fracked'
+   | 'healthy'). The "pending" state renders a Loader2 spinner with
+   text: "Your identity is still loading. You can proceed to the
+   dashboard; the app will keep trying to load your details."
+   The Heal Identity button is disabled when no verified identity
+   (with a tooltip explaining why) — you can't heal what's not
+   visible. Make Change stays enabled (it's wallet-side, not
+   identity-dependent).
+
+4. (gpt #4, Medium) Mount-time retry strengthened in QMailDashboard.
+   Before: single immediate getIdentity() call. If it returned
+     unconfigured or threw, no retry.
+   After: up to 3 attempts with 500ms / 1000ms backoff (matches
+     hydrateDownloadedEmail's pattern). Cancellation flag respected.
+     Try/catch per attempt. Only setUserAccount when configured=true.
+     If all 3 attempts fail, leave userAccount null and log a warn.
+     AccountPane's existing conditional render already handles the
+     null case gracefully.
+
+5. (gpt #5, Low) normalizeIdentityForUi now reads raw.identity.
+   Before: helper claimed to handle the nested identity object but
+     only read top-level fields.
+   After: `const nested = raw.identity || {};` and falls back
+     through both top-level and nested for address/email, serial/sn,
+     display_name, first_name, last_name, class_name, beacon_raida.
+
+Files changed in follow-up:
+  src\api\qmailApiServices.js              — normalizer rewrite
+  src\App.jsx                              — handleSelectService
+  src\qmail\screens\QMailDashboard.jsx     — gate + retry loop
+  src\qmail\screens\WalletSetupScreen.jsx  — pending state + heal gate
+  src\screens\ServiceSelectionScreen.jsx   — pass null when unconfigured
+
+normalizer fixture table (gpt requested)
+========================================
+Expected output for the four shapes the normalizer is asked to handle:
+
+Input shape A — configured getIdentity() response
+  raw = {
+    address: "alice", serial_number: 4242, registered: true,
+    display_name: "Alice", first_name: "Alice", last_name: "Smith",
+    class_name: "User",
+    identity: { sn: 4242, address: "alice", ... },
+    configured: true   // synthetic, added by getIdentity()
+  }
+  Expected normalized:
+    address: "alice"
+    prettyAddress: "alice@qmail.cloud"   (no @ in source, synthesize)
+    serialNumber: 4242
+    domain: "qmail.cloud"
+    configured: true
+    needsHealing: false
+    + snake_case aliases pretty_address, serial_number, email_address
+
+Input shape B — configured response with full email already
+  raw = { address: "Alice.Admin@Developer.C25.Giga",
+          serial_number: 4242, registered: true, ... configured: true }
+  Expected normalized:
+    address: "Alice.Admin"                              (local-part only)
+    prettyAddress: "Alice.Admin@Developer.C25.Giga"     (as-is, no doubling)
+    domain: "Developer.C25.Giga"                        (derived from email)
+    serialNumber: 4242
+    configured: true
+   ←—— gpt batch-2 #1 verifies this case explicitly.
+
+Input shape C — unregistered backend response
+  raw = { registered: false, serial_number: 0, configured: false }
+  Expected normalized:
+    address: ""
+    prettyAddress: ""
+    serialNumber: 0
+    configured: false
+   ←—— gpt batch-2 #2 requires that this NOT seed initialIdentity.
+       The callsite gate (configured ? normalized : null) does the
+       work; the normalizer itself produces a sparse-but-honest
+       object.
+
+Input shape D — raw import-credentials metadata (wrong input)
+  raw = { coins_found: 12, coins_saved: 12,
+          wallet_path: "/.../Mail", mail_wallet_path: "/.../Mail" }
+  Expected normalized:
+    address: ""
+    prettyAddress: ""
+    serialNumber: 0
+    configured: false       (no address, no registered, no serial)
+   ←—— behaves identically to shape C. Callsite gate prevents this
+       from leaking downstream.
+
+A real test file (e.g. qmailApiServices.test.js with these four
+cases) would be the right durable solution; not added in this batch
+because there's no existing test infrastructure in the GUI project
+(checked package.json — no test runner configured). Flagged for a
+future "set up GUI testing" ticket if/when desired.
+
+Decisions worth flagging in this follow-up
+==========================================
+- App.handleSelectService now switches on the service argument
+  instead of conflating data!=null with PROVISIONING. This is a
+  behavior change — any caller that relied on
+  onSelectService('something', data) routing to PROVISIONING
+  regardless of `something` now goes to whatever `something` says.
+  No such callers exist today (ServiceSelectionScreen is the only
+  call site).
+- WalletSetupScreen now has THREE status states (pending/fracked/
+  healthy). The Heal button disables in 'pending' mode. Make Change
+  stays enabled.
+- The mount-time retry uses the same 500ms/1000ms backoff as
+  hydrateDownloadedEmail. If we ever want one knob to tune both,
+  factor a withRetry() helper. Not required now.
+
+Verification
+============
+- npm run build: passes (2.23s). JS bundle +1.0kB (longer normalizer,
+  tri-state WalletSetupScreen, retry loop). CSS unchanged.
+- ESLint on the five touched files: 14 issues (13 errors + 1 warning),
+  identical to pre-follow-up baseline. No new violations.
+
+Open question for gpt
+=====================
+gpt's "Recommended minimum before marking batch 2 done":
+  [x] Fix pretty address normalization for full backend addresses.
+  [x] Gate initialIdentity on a verified/configured identity.
+  [x] Treat unresolved identity as pending, not healthy/verified.
+  [ ] Add a normalizer test/table for the four shapes.
+
+The fourth item ships here as documentation (the fixture table
+above) rather than runnable code because there's no test infra in
+the GUI project yet. If you'd prefer me to bootstrap a Vitest or
+Jest config + a normalizer.test.js, say the word — it's ~30 minutes
+of plumbing.
+
+End of file.

@@ -1,5 +1,3 @@
-import React from 'react';
-
 const PayoutTab = () => {
   const handleTransferToBank = () => {
     // TODO: Implement transfer to bank logic

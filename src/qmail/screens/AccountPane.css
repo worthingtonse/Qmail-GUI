@@ -331,6 +331,21 @@
   border-color: var(--accent-danger);
 }
 
+.balance-card.network-online {
+  background: linear-gradient(135deg, var(--accent-success) 10%, var(--card-bg) 100%);
+  border-color: var(--accent-success);
+}
+
+.balance-card.network-offline {
+  background: linear-gradient(135deg, var(--accent-danger) 10%, var(--card-bg) 100%);
+  border-color: var(--accent-danger);
+}
+
+.balance-card.network-unknown {
+  background: linear-gradient(135deg, var(--accent-warning) 10%, var(--card-bg) 100%);
+  border-color: var(--accent-warning);
+}
+
 .balance-label {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
@@ -381,6 +396,13 @@
   gap: var(--space-md);
 }
 
+button.security-action {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
 .security-action:hover {
   background-color: var(--tertiary-bg);
   border-color: var(--border-strong);
@@ -406,6 +428,14 @@
 
 .security-action-icon.danger {
   background-color: var(--accent-danger);
+}
+
+.sign-out-action {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.sign-out-action:hover {
+  border-color: var(--accent-warning);
 }
 
 .security-action-content {
@@ -457,6 +487,25 @@
 .setting-item:hover {
   background-color: var(--tertiary-bg);
   border-color: var(--border-strong);
+}
+
+/* FIX-16-0A + gpt-batch1: rows marked .coming-soon are visibly disabled
+   but still hoverable so the title-tooltip ("This feature is on the
+   roadmap.") fires. The class suppresses the hover-state visuals from
+   .security-action:hover and .setting-item:hover that would otherwise
+   imply interactivity. */
+.security-action.coming-soon,
+.setting-item.coming-soon {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.security-action.coming-soon:hover,
+.setting-item.coming-soon:hover {
+  background-color: var(--secondary-bg);
+  border-color: var(--border-medium);
+  transform: none;
+  box-shadow: none;
 }
 
 .setting-info {
@@ -635,56 +684,74 @@
   flex-shrink: 0;
 }
 
-/* ==================== NOTIFICATION BANNER ==================== */
-
-.notification-banner {
+.account-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
+  justify-content: center;
+  padding: var(--space-xl);
+  background: rgba(15, 23, 42, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.account-confirm-modal {
+  width: min(440px, 100%);
+  background: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-xl);
+  color: var(--text-primary);
+}
+
+.account-confirm-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.account-confirm-header svg {
+  color: var(--accent-warning);
+}
+
+.account-confirm-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.account-confirm-modal p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.account-confirm-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid rgba(245, 158, 11, 0.35);
   border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  font-weight: 500;
-  animation: slideDown 0.3s ease-out;
-  position: relative;
 }
 
-.notification-banner span {
-  flex: 1;
-  line-height: 1.4;
-}
-
-.notification-close {
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  padding: var(--space-xs);
-  opacity: 0.7;
-  transition: opacity var(--transition-base);
+.account-confirm-warning svg {
+  color: var(--accent-warning);
   flex-shrink: 0;
+  margin-top: 1px;
 }
 
-.notification-close:hover {
-  opacity: 1;
-}
-
-.notification-success {
-  background-color: #10b981;
-  border: 1px solid #059669;
-  color: white;
-}
-
-.notification-error {
-  background-color: #ef4444;
-  border: 1px solid #dc2626;
-  color: white;
-}
-
-.notification-info {
-  background-color: #3b82f6;
-  border: 1px solid #2563eb;
-  color: white;
+.account-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
 }
 
 @keyframes slideDown {

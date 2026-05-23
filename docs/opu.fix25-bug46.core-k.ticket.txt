@@ -1,0 +1,518 @@
+FIX-25 / BUG-46 / CORE-K — Search pagination
+=============================================
+Author: Claude Opus 4.7 (Phase 3 reviewer)
+Date:   2026-05-23
+Status: OPEN — backend ask is small (one offset param + one
+        bool field). Fixes BUG-46 and unlocks real search
+        pagination at the same time.
+
+Audience
+--------
+- Backend owner (rest_core).
+- Phase 3+ GUI implementer who will land the pagination + BUG-46
+  fix once the backend ships.
+
+High-level pointer: docs\opu.usability.fix.plan.txt — search for
+"FIX-25", "BUG-46", and "CORE-K." This file documents the contract
+precisely and the GUI patch ready to land. The bug-ledger entry
+for BUG-46 is in docs\cla.bugs.txt.
+
+
+TL;DR
+-----
+1. Today /api/qmail/db/messages/search accepts only `query` and
+   `limit` (clamped 1-200, default 50). Returns
+   { query, count, results[] }. No offset. No total. No "more
+   available" signal.
+
+2. The GUI compensates with a heuristic: if results.length === 50,
+   show "Showing top 50 results. Refine your search to see more."
+   When there happen to be EXACTLY 50 actual matches with no
+   truncation, the notice lies. That's BUG-46.
+
+3. The asked-for change is two additions:
+     (a) Accept an `offset` query param. SQL becomes
+         `LIMIT ? OFFSET ?`. Standard pagination.
+     (b) Internally request `limit + 1` rows; if you got the
+         extra row, set `has_more: true` and only return `limit`.
+         Standard cursor trick — no second COUNT query, no
+         second SQL statement.
+
+4. Response gains two fields: `offset` (echoed) and `has_more`
+   (boolean). Existing `count` stays — it now means "rows in
+   this page," matching its current semantics.
+
+5. NOT asking for an exact `totalCount`. SQLite FTS5 doesn't
+   yield total for free; a second `COUNT(*)` over the FTS index
+   would double search latency for every keystroke. `has_more`
+   is the right shape for search.
+
+
+Diagnostic walk
+---------------
+Files inspected:
+  D:\Code\src\C\rest_core\api_src\api_handlers_qmail_inbox.c
+    (api_handle_qmail_search — the search handler)
+  D:\Code\src\C\rest_core\src\qmail\qmail_db.c
+    (qmail_db_email_search — the SQL underneath)
+  D:\Code\src\JavaScript\Qmail-GUI\src\api\qmailApiServices.js
+    (searchEmails — the GUI's HTTP wrapper)
+  D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\QMailDashboard.jsx
+    (handleSearch — the search-as-you-type pipeline)
+  D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\EmailListPane.jsx
+    (the cap notice + pagination controls)
+
+1. Backend handler (api_handlers_qmail_inbox.c:362-426):
+
+     query  required string param
+     limit  int, default 50, clamped to 1-200
+
+   Response:
+
+     {
+       "success": true,
+       "rid": "...",
+       "query": "<echo>",
+       "count": <number of rows returned>,
+       "results": [
+         {
+           "email_id": "<hex>",
+           "subject": "...",
+           "sender_sn": <int>,
+           "received_timestamp": <int>,
+           "is_read": <bool>,
+           "folder": <int>,
+           "body_preview": "..."   (optional, first 200 chars)
+         },
+         ...
+       ]
+     }
+
+   No offset accepted. No "more results" signal in the response.
+
+2. Backend SQL (qmail_db.c:1011-1073):
+
+     SELECT e.email_id, e.subject, e.body, e.received_timestamp,
+            e.sent_timestamp, e.is_read, e.is_starred, e.is_trashed,
+            e.folder, e.sender_sn, e.inbox_fee
+       FROM qmail_emails e
+       JOIN qmail_emails_fts fts ON e.rowid = fts.rowid
+      WHERE qmail_emails_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+
+   Single-statement SQL. FTS5 with relevance ranking. Result rows
+   loaded into a growable buffer, recipients populated per-row
+   in a second pass.
+
+3. GUI consumer (QMailDashboard.jsx:705-752):
+
+     - 500ms debounce on the search input.
+     - Hard-codes limit=50 (SEARCH_RESULT_LIMIT constant).
+     - Sets totalEmailCount = transformedEmails.length (wrong for
+       pagination — would always be ≤50).
+     - Sets searchResultCapHit = (transformedEmails.length === 50).
+       This is the BUG-46 line. When there are EXACTLY 50 matches
+       with no truncation, this is true but lies.
+     - No offset state, no Previous/Next wiring for search.
+       EmailListPane's existing pagination widget renders only
+       when totalCount > pageSize — which is never true for
+       search results today, so pagination is invisible.
+
+   So today's behavior: search shows up to 50 results, plus a
+   "top 50 results" notice when exactly 50 are returned. No
+   page 2. No "show more." If the target is hit 51, the user
+   has to refine their query.
+
+4. GUI cap notice (EmailListPane.jsx:147-151):
+
+     {searchQuery.trim() && searchResultCapHit && !isLoading && (
+       <div className="search-cap-notice" role="status">
+         Showing top 50 results. Refine your search to see more.
+       </div>
+     )}
+
+   Three-way guard — needed because earlier prototypes flashed
+   the notice during in-flight searches (see Batch 13 notes).
+
+
+Proposed contract — CORE-K (Option A)
+-------------------------------------
+Endpoint:
+  GET /api/qmail/db/messages/search
+
+Existing params unchanged:
+  query  string  required
+  limit  int     1-200, default 50
+
+New param:
+  offset int     0+, default 0
+
+Response shape — two new fields, otherwise unchanged:
+
+  {
+    "success": true,
+    "rid": "...",
+    "query": "<echo>",
+    "count": <rows returned in THIS page>,   (unchanged)
+    "limit": <echo>,                          (NEW — echo for parity
+                                                with /messages/list)
+    "offset": <echo>,                         (NEW)
+    "has_more": <bool>,                       (NEW)
+    "results": [ ... ]                        (unchanged shape)
+  }
+
+  count semantics: same as today — number of rows in `results`.
+  has_more: true iff there is at least one more row beyond this
+            page. false on the last page (or empty results).
+  limit/offset: echoes; matches /messages/list's response shape so
+                callers can reuse the same pagination state.
+
+The internal trick: request `limit + 1` rows from SQL. If you
+got `limit + 1`, set has_more=true and discard the trailing row
+before serializing. Otherwise has_more=false. No second query.
+
+Backend implementation sketch
+------------------------------
+File: src/qmail/qmail_db.c
+
+Step 1: Extend qmail_db_email_search signature:
+
+  result_t qmail_db_email_search(const char *query, int limit,
+                                  int offset, bool *has_more_out,
+                                  qmail_email_t **emails_out,
+                                  int *count_out);
+
+  Inside:
+    if (limit <= 0) limit = 50;
+    if (offset < 0) offset = 0;
+    *has_more_out = false;
+
+    const char *sql =
+        "SELECT ... FROM qmail_emails e "
+        "JOIN qmail_emails_fts fts ON e.rowid = fts.rowid "
+        "WHERE qmail_emails_fts MATCH ? "
+        "ORDER BY rank LIMIT ? OFFSET ?";
+
+    sqlite3_bind_text(stmt, 1, query, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, limit + 1);   /* peek-ahead */
+    sqlite3_bind_int(stmt, 3, offset);
+
+    /* loop: collect up to limit rows; if you stepped to a
+       (limit+1)-th row, set *has_more_out = true and stop. */
+    int idx = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (idx >= limit) {
+            *has_more_out = true;
+            break;
+        }
+        read_email_row(stmt, &list[idx]);
+        idx++;
+    }
+
+  Existing capacity/realloc loop stays the same. Just bound the
+  inner step loop by limit (not limit+1) and check for the extra
+  step before assigning.
+
+File: src/qmail/api_handlers_qmail_inbox.c
+
+Step 2: Parse offset + has_more in the handler:
+
+  int limit  = http_param_int_clamped(request, "limit",  50, 1, 200);
+  int offset = http_param_int_clamped(request, "offset",  0, 0, INT_MAX);
+
+  bool has_more = false;
+  result_t ret = qmail_db_email_search(query, limit, offset,
+                                        &has_more, &emails, &count);
+
+  /* In the JSON build: */
+  json_add_int(&jb, "count", count);
+  json_add_int(&jb, "limit", limit);
+  json_add_int(&jb, "offset", offset);
+  json_add_bool(&jb, "has_more", has_more);
+
+Step 3: Update qmail_db.h to match the new signature. Any other
+callers (probably none — this is GUI-only) get the new args.
+
+Estimated diff: ~25 LOC backend, mostly mechanical.
+
+
+Rejected alternatives
+---------------------
+Option B — Return exact totalCount via a second SQL query
+  Add a `SELECT COUNT(*) FROM qmail_emails_fts WHERE
+  qmail_emails_fts MATCH ?` before the main SELECT. Response
+  gains a `total` integer.
+
+  Why this was rejected:
+  - FTS5 COUNT queries are slower than ordinary COUNT queries —
+    they have to evaluate the MATCH expression across the whole
+    index, not just the top-K rows. We'd pay this cost on every
+    keystroke (the GUI debounces at 500ms; multi-keyword
+    queries can be expensive).
+  - Search isn't a folder. Users don't need "Page 7 of 23" —
+    they need "more results available." Pagination widgets
+    typically don't show 1-of-N for search results.
+  - If a user really wants to know the total, they can keep
+    paging until has_more=false. Most users will refine the
+    query long before that.
+
+  Option B IS achievable if the backend owner thinks search
+  performance is fine. The GUI patch is mostly the same; only
+  the cap-notice copy changes ("X results found" vs "more
+  results available"). Flag it during review if you disagree
+  with my read on the cost.
+
+Option C — FTS5 rank cursor (continuation token)
+  Instead of OFFSET, the response includes a continuation
+  cursor (the rank or rowid of the last row returned). The next
+  page request passes that cursor; SQL becomes
+  `WHERE rank > ? AND MATCH ? ORDER BY rank LIMIT ?`.
+
+  Why this was rejected:
+  - OFFSET in FTS5 is O(offset+limit) — you pay for all the
+    skipped rows. For shallow pagination (page 1, 2, 3) this is
+    fine. For deep pagination it gets slower.
+  - But the GUI does not deep-paginate search. The 500ms debounce
+    and the "refine your query" UX both discourage going past
+    page 2 or 3 in practice. Standard OFFSET handles that
+    comfortably.
+  - Cursors are more complex on both sides — the GUI has to
+    track an opaque token per page, the backend has to validate
+    it. Not worth the complexity for the actual usage pattern.
+
+  Option C is the right answer IF search performance under deep
+  pagination becomes a real complaint. Until then, OFFSET is
+  the simpler, more standard, and easier-to-debug shape.
+
+Option D — Just fix BUG-46, skip pagination
+  Add a `has_more` field via the peek-ahead trick, but don't
+  add offset. The GUI replaces the exact-50 check with the
+  authoritative has_more bool and keeps the "Showing top 50
+  results. Refine to see more." notice.
+
+  Why this was rejected:
+  - The peek-ahead change is the same backend work as Option A.
+    OFFSET is one more bind + one more clamp parse, ~3 LOC.
+    Skipping it leaves the user with no way to ever see results
+    51+, even if they really want them.
+  - The GUI's existing pagination widget is already designed
+    for limit/offset. Wiring it up to search is the natural
+    next step.
+
+  Option D is a viable smaller-scope ship if the backend owner
+  wants to land the BUG-46 fix immediately and defer pagination.
+  Tell me which way you'd prefer and I'll adjust the GUI patch.
+
+
+GUI-side patch (ready to land once Option A ships)
+--------------------------------------------------
+Two files. ~50 LOC.
+
+src/api/qmailApiServices.js
+
+  Update searchEmails to pass offset and surface has_more:
+
+    export const searchEmails = async (query, limit = 50, offset = 0) => {
+      try {
+        if (!query || query.trim() === "") {
+          throw new Error("Search query is required");
+        }
+        const encodedQuery = encodeURIComponent(query);
+        const url =
+          `${API_BASE_URL}/qmail/db/messages/search` +
+          `?query=${encodedQuery}` +
+          `&limit=${limit}` +
+          `&offset=${offset}`;
+        const response = await fetch(url);
+        const data = await handleResponse(response);
+        if (data) {
+          return {
+            success: true,
+            data: {
+              query: data.query || query,
+              results: data.results || [],
+              count: data.count || 0,
+              limit: data.limit || limit,
+              offset: data.offset || offset,
+              hasMore: data.has_more === true,
+            },
+          };
+        }
+        throw new Error("Invalid response from email search endpoint");
+      } catch (error) {
+        console.error("Email search failed:", error);
+        return { success: false, error: `Error: ${error.message}\n\nFailed to search emails.` };
+      }
+    };
+
+src/qmail/screens/QMailDashboard.jsx
+
+  1. Add search-pagination state alongside the existing search
+     state:
+
+       const [searchOffset, setSearchOffset] = useState(0);
+       const [searchHasMore, setSearchHasMore] = useState(false);
+       const [searchTotalShown, setSearchTotalShown] = useState(0);
+
+     (Or fold these into the existing search state if you have
+     a context. Pick what fits the existing pattern.)
+
+  2. handleSearch resets offset to 0 on new query:
+
+       if (query.trim() === "") {
+         setSearchResultCapHit(false);
+         setSearchOffset(0);
+         setSearchHasMore(false);
+         setSearchTotalShown(0);
+         loadEmails(currentFolder);
+         return;
+       }
+
+  3. The debounced search call uses the current offset:
+
+       const result = await searchEmails(query, SEARCH_RESULT_LIMIT, searchOffset);
+       if (result.success) {
+         // ... existing transform ...
+         setEmails(transformedEmails);
+         setTotalEmailCount(transformedEmails.length); // page-local
+         setSearchHasMore(result.data.hasMore);
+         setSearchTotalShown((prev) => searchOffset === 0 ? transformedEmails.length : prev + transformedEmails.length);
+         // BUG-46 fix — authoritative has_more replaces the heuristic:
+         setSearchResultCapHit(result.data.hasMore);
+       }
+
+     The cap-notice now ONLY fires when the backend confirms more
+     results exist. Exact-50 false positive is gone.
+
+  4. Pagination handlers for search mode. Wire them through the
+     existing onPageChange prop, but check whether we're in
+     search mode:
+
+       const isSearching = searchQuery.trim() !== "";
+       const handlePageChange = (newPage) => {
+         if (isSearching) {
+           const newOffset = newPage * SEARCH_RESULT_LIMIT;
+           setSearchOffset(newOffset);
+           // re-run the search at the new offset; the debounce
+           // useEffect already triggers on searchOffset change
+           // if you add it to the dep array.
+           runSearchAtOffset(newOffset);
+           return;
+         }
+         // ... existing folder-pagination path ...
+         setCurrentPage(newPage);
+         loadEmails(currentFolder, newPage);
+       };
+
+     (Implementation detail: easiest shape is to extract the
+     search-fetch block into its own helper that takes an offset,
+     and call it from both the debounce effect and the page
+     handler. Avoids duplicate fetch logic.)
+
+src/qmail/screens/EmailListPane.jsx
+
+  Replace the cap-notice copy to be honest about pagination:
+
+    {searchQuery.trim() && searchResultCapHit && !isLoading && (
+      <div className="search-cap-notice" role="status">
+        More results available. Use Next to keep browsing,
+        or refine your search.
+      </div>
+    )}
+
+  The Previous/Next pagination controls at line 199-220 already
+  exist and gate on totalCount > pageSize. For search, we want
+  them to gate on hasMore || currentSearchPage > 0. Simplest
+  shape: pass a hasMore prop and let EmailListPane combine the
+  two conditions:
+
+    {(totalCount > pageSize || hasMore || currentPage > 0) && (
+      <div className="pagination-controls">
+        <button disabled={currentPage === 0}>Previous</button>
+        <span>Page {currentPage + 1}</span>
+        <button disabled={!hasMore}>Next</button>
+      </div>
+    )}
+
+  In folder-list mode, hasMore is computed as
+  `(currentPage + 1) * pageSize < totalCount`. In search mode,
+  hasMore comes from the backend. Same widget, two data sources.
+
+Estimated GUI diff: ~50 LOC.
+
+
+Verification (after CORE-K ships)
+---------------------------------
+Manual checks against a live backend:
+
+  1. Search for a term with exactly 50 matches (no truncation).
+     Confirm:
+       - Cap notice does NOT appear.
+       - Next button is disabled.
+       - has_more in dev-tools response is false.
+     This is the BUG-46 regression test.
+
+  2. Search for a term with 51+ matches. Confirm:
+       - Cap notice appears with the "More results available"
+         copy.
+       - Next button is enabled.
+       - has_more is true.
+       - Clicking Next fetches page 2; the next 50 rows render.
+       - Previous becomes enabled; Next reflects has_more on the
+         new page.
+
+  3. Page deep into search results (page 3+). Performance should
+     remain reasonable. FTS5 OFFSET is O(offset+limit); a search
+     hitting offset=200 with limit=50 is still fast on realistic
+     mailboxes.
+
+  4. Search for a term with 0 matches. Confirm the empty-state
+     copy renders and no pagination is shown.
+
+  5. Search with a new query while on page N>0 of an old search.
+     Confirm:
+       - Offset resets to 0 on the new query (debounce effect).
+       - Page 1 of the new results renders.
+       - has_more reflects the new query's truncation, not the
+         old one.
+
+  6. Clear the search input. Confirm:
+       - The folder-list view returns.
+       - searchHasMore + searchOffset are reset to 0/false.
+       - Folder-list pagination (the existing path) is unaffected.
+
+  7. Concurrency: very fast typing (5+ chars per second).
+     Confirm only the latest debounced search response wins
+     (the existing 500ms debounce + the implicit "latest result
+     replaces" pattern in handleSearch handle this; no race
+     introduced by the new offset state).
+
+
+Schedule
+--------
+- This file documents the contract.
+- The interim GUI side ships NOTHING in this batch. The current
+  exact-50 heuristic is acknowledged as a known issue (BUG-46
+  in cla.bugs.txt) and the project decided most users won't hit
+  the cap. There's no useful interim cleanup short of removing
+  the cap notice entirely, which would make the existing
+  truncation invisible — worse than the false positive.
+- After CORE-K ships, land the GUI patch in one batch.
+
+CORE-K is marked LOW priority per cla.bugs.txt — "most users
+will not hit the cap." The actual backend cost is small enough
+that bundling it with whichever other CORE-X ticket ships next
+makes sense.
+
+
+Files touched by this batch
+---------------------------
+- docs/opu.fix25-bug46.core-k.ticket.txt — this file (new).
+- docs/opu.usability.fix.plan.txt — refresh FIX-25 + CORE-K
+  entries to point here.
+- docs/cla.bugs.txt — update BUG-46 to reference this ticket.
+
+No code changes. No backend changes. CORE-K remains OPEN.
+
+End of file.

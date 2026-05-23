@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Pencil, Trash2, AlertTriangle } from 'lucide-react';
 // API-FIX: switchWallet removed — rest_core doesn't track active wallet state
 import { listWallets, getWalletBalance, createWallet, renameWallet, deleteWallet, addWalletLocation } from '../../../api/apiService.js';
@@ -455,7 +455,7 @@ const StoreTab = () => {
                             <p className="denomination-label">Denominations:</p>
                             <div className="denomination-list">
                               {Object.entries(wallet.denomination_counts)
-                                .filter(([denom, count]) => count > 0)
+                                .filter(([, count]) => count > 0)
                                 .sort(([a], [b]) => Number(b) - Number(a))
                                 .map(([denom, count]) => (
                                   <span key={denom} className="denomination-item">
@@ -485,7 +485,7 @@ const StoreTab = () => {
                         <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
                           <p className="delete-warning">
                             <AlertTriangle size={16} className="warning-icon" />
-                            Delete wallet "{wallet.name}"?
+                            Delete wallet &quot;{wallet.name}&quot;?
                           </p>
                           <div className="delete-actions">
                             <button

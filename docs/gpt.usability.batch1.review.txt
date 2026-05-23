@@ -1,0 +1,182 @@
+gpt review of opu QMail-GUI usability batch 1
+Date: 2026-05-21
+Reviewed summary:
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.batch1.summary.txt
+
+Scope
+=====
+Reviewed the batch summary and the current worktree, with focus on the two
+claimed implemented tickets:
+
+  - FIX-01: pending-message download hydrates body
+  - FIX-16-0A: dead Account/Security controls disabled
+
+Important caveat: the current worktree has modified files outside the batch
+summary:
+
+  - src\api\qmailApiServices.js
+  - src\qmail\screens\ComposeModal.jsx
+  - src\screens\ServiceSelectionScreen.jsx
+
+Those may be earlier/unrelated work, but the summary says only
+QMailDashboard.jsx and AccountPane.jsx changed. If this is meant to be a
+reviewable batch, either isolate the diff or update the summary so reviewers
+know what is in scope.
+
+Verification run
+================
+  - npm run build: passes.
+  - npx eslint src/qmail/screens/AccountPane.jsx src/qmail/screens/QMailDashboard.jsx:
+    still fails on existing baseline issues. One current unused import,
+    Trash2, is newly suspicious because Delete Account was removed.
+
+Findings
+========
+
+1. High: pending download completion can overwrite a different selected email.
+
+   Files:
+     src\qmail\screens\QMailDashboard.jsx:481
+     src\qmail\screens\QMailDashboard.jsx:488
+     src\qmail\screens\QMailDashboard.jsx:797
+     src\qmail\screens\QMailDashboard.jsx:807
+
+   Problem:
+     handleSelectEmail starts an async download/hydrate operation for a pending
+     row, then returns. If the user selects another message while hydration is
+     still running, handleDownloadMail still calls setSelectedEmail(prev => ...)
+     and setEmailAttachments(...) when it finishes. That mutates whichever email
+     is selected at completion time, not necessarily the email that initiated
+     the download.
+
+     The summary says the existing isDownloadingItem guard handles this, but it
+     only disables the currently selected ReadingPane download button. It does
+     not prevent list selection changes and it does not guard the final state
+     writes.
+
+   Impact:
+     The reading pane can show message A's metadata merged with message B's
+     decrypted body/attachments. The retry loop makes this more likely because
+     the operation can now last longer.
+
+   Suggested fix:
+     Track the requested identifier with a request token/ref, or guard each
+     selectedEmail/emailAttachments write:
+
+       setSelectedEmail(prev => {
+         const selectedKey = prev?.guid || prev?.id;
+         if (selectedKey !== identifier && selectedKey !== hydrated.body.id) {
+           return prev;
+         }
+         return { ...prev, ...hydrated.body, ... };
+       });
+
+     Do the same for setEmailAttachments. It is fine to refresh the list and
+     remove the pending row after a successful download, but only mutate the
+     reading-pane selection if the same message is still selected.
+
+2. Medium/High: pending download marks the message read only in local UI state.
+
+   Files:
+     src\qmail\screens\QMailDashboard.jsx:485
+     src\qmail\screens\QMailDashboard.jsx:488
+     src\qmail\screens\QMailDashboard.jsx:818
+     src\qmail\screens\QMailDashboard.jsx:823
+
+   Problem:
+     The pending branch in handleSelectEmail returns before the normal
+     handleMarkAsRead(email.id, true) path. After hydration, handleDownloadMail
+     sets isRead: true in selectedEmail/list state and calls loadMailCounts(),
+     but it never persists the read state with markEmailRead for the returned
+     email_id.
+
+   Impact:
+     The UI can briefly show the decrypted message as read, then a reload/count
+     refresh can still treat it as unread if the backend saved the newly
+     downloaded row as unread. The unread badge may not update the way the
+     summary expects.
+
+   Suggested fix:
+     After hydration succeeds and the real local email id is known, call:
+
+       await markEmailRead(hydrated.body.id, true)
+
+     or route through handleMarkAsRead(hydrated.body.id, true). Keep this after
+     the successful hydrate, not before, because pending rows do not have the
+     local email id yet.
+
+3. High: AccountPane still runs a mutating identity repair from the wrong signal.
+
+   Files:
+     src\qmail\screens\AccountPane.jsx:296
+     src\qmail\screens\AccountPane.jsx:301
+     src\qmail\screens\AccountPane.jsx:553
+     src\qmail\screens\AccountPane.jsx:585
+
+   Problem:
+     Current AccountPane shows the Repair Now panel when
+     walletBalance?.folders.fracked.coins > 0, then calls healWallet() when the
+     user clicks it. That is still the wallet-wide fracked-coin signal called
+     out as wrong in the plan, and healWallet() is a mutating identity-heal
+     endpoint.
+
+   Impact:
+     A user can be prompted to mutate/heal the QMail identity because unrelated
+     wallet coins are fracked. This violates the revised plan's CORE-F rule:
+     do not drive identity repair from wallet fracked counts and do not use heal
+     as a health check.
+
+   Suggested fix:
+     Until a non-mutating identity-health endpoint exists, remove this warning
+     trigger entirely or move repair into an explicit manual "Identity tools"
+     subsection that is not automatically shown from walletBalance folders.
+     If this change is not part of batch 1, it should still be fixed or reverted
+     because it is present in the current worktree.
+
+4. Low/Medium: Coming Soon rows claim tooltips, but pointer-events disables them.
+
+   Files:
+     src\qmail\screens\AccountPane.jsx:34
+     src\qmail\screens\AccountPane.jsx:39
+     src\qmail\screens\AccountPane.jsx:56
+     src\qmail\screens\AccountPane.jsx:76
+
+   Problem:
+     COMING_SOON_STYLE sets pointerEvents: "none" on the disabled row. The row
+     also carries title text, but pointer-events none means the row will not be
+     the hover target, so the browser tooltip generally will not appear. The
+     toggle wrapper also prevents hover from reaching the disabled button.
+
+   Impact:
+     The controls are disabled, but one of the stated UX affordances ("This
+     feature is on the roadmap" tooltip) will not reliably work.
+
+   Suggested fix:
+     Remove pointerEvents: "none" from the wrapper. Keep no onClick handler,
+     cursor: default, tabIndex={-1}, aria-disabled, and disabled on actual
+     buttons. If hover styles from .security-action are a problem, override
+     those hover styles with a coming-soon CSS class instead of disabling pointer
+     events.
+
+5. Low: remove the now-unused Trash2 import.
+
+   File:
+     src\qmail\screens\AccountPane.jsx:13
+
+   Problem:
+     Delete Account was removed, but Trash2 is still imported. This is now an
+     unused import. The touched-file eslint run reports it.
+
+   Suggested fix:
+     Remove Trash2 from the lucide-react import list.
+
+Non-blocking notes
+==================
+The FIX-01 retry helper waits after the final attempt too. That is harmless but
+unnecessary; the loop currently does 500ms, 1000ms, and then another 1500ms
+before returning null. If the intended backoff is only between attempts, skip
+the sleep when attempt === 2.
+
+The local-DB short-circuit in handleDownloadMail is fine in principle, but the
+same stale-selection guard from finding 1 should cover both local and pending
+success paths.

@@ -1,0 +1,77 @@
+QMail GUI theme plan
+
+Existing situation
+- The GUI already has a strong CSS variable base in `src/index.css`, `src/App.css`, and the feature CSS files.
+- That base still behaves like one baked-in dark theme, with repeated raw colors, gradients, blur values, and font sizes scattered through the app.
+- The Account pane still shows Dark Mode as a placeholder, so theme selection is not wired through the UI yet.
+- There is no runtime theme manager, no standard-theme registry, and no persisted user choice in the GUI.
+
+Backend facts
+- The theme endpoint is `GET/POST/DELETE /api/system/theme`.
+- The C backend stores the file as raw text in `Themes/custom_theme.txt` under client data and enforces an 8192-byte limit.
+- The PHP spec page recommends a YAML-style configuration file and documents create-on-GET behavior with a default stub.
+- The backend and spec do not match perfectly, so the GUI should treat the file as opaque text and stay tolerant of either shape until the contract is reconciled.
+
+Proposed approach
+- Define one shared theme contract using CSS variables for colors, typography, spacing, shadows, borders, blur, and motion.
+- Centralize the tokens so component CSS consumes variables instead of repeating values.
+- Ship built-in standard themes:
+  - light
+  - dark
+  - high-contrast with larger fonts and reduced visual effects
+- Add a theme manager that loads the active theme at startup, applies it to `<html>`, and falls back to dark when no custom file exists.
+- Keep component styles theme-agnostic so every screen follows the active theme without per-screen rewrites.
+
+User-created themes
+- Use the `theme` API to save a compact theme file with metadata plus token overrides.
+- The plan should include a GUI theme editor so users can start from a standard theme, tweak values, and save the result as a custom theme.
+- Custom themes should register the same way as built-in themes so the UI can list them uniformly.
+- Keep the file format declarative and small enough to stay well under the 8 KB limit.
+
+Responsive sizing
+- Yes, the app should be reactive to monitor size and window size.
+- Handle sizing with fluid layout primitives first: flexbox, grid, `minmax()`, `clamp()`, `rem`, and percentage-based widths.
+- Use media queries for breakpoint changes and container queries where a component needs to adapt to its own width rather than the whole window.
+- Add size tokens for common layout values like content width, panel width, spacing scale, and readable line length.
+- Keep font scaling separate from layout scaling so large text does not break the interface.
+- Favor `min-width`, `max-width`, and scrollable panes over fixed pixel sizing.
+
+Theme file shape
+- Prefer a YAML-style schema in the saved theme file, since that matches the public endpoint documentation and stays readable for users.
+- Include a version, base theme, author/name metadata, and first-class accessibility flags.
+- Use a flat token map keyed by CSS custom-property names so the editor can serialize and deserialize without guessing.
+- Keep the schema minimal so the backend can continue treating the file as opaque text.
+
+Accessibility and theme tokens
+- Add tokens that make the standard themes practical: `--font-scale`, `--motion-scale`, `--glass-blur-amount`, and the missing glow tokens.
+- High contrast should flatten blur, reduce motion, increase type size, and sharpen borders instead of just inverting colors.
+- Make accessibility flags part of the theme metadata so the editor can expose them without requiring users to know token names.
+- Respect system preferences where possible: `prefers-color-scheme`, `prefers-reduced-motion`, `prefers-contrast`, and `forced-colors`.
+- Set the CSS `color-scheme` property on the active theme so form controls and built-in UI chrome match the theme better.
+
+Phase 3: Consolidation, Cleanup & Responsive Refactor
+- Move repeated token definitions into a shared theme layer first.
+- Replace raw colors, shadow values, and blur values in the biggest CSS files with variables.
+- Clean up the largest repeated blocks after the token layer is stable, starting with shared app chrome and then the QMail screens.
+- Standardize the existing CSS as part of the theme work, because themes only work well when the app consumes one coherent token set.
+- Normalize repeated component patterns such as cards, modal shells, buttons, and panes so new themes only need token changes instead of per-screen rewrites.
+- Convert remaining `px` sizing to `rem` where it improves scalability and introduce 8px grid tokens for spacing consistency.
+- Rework fixed-width layouts into fluid constraints so the standard themes stay usable across monitor sizes and window widths.
+
+Model disagreements summary
+- `gem.theme.plan.txt` uses JSON for the custom theme file, while `opu.theme.plan.txt` and this plan prefer YAML-style text.
+- `gem.theme.plan.txt` pushes backend alignment changes first; `opu.theme.plan.txt` treats the backend mismatch as a parallel concern; this plan keeps the GUI tolerant until the contract is reconciled.
+- `gem.theme.plan.txt` is lighter on accessibility tokens; `opu.theme.plan.txt` explicitly adds `--font-scale`, `--motion-scale`, and `--glass-blur-amount`.
+- The plans also differ on how much editor detail to include: gem is minimal, GPT centers the editor as a product feature, and opu goes deepest into the implementation shape.
+
+Positive criticisms of the other plans
+- `gem.theme.plan.txt` is strongest on the custom theme editor and persistence gap, but it stays too abstract about the backend contract and file constraints.
+- `opu.theme.plan.txt` is strongest on backend reality, accessibility tokens, and phase ordering, but it leans too quickly into implementation detail before the token cleanup is fully scoped.
+- `gpt.theme.plan.txt` is strongest when it frames themes as a contract and treats custom themes as first-class registry entries, which keeps built-in and user themes on the same path.
+- The best combined version is gem's editor focus, opu's backend precision, and GPT's theme-contract language.
+
+Implementation notes
+- Use the default theme as the fallback when a custom theme is missing, invalid, or incomplete.
+- Keep built-in themes and custom themes on the same selection path.
+- Reconcile the endpoint contract before implementation if the backend docs and C code must be made consistent.
+- Consolidate CSS in phases so theme changes do not break existing screens while the token layer expands.

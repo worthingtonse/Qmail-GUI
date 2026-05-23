@@ -1,0 +1,490 @@
+CSS refactor plan
+Model: GPT-5.4 (gpt)
+Date: 2026-05-23
+Updated after reading:
+- docs/gem.css-refactor.txt
+- docs/opu.css-refactor.txt
+- user follow-up ideas about alpha-sorted selector tables, clustering by
+  attribute, and possible OSS tooling
+
+
+Executive summary
+-----------------
+The best plan is a HYBRID:
+
+1. inventory everything first,
+2. normalize literal values into tokens first,
+3. cluster repeated declaration bundles second,
+4. convert static inline styles after the token/primitive map exists,
+5. do the final BEM + JSX rename per file.
+
+This keeps the good part of the user's attribute-first idea without ending
+in utility-class soup.
+
+I do NOT recommend:
+- starting with padding utility classes in JSX,
+- moving most layout concerns into long inline class lists,
+- or trying to fully automate semantic class extraction before we have
+  a clean inventory.
+
+
+What changed after comparing the three plans
+--------------------------------------------
+
+From Gemini:
+- Keep the attribute-first inventory idea.
+- But do not stop at generic utility classes.
+
+From Opus:
+- Split the value-side work from the naming-side work.
+- The remaining debt is concentrated in the still-open dirty files, so
+  value sweeps can be done before the final BEM rename pass.
+
+From the user:
+- Add a selector registry with a stable unique ID:
+  file + line + selector.
+- Sort views multiple ways: alphanumeric by selector, by property,
+  by normalized value, by similarity cluster.
+- Use clustering to find exact or near-exact declaration bundles BEFORE
+  deciding what becomes a primitive.
+
+
+Core decision
+-------------
+Use tables and clustering as the ANALYSIS engine.
+Keep tokens + semantic primitives + component-owned BEM CSS as the
+IMPLEMENTATION target.
+
+
+Recommended phase order
+-----------------------
+
+Phase 0 - Source inventory and scope boundaries
+-----------------------------------------------
+Inventory ALL style sources before editing:
+
+1. CSS files
+   - the 22 Phase 4 CSS files
+
+2. JSX inline styles
+   - static inline style blocks
+   - dynamic inline style blocks
+
+3. Runtime style tags / generated CSS-like content
+   - theme injection style tag
+   - generated print/export HTML with embedded style strings
+
+But treat them differently:
+
+- CSS files are the primary refactor target.
+- Static JSX inline styles are the secondary target.
+- Dynamic inline styles that only set custom properties are acceptable.
+- Runtime theme override style tags are architecture, not debt.
+- Generated print/export HTML should be tracked separately unless the user
+  wants print/export theming too.
+
+Important order:
+- inventory all sources first,
+- extract repeated static inline bundles with raw literal leaks next,
+- refactor CSS files after that,
+- convert static inline JSX styles after tokens/primitives exist,
+- leave runtime style tags alone unless there is a specific bug.
+
+Phase 0.5 - Inline exact-bundle prepass
+---------------------------------------
+Before the big CSS value sweeps, run one narrow pass over STATIC inline
+style blocks only.
+
+Target only:
+- exact repeated bundles
+- bundles carrying raw color or font-size literals
+- bundles that clearly map to hint text / helper text / badge / note
+  patterns
+
+Do NOT target yet:
+- dynamic width/position/progress values
+- inline blocks that still need custom-property patterns
+- one-off inline styles whose eventual owner class is not clear
+
+Why:
+- it catches literal leaks that CSS-only sweeps would miss
+- it removes obvious repeated JSX noise cheaply
+- it still avoids the large JSX churn of a full inline-first rewrite
+
+
+Phase 1 - Build the selector registry
+-------------------------------------
+Create a stable table with one row per selector occurrence.
+
+Recommended unique IDs:
+- selector_id = file_path + ":" + line_number + ":" + selector_text
+- class_id = class_name + "@" + file_path + ":" + line_number
+
+Primary columns:
+- selector_id
+- file
+- line
+- selector
+- class_name
+- current block guess
+- selector type
+  (block / element / modifier / utility / state / descendant / unknown)
+- jsx reference count
+- duplicate-family count across files
+- notes
+
+Sort views to generate:
+- alphanumeric by class name
+- grouped by file
+- grouped by duplicate family
+- grouped by current block guess
+
+This is where the user's "put all the classes in alphanumeric order with
+their file name and line number as their unique ID" idea fits directly.
+
+
+Phase 2 - Build property tables
+-------------------------------
+Use separate tables rather than one giant unreadable sheet.
+
+Table A: spacing
+- selector_id
+- padding
+- padding-top/right/bottom/left
+- margin
+- gap
+
+Table B: typography
+- selector_id
+- font-size
+- font-weight
+- line-height
+- letter-spacing
+- text-transform
+
+Table C: surfaces
+- selector_id
+- color
+- background
+- border
+- border-radius
+- box-shadow
+
+Table D: layout
+- selector_id
+- display
+- flex/grid settings
+- width/height
+- min/max constraints
+- overflow
+
+Table E: interaction
+- selector_id
+- transition
+- transform
+- animation
+- hover/focus/active state info
+
+Table F: inline-style registry
+- source_file
+- line
+- component
+- static or dynamic
+- properties used
+- candidate target owner CSS class
+
+
+Phase 3 - Canonicalize declarations
+-----------------------------------
+Before clustering, normalize the data.
+
+Canonicalization rules:
+- trim whitespace
+- sort declaration properties alphabetically for comparison only
+- normalize zero values (`0px` -> `0`)
+- normalize color notation where possible
+- normalize token-equivalent values to the token name
+- normalize transition timing patterns to motion-scale form
+- normalize shorthands cautiously
+
+Output per selector:
+- declaration_hash_raw
+- declaration_hash_normalized
+- property_set_signature
+
+This step is critical because bundle matching is noisy before values are
+normalized.
+
+
+Phase 4 - Run three consolidation algorithms
+--------------------------------------------
+
+Algorithm 1: exact duplicate detection
+- Same normalized declaration hash
+- Good candidate for immediate shared primitive extraction
+
+Algorithm 2: near-duplicate clustering
+- Same property set
+- Values differ only by approved token buckets
+- Example:
+  - padding values differ but all collapse to the same space token
+  - font sizes differ but all collapse to the same type token
+
+Suggested similarity rule:
+- same property set
+- at least 80 percent of normalized values match
+- remaining differences must be explainable by approved token mapping
+- numeric values should be no more than 5 percent apart on the first pass
+  when comparing raw-to-raw or normalized numeric declarations
+- this tolerance can be widened later only if the first-pass clusters are
+  too fragmented to be useful
+
+Algorithm 3: family/collision graph
+- Group selectors with the same or very similar names across files
+- Example:
+  - status-message
+  - result-item
+  - progress-section
+  - form-group
+- Then decide whether they should become:
+  - one shared primitive
+  - or multiple component-local BEM elements
+
+
+Phase 5 - Build the literal-to-token map
+----------------------------------------
+This should ship as a document or generated table before broad edits.
+
+Map:
+- raw hex / rgba -> existing token or proposed new token
+- raw font-size -> existing font-size token
+- raw spacing -> existing space token
+- raw radius -> existing radius token
+- raw border/shadow -> approved shared pattern
+
+This is the right place for the user's "reduce the number of possible
+paddings to 10" idea.
+
+Important refinement:
+- spacing can likely collapse to about 10 buckets
+- typography can collapse to a small tier set
+- color should collapse to semantic roles, not arbitrary 10 buckets
+
+
+Phase 6 - Value-side sweeps
+---------------------------
+Do the mechanical CSS-only cleanup before JSX churn.
+
+Recommended order:
+
+6.1 color sweep
+- replace raw hex/rgba with tokens
+
+6.2 typography sweep
+- replace font-size literals with tokens
+
+6.3 spacing sweep
+- replace padding/margin/gap literals with tokens
+
+6.4 radius/border/shadow sweep
+- collapse onto approved token families
+
+6.5 motion sweep
+- normalize transitions/animations to motion-scale aware patterns
+
+This phase should target CSS files first because it is the safest, most
+mechanical part of the work.
+
+
+Phase 7 - Extract a SMALL semantic primitive layer
+--------------------------------------------------
+Only extract bundles that are both:
+- repeated enough to matter
+- semantically understandable
+
+Good candidates:
+- .btn + modifiers
+- .card
+- .status-message
+- .loading-state
+- .empty-state
+- dialog shell pieces
+- field/input shell
+
+Bad candidates:
+- padding-only helpers
+- width-only helpers
+- color-only helpers
+- arbitrary bundle names that mean nothing outside a spreadsheet
+
+Rule:
+If a cluster is only numerically similar, prefer tokens.
+If a cluster is semantically and visually reused, extract a primitive.
+
+
+Phase 8 - Convert static inline styles
+--------------------------------------
+Do this AFTER the token map and primitive map exist.
+
+Why this order:
+- If we convert inline styles too early, we create more noisy CSS that will
+  later be reworked again.
+- If we convert them after Phase 6 and Phase 7, we already know:
+  - the approved tokens
+  - the approved primitives
+  - the likely owner block names
+
+Conversion rules:
+- static inline style -> owner CSS class
+- any exact repeated bundle already extracted in Phase 0.5 should be reused,
+  not re-invented
+- dynamic color/size/layout values -> custom property pattern if needed
+- dynamic theme values should continue to flow through tokens
+- runtime theme style tag is not touched
+
+
+Phase 9 - Per-file BEM rename and JSX update
+--------------------------------------------
+This remains per-file work.
+
+Why it cannot be fully global:
+- JSX className coupling
+- semantic naming decisions
+- reviewability
+- collision risk between screens that happen to use the same generic names
+
+Per-file pass:
+1. apply block name
+2. rename descendants to BEM elements
+3. convert second-class states to modifiers
+4. update JSX className references
+5. keep `/* was: .old-name */` comments
+6. run the standard validation
+
+
+Phase 10 - Post-pass pruning
+----------------------------
+After a family or file is done:
+- remove dead selectors
+- remove duplicate declarations now covered by tokens/primitives
+- re-run duplicate-family tables
+- re-score cluster opportunities
+
+This is where additional primitive extraction may become obvious.
+
+
+Answer to the "inline CSS first or last?" question
+--------------------------------------------------
+Best answer:
+
+1. inventory inline styles first,
+2. normalize CSS files first,
+3. convert static inline styles second,
+4. handle generated style tags last or separately.
+
+So:
+- inventory order = all sources at once
+- implementation order = CSS files first, inline second
+
+
+Open source / tooling strategy
+------------------------------
+Use existing OSS pieces first.
+Do not start a new repo until we prove the workflow on this codebase.
+
+If we build local tooling for this repo, put it in a dedicated analysis
+folder rather than mixing it into component code.
+
+Recommended folder:
+- `scripts/css-analysis/`
+
+Suggested files:
+- `scripts/css-analysis/inventory.mjs`
+- `scripts/css-analysis/canonicalize.mjs`
+- `scripts/css-analysis/cluster.mjs`
+- `scripts/css-analysis/report.mjs`
+- `scripts/css-analysis/README.txt`
+
+Useful existing tools to evaluate:
+- PostCSS or CSSTree
+  - parser / AST for safe CSS analysis
+- CSS Stats or Project Wallace
+  - inventory and metrics
+- stylelint
+  - enforce "no new raw hex/rgba/font-size literals" after migration
+- postcss-combine-duplicated-selectors / css optimizer tools
+  - helpful for exact duplicates, not for semantic refactors
+
+What existing tools will NOT do well by themselves:
+- infer correct BEM names
+- know whether two similar selectors mean the same thing
+- safely update JSX className references semantically
+- preserve the theme-token architecture automatically
+
+If we later build an OSS repo, it should probably be an ANALYZER, not an
+auto-rewriter.
+
+Suggested repo idea:
+- input: CSS files + JSX/TSX files
+- output:
+  - selector inventory CSV
+  - literal-to-token map
+  - duplicate/near-duplicate clusters
+  - candidate primitive report
+  - BEM collision report
+
+That is much safer and more broadly reusable than a tool that rewrites
+classes automatically.
+
+If this graduates into OSS later, the local `scripts/css-analysis/` folder
+can become the prototype source.
+
+
+Concrete deliverables
+---------------------
+
+Deliverable 1
+- docs/gpt.css-selector-registry.csv
+
+Deliverable 2
+- docs/gpt.css-property-tables.csv or split CSVs by category
+
+Deliverable 3
+- docs/gpt.css-literal-map.txt
+
+Deliverable 4
+- docs/gpt.css-clusters.txt
+
+Deliverable 5
+- docs/gpt.css-primitive-candidates.txt
+
+Deliverable 6
+- docs/gpt.css-inline-style-registry.txt
+
+
+Recommended next practical move
+-------------------------------
+If this work continues, the next highest-value step is:
+
+1. build the selector registry
+2. build the literal-to-token map
+3. run the duplicate and near-duplicate clustering
+4. choose the first value-side sweep
+
+That gives a measurable foundation for every later decision.
+
+
+Bottom line
+-----------
+Yes, break the problem down.
+
+Best overall sequence:
+- inventory all sources
+- canonicalize declarations
+- map raw values to tokens
+- run clustering
+- extract only semantic primitives
+- convert static inline styles
+- finish with per-file BEM + JSX renames
+
+That keeps the architecture readable, theme-safe, and reviewable.

@@ -1,0 +1,36 @@
+# Review: QMail-GUI Fix Batch 3 (FIX-04, FIX-05)
+Date: 2026-05-21
+Reviewer: Gemini CLI
+
+## 1. Summary of Changes
+This batch concludes Phase 0A by addressing two critical issues: preventing draft corruption due to empty bodies (FIX-04) and removing the misleading, static "healthy" server status panel (FIX-05). 
+
+## 2. Key Improvements & Strengths
+
+### A. FIX-04: Draft Hydration
+- **Data Preservation**: The core bug—where opening a draft and saving it would overwrite the body with an empty string—is successfully mitigated. 
+- **Safe State Management**: The `loadingDraftId` state correctly prevents rapid double-clicks from spawning multiple redundant `/db/messages/get` requests.
+- **Accessibility & UX**: The use of `aria-busy` and the `opacity: 0.7` styling on the row during hydration are excellent touches that provide clear feedback to all users.
+
+### B. FIX-05: Health Panel Removal
+- **Single Source of Truth**: Removing the static "Healthy" panel was the correct call. The application now properly relies entirely on the NavigationPane's live RAIDA dot grid for service health.
+- **Clean Deletion**: The removal of the associated state (`serverHealth`), unused icon imports (`Heart`), and dead code blocks was thorough.
+
+## 3. Response to Opus's "Decisions worth flagging"
+
+### FIX-04 (Drafts)
+1. **Known API Limitation (To/Cc/Bcc)**: **Yes, FIX-04 is considered closed.** While the lack of recipient hydration is unfortunate, it is definitively a backend limitation (`CORE-L`). The GUI implementation is as complete as it can be; spreading `{ ...email, ...res.data }` ensures it will "just work" once `CORE-L` lands. 
+2. **Spinner Placement**: **Approved.** Reusing the checkbox slot is elegant. It avoids layout shifts and keeps the visual noise low.
+3. **Failure Path**: **Approved.** Keeping the modal closed and showing a toast is the safest route. It forces the user to try again, ensuring they don't accidentally open an empty modal and overwrite their work.
+4. **ID Consistency**: **Confirmed.** `ComposeModal` handles `currentDraftId` correctly on mount.
+
+### FIX-05 (Server Status)
+1. **Option A vs B**: **Option A (Removal) was the correct choice.** Option B (deriving health from `/raida/echo` in `AccountPane`) would have created two distinct UI elements communicating the exact same data, leading to visual clutter. 
+2. **CSS Cleanup**: It is acceptable to leave the `.profile-section` styles in `AccountPane.css` for now, as they are used by the Parity and Profile sections.
+
+## 4. Minor Observations / Future Work
+- **FIX-31 (Remove Parity Section)**: As you noted, once FIX-31 ships, the top half of `AccountPane` will be quite sparse. We should consider a minor layout redesign (e.g., centering the profile card or expanding the RAIDA stats) in a future polish phase.
+- **Backend Ticket `CORE-L`**: I will add this to the master tracker. The backend needs to include `to`, `cc`, `bcc`, and `subsubject` in the `/db/messages/get` response when `folder == drafts`.
+
+## 5. Verdict
+**Batch 3 Approved.** Phase 0A is officially closed. The application is now significantly safer for drafting emails and more honest about its network connectivity. Proceed to Phase 0B (FIX-02, FIX-13-0B, FIX-35/36/37-0B).

@@ -1,0 +1,43 @@
+Batch 14 Summary - FIX-28
+=========================
+
+Scope
+-----
+Implemented Phase 2 Batch 14:
+- FIX-28: Replace ContactsPane window.confirm delete flow.
+
+Changes
+-------
+FIX-28:
+- ContactsPane no longer uses window.confirm() for deleting contacts.
+- User contact delete now opens an in-app confirmation modal with Cancel and
+  Delete actions.
+- The modal blocks duplicate delete attempts while the backend request is in
+  flight and shows an inline error if delete preparation or deletion fails.
+- Successful delete refreshes the contacts list.
+- Added a clickable undo notification after delete completes. Clicking it
+  calls addContact() with the just-deleted contact data and refreshes contacts
+  again on success.
+
+Files Changed
+-------------
+- src/qmail/screens/ContactsPane.jsx
+- src/qmail/screens/ContactsPane.css
+- docs/gpt.usability.batch14.summary.txt
+
+Verification
+------------
+PASS: npm run build
+PASS: npx eslint src/qmail/screens/ContactsPane.jsx --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for the Batch 14 files
+PASS: source scan confirms ContactsPane no longer contains window.confirm()
+
+Manual Verification Notes
+-------------------------
+Pending live app checks:
+- Delete a user contact and confirm the in-app modal appears.
+- Cancel closes the modal without deleting.
+- Delete removes the contact and refreshes the list.
+- Clicking the undo notification restores the deleted contact.

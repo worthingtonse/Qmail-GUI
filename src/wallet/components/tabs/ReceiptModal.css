@@ -1,249 +1,291 @@
-/* Receipt Button Styles */
-.receipt-cell {
-  padding: 8px 12px;
+/* was: .receipt-cell */
+.receipt-modal__cell {
+  min-width: 5rem;
+  padding: var(--space-sm) var(--space-md);
   text-align: center;
-  min-width: 80px;
 }
 
-.receipt-btn {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
+/* was: .receipt-btn */
+.receipt-modal__trigger {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  transition: all 0.2s ease;
-  min-width: 60px;
   justify-content: center;
+  gap: var(--space-xs);
+  min-width: 3.75rem;
+  padding: var(--space-sm) calc(var(--space-sm) + var(--space-xs));
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent-primary) 100%);
+  color: var(--secondary-bg);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform calc(150ms * var(--motion-scale)) ease,
+    box-shadow calc(150ms * var(--motion-scale)) ease,
+    border-color calc(150ms * var(--motion-scale)) ease;
 }
 
-.receipt-btn:hover {
-  background: #2563eb;
+.receipt-modal__trigger:hover {
   transform: translateY(-1px);
+  box-shadow: var(--shadow-md), var(--glow-secondary);
 }
 
-.receipt-btn:active {
+.receipt-modal__trigger:active {
   transform: translateY(0);
 }
 
-.no-receipt {
-  color: #6b7280;
+/* was: .no-receipt */
+.receipt-modal__empty-indicator {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
   font-style: italic;
-  font-size: 12px;
 }
 
-/* Receipt Modal Styles */
-.receipt-modal-overlay {
+/* was: .receipt-modal-overlay */
+.receipt-modal__overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  inset: 0;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 20px;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 82%, transparent);
+  animation: receipt-modal-fade-in calc(200ms * var(--motion-scale)) ease-out;
 }
 
-.receipt-modal {
-  background: #1a1a1a;
-  border-radius: 12px;
-  max-width: 900px;
-  width: 100%;
-  max-height: 80vh;
+/* was: .receipt-modal */
+.receipt-modal__dialog {
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-  border: 1px solid #333;
+  width: 100%;
+  max-width: 56.25rem;
+  max-height: 80vh;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  background: var(--secondary-bg);
+  box-shadow: var(--shadow-xl);
 }
 
-.receipt-modal-header {
-  padding: 20px;
-  border-bottom: 1px solid #333;
+/* was: .receipt-modal-header */
+.receipt-modal__header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  background: #222;
-  border-radius: 12px 12px 0 0;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--card-bg);
 }
 
-.receipt-modal-header h3 {
+.receipt-modal__title {
   margin: 0;
-  color: #fff;
-  font-size: 18px;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
   font-weight: 600;
 }
 
-.close-modal-btn {
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  display: flex;
+/* was: .close-modal-btn */
+.receipt-modal__close-icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  padding: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background calc(150ms * var(--motion-scale)) ease,
+    color calc(150ms * var(--motion-scale)) ease,
+    border-color calc(150ms * var(--motion-scale)) ease;
 }
 
-.close-modal-btn:hover {
-  background: #374151;
-  color: #fff;
+.receipt-modal__close-icon:hover {
+  background: var(--card-hover);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
 }
 
-.receipt-modal-body {
+/* was: .receipt-modal-body */
+.receipt-modal__body {
   flex: 1;
   overflow: auto;
-  padding: 20px;
-  min-height: 300px;
+  min-height: 18.75rem;
+  padding: var(--space-lg);
 }
 
-.receipt-filename {
-  background: #2a2a2a;
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  border-left: 4px solid #3b82f6;
-  color: #e5e7eb;
-  font-size: 14px;
+/* was: .receipt-filename */
+.receipt-modal__filename {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-left: 4px solid var(--accent-secondary);
+  border-radius: var(--radius-sm);
+  background: var(--card-hover);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 
-.receipt-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  color: #9ca3af;
+/* was: .receipt-loading */
+.receipt-modal__loading {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-md);
+  padding: var(--space-2xl);
+  color: var(--text-tertiary);
 }
 
-.receipt-loading .loading-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid #374151;
-  border-top: 3px solid #3b82f6;
+/* was: .loading-spinner */
+.receipt-modal__spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--border-medium);
+  border-top-color: var(--accent-secondary);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
+  animation: receipt-modal-spin calc(1s * var(--motion-scale)) linear infinite;
 }
 
-.receipt-error {
-  background: #7f1d1d;
-  border: 1px solid #dc2626;
-  border-radius: 8px;
-  padding: 16px;
-  color: #fca5a5;
+/* was: .receipt-error */
+.receipt-modal__error {
+  padding: var(--space-md);
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius-sm);
+  background: var(--status-error-bg);
+  color: var(--status-error);
 }
 
-.receipt-error h4 {
-  margin: 0 0 8px 0;
-  color: #fef2f2;
+.receipt-modal__error-title {
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
 }
 
-.receipt-error p {
+.receipt-modal__error p {
   margin: 0;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
+  font-family: 'Courier New', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: var(--font-size-sm);
 }
 
-.receipt-content {
-  background: #0a0a0a;
-  border: 1px solid #333;
-  border-radius: 8px;
+/* was: .receipt-content */
+.receipt-modal__content {
+  max-height: 31.25rem;
   overflow: auto;
-  max-height: 500px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
 }
 
-.receipt-content pre {
+.receipt-modal__content pre {
   margin: 0;
-  padding: 20px;
-  font-family: 'Courier New', 'Monaco', 'Consolas', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #e5e7eb;
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  padding: var(--space-lg);
   background: transparent;
+  color: var(--text-secondary);
+  font-family: 'Courier New', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.receipt-empty {
+/* was: .receipt-empty */
+.receipt-modal__empty {
+  padding: var(--space-2xl);
+  color: var(--text-tertiary);
   text-align: center;
-  padding: 40px;
-  color: #6b7280;
 }
 
-.receipt-modal-footer {
-  padding: 16px 20px;
-  border-top: 1px solid #333;
+/* was: .receipt-modal-footer */
+.receipt-modal__footer {
   display: flex;
   justify-content: flex-end;
-  background: #222;
-  border-radius: 0 0 12px 12px;
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--border-medium);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--card-bg);
 }
 
-.close-receipt-btn {
-  background: #374151;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 10px 20px;
-  font-size: 14px;
+/* was: .close-receipt-btn */
+.receipt-modal__close-button {
+  padding: var(--space-sm) var(--space-lg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--card-hover);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background calc(150ms * var(--motion-scale)) ease,
+    border-color calc(150ms * var(--motion-scale)) ease,
+    transform calc(150ms * var(--motion-scale)) ease;
 }
 
-.close-receipt-btn:hover {
-  background: #4b5563;
+.receipt-modal__close-button:hover {
+  background: var(--card-bg);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-  .receipt-modal {
-    margin: 10px;
+@media (max-width: 640px) {
+  .receipt-modal__overlay {
+    padding: var(--space-md);
+  }
+
+  .receipt-modal__dialog {
     max-height: 90vh;
   }
-  
-  .receipt-modal-header,
-  .receipt-modal-body,
-  .receipt-modal-footer {
-    padding: 16px;
+
+  .receipt-modal__header,
+  .receipt-modal__body,
+  .receipt-modal__footer {
+    padding: var(--space-md);
   }
-  
-  .receipt-content pre {
-    padding: 16px;
-    font-size: 12px;
+
+  .receipt-modal__content pre {
+    padding: var(--space-md);
+    font-size: var(--font-size-xs);
   }
-  
-  .receipt-btn {
-    padding: 4px 8px;
-    font-size: 11px;
+
+  .receipt-modal__trigger {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-size-xs);
   }
 }
 
-/* Animation for modal */
-@keyframes spin {
+[data-theme="high-contrast"] .receipt-modal__trigger,
+[data-theme="high-contrast"] .receipt-modal__close-button {
+  background: var(--secondary-bg);
+  color: var(--text-primary);
+  border-color: var(--accent-secondary);
+  box-shadow: none;
+}
+
+[data-theme="high-contrast"] .receipt-modal__overlay {
+  background: color-mix(in srgb, var(--secondary-bg) 92%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receipt-modal__overlay,
+  .receipt-modal__spinner {
+    animation: none;
+  }
+}
+
+@keyframes receipt-modal-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-@keyframes fadeIn {
-  from { 
-    opacity: 0; 
+@keyframes receipt-modal-fade-in {
+  from {
+    opacity: 0;
     transform: scale(0.9);
   }
-  to { 
-    opacity: 1; 
+
+  to {
+    opacity: 1;
     transform: scale(1);
   }
-}
-
-.receipt-modal-overlay {
-  animation: fadeIn 0.2s ease-out;
 }

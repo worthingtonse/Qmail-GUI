@@ -1,0 +1,396 @@
+Batch 16 Review (FIX-39 + FIX-40 + FIX-41 + BUG-37/38/43)
+=========================================================
+Reviewer: Claude Opus 4.7 (Phase 3)
+Implementer: GPT (gpt.usability.batch16.summary.txt)
+Date: 2026-05-23
+
+Reviewed Files
+--------------
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/ComposeModal.css
+- docs/gpt.usability.batch16.summary.txt
+
+Verdict
+-------
+APPROVED — no code fixes required.
+
+Batch 16 ships FIX-39 (autosave), FIX-40 (showAdvanced persistence), and
+FIX-41 (Cc/Bcc autocomplete) per the master plan, and folds in the
+three compose-modal reviewer BUGs flagged for this batch (BUG-37
+indentation, BUG-38 retry-spinner visibility, BUG-43 validation throw
+routing).
+
+One LOW-severity reviewer-perspective observation logged as BUG-49 in
+docs\cla.bugs.txt — does not block this patch. See Out-of-Scope.
+
+Phase 3 GUI-side progress after this batch: Batches 15 + 16 complete.
+Batch 17 (contacts / nav / account) is the remaining GUI batch.
+
+Spec Verification Checklist
+---------------------------
+FIX-39 (Compose autosave: debounced save every ~5s while typing)
+  Plan text: "Compose autosave: debounced save every ~5s while typing."
+  [x] AUTOSAVE_DELAY_MS = 5000 (line 27) drives a single setTimeout
+      held in autosaveTimerRef (line 169).
+  [x] scheduleAutosave (line 188-196) is the only public entry. It
+      cancels any pending timer first, then early-returns if the
+      modal is closed, currently sending, or already in the
+      success-flash state (sendingStatus === "completed").
+  [x] Edit paths that trigger scheduleAutosave():
+        - handleRecipientChange (line 751) → To/Cc/Bcc
+        - handleContactSelect (line 773) → autocomplete insertion
+        - subsubject onChange (line 1236)
+        - subject onChange (line 1267)
+        - body onChange (line 1281)
+      storageWeeks is intentionally NOT a trigger — it's not a
+      touchedFields entry and the backend only consumes it at send
+      time, so debouncing on it would be noise.
+  [x] Timer fires latestSaveDraftRef.current?.({ autosave: true })
+      so the autosave always uses the latest closure of
+      handleSaveDraft (latestSaveDraftRef is rebound every render at
+      line 596). Closure freshness preserved.
+  [x] handleSaveDraft re-guards at top (line 499-508):
+        - !isOpen
+        - cancelledRef.current
+        - isSending
+        - sendingStatus === "completed"
+        - saveDraftInFlightRef.current
+      The first four protect against a stale timer firing after the
+      user closed/sent/cancelled. The fifth prevents an autosave
+      stampede if the user is mashing keys while a save is in flight.
+  [x] saveDraftInFlightRef cleared in finally (line 586) — guard
+      cannot get stuck. Also force-cleared in the close effect
+      (line 401).
+  [x] Empty-draft guard: if (!subject.trim() && !body.trim()) return
+      false (line 511) — autosave skips empty modals.
+  [x] Saved-indicator UX preserved: setDraftSaved(true) +
+      draftSavedTimerRef setTimeout (line 561-566). Same 2s flash
+      whether manual or autosave. Both timers cleared on close (line
+      396-397) and on unmount (line 416-419).
+  [x] touchedFields guard from gpt-batch3 #1 is preserved. autosave
+      uses the same draftData construction as manual save (line
+      534-538), so it cannot clobber unhydrated to/cc/bcc.
+  [x] Manual Save Draft button (line 1491) calls handleSaveDraft()
+      with no args; clearAutosaveTimer fires inside via the
+      !autosave branch (line 515-517). Manual save resets the
+      autosave debounce window — correct behavior.
+  [x] clearAutosaveTimer in handleSend (line 918) prevents the
+      timer from racing the send poll loop.
+  [x] Draft attachments not persisted — pre-existing limitation,
+      explicitly noted in the summary. Out of scope for this ticket.
+
+FIX-40 (Persist Advanced Options state across modal opens)
+  Plan text: "Persist showAdvanced state across modal opens via
+  localStorage."
+  [x] COMPOSE_ADVANCED_STORAGE_KEY = "qmail.compose.showAdvanced"
+      (line 28). Single key, no namespacing collision risk.
+  [x] readStoredShowAdvanced (line 30-37) reads the key on mount
+      and is the useState initializer for showAdvanced (line 151).
+        - Safe in the SSR/no-window case (returns false).
+        - try/catch around localStorage.getItem so a corrupted
+          profile or quota-exhausted state doesn't crash mount.
+  [x] Persistence useEffect (line 405-414) writes the key on every
+      showAdvanced change. Try/catch around setItem with a quiet
+      no-op (comment: "Ignore storage failures; the toggle still
+      works for this session.") — matches project convention not to
+      surface storage hygiene to the user.
+  [x] Toggle button (line 1205) uses setShowAdvanced(!showAdvanced),
+      which fires the effect on each click → write to localStorage.
+  [x] No setShowAdvanced(false) anywhere in compose open/reset
+      paths. The wide isOpen reset block (line 204-391) does NOT
+      touch showAdvanced, so opening Reply / Forward / new compose
+      keeps the persisted state. Confirmed by grep.
+  [x] Observable behavior: open compose, toggle Advanced open, close
+      modal, reopen — Advanced stays open. Survives full app
+      restart since the value lives in localStorage.
+
+FIX-41 (Contact autocomplete on Cc and Bcc, not just To)
+  Plan text: "Contact autocomplete on Cc and Bcc fields, not just To."
+  [x] Replaced the To-only contact suggestion state with a
+      field-aware model:
+        - contactSuggestionField: "to" | "cc" | "bcc" | null (line
+          160)
+        - contactQuery: shared query string (line 161)
+      No field-specific suggestion state variables remain. Grep
+      confirms zero hits for showContactSuggestions or handleToChange.
+  [x] renderRecipientField (line 1102-1129) is the single render
+      path for all three recipient inputs and includes:
+        - the labeled <input> with handleRecipientChange(field, …)
+        - the contacts toggle button (Users icon) tied to
+          toggleContactSuggestions(field)
+        - renderContactSuggestions(field) for the dropdown
+      All three sites (To at line 1193, Cc at line 1215, Bcc at
+      line 1221) call renderRecipientField, so the new behavior is
+      necessarily uniform across the three fields.
+  [x] getContactAddress (line 721-722) returns
+      autoAddress > email > fullName, matching the summary's
+      precedence and the existing contact-shape contract.
+  [x] mergeContactAddress (line 729-746) is the comma-preserving
+      insertion helper:
+        - currentValue with no trailing comma + non-empty existing
+          content → REPLACE the last token (treat typed partial as
+          the search prefix).
+        - currentValue with trailing comma+whitespace → APPEND
+          (user has signaled "now add another").
+        - empty / single-token currentValue → SET.
+      Result is trim-and-rejoin with ", " separators. Single-
+      responsibility helper; testable in isolation.
+  [x] handleContactSelect (line 760-776) passes replaceLastToken =
+      contactQuery.trim().length > 0 so a fresh-from-toggle
+      selection (no typed prefix) just appends; a partial-typed
+      selection replaces the partial. Correct.
+  [x] markTouched("to" / "cc" / "bcc") still fires in both
+      handleRecipientChange (line 750) and handleContactSelect
+      (line 772). FIX-09 touchedFields contract preserved.
+  [x] toggleContactSuggestions (line 778-787) clears the query when
+      the user opens the picker fresh, so the dropdown shows all
+      contacts (capped via slice(0, 5)) rather than filtering on a
+      stale query.
+  [x] filteredContacts (line 790-800) shared filter — searches both
+      fullName and address, case-insensitive. No per-field divergence.
+  [x] Cc/Bcc inputs only render when showAdvanced is true (line
+      1213-1257). That's intentional — Advanced gates the fields
+      themselves. Combined with FIX-40, the user can keep Advanced
+      open across sessions and get autocomplete on Cc/Bcc by default.
+  [x] Pre-existing Phase 1 schema dependency (FIX-09) verified — the
+      contact shape exposes autoAddress, email, and fullName per
+      gpt.phase3.handoff.txt's note. No new backend dependency.
+
+Reviewer BUG Coverage (BUG-37, BUG-38, BUG-43)
+----------------------------------------------
+BUG-37 (LOW — handleSaveDraft dedented to col 0 + duplicate comment)
+  [x] handleSaveDraft is now indented to 2 spaces, matching its
+      sibling functions (sed-checked at line 496-501).
+  [x] Single "// Smart draft save/update functionality" comment
+      remains immediately above the function. The pre-existing
+      duplicate comment is gone.
+  [x] No behavior change — the arrow function continues to close
+      over the enclosing component scope identically.
+
+BUG-38 (LOW — Retry spinner unreachable while rechecking)
+  [x] Network-warning wrapper condition changed from
+        canSend === false   (only renders on confirmed insufficient)
+      to
+        canSend !== true    (renders on null OR false)  (line 1171)
+      That means the banner stays visible during the rechecking
+      window (canSend === null).
+  [x] RefreshCw className stays {canSend === null ? "spinning" : ""}
+      (line 1186) — now actually reachable because the banner
+      doesn't unmount while canSend is null.
+  [x] Retry button itself remains disabled during isSending or
+      canSend === null (line 1182), preventing double-clicks
+      during the recheck.
+  [x] Grep across src\ confirms no other site uses the old
+      canSend === false guard against the banner.
+
+BUG-43 (LOW — Validation throw routes through onSendFailure)
+  [x] The "Please provide at least one valid recipient address."
+      check now lives in the top-of-handleSend validation block
+      (line 905-908):
+        if (toList.length === 0) {
+          setError("Please provide at least one valid recipient...");
+          return;
+        }
+      Critically, this is BEFORE setIsSending(true) at line 919,
+      and BEFORE any state transition that markSendFailed/
+      onSendFailure depend on.
+  [x] No setError path inside the try-block fires onSendFailure
+      anymore for pure validation. The catch block still routes
+      genuine send errors through markSendFailed (line 1038),
+      which is the correct behavior — those ARE legitimate failures
+      the dashboard should be notified about.
+  [x] Net effect: pure recipient-validation failure shows ONLY the
+      inline modal error banner, not the dashboard toast. Matches
+      the BUG-43 fix plan.
+
+Build / Lint Status
+-------------------
+PASS: npm run build
+       1763 modules transformed (Batch 15: 1759) — +4 modules.
+       dist/assets/index-1b3ea574.js  414.21 KB (+18.5 KB vs Batch 15)
+       dist/assets/index-5d628bda.css 224.34 KB (+10.2 KB vs Batch 15)
+       Build time ~3.21s.
+       Implementer noted a transient Vite emitted-asset path error
+       on first attempt that did not reproduce on rerun. I did not
+       hit any flake in this review's build.
+
+PASS: ./node_modules/.bin/eslint
+        src/qmail/screens/ComposeModal.jsx
+        --report-unused-disable-directives --max-warnings 0
+      Clean — including the file-level
+      /* eslint-disable react/prop-types */ pragma still earns its
+      keep (the component takes prop-typed props by convention).
+
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+
+Grep cross-checks
+-----------------
+- setShowAdvanced(false): ZERO matches in src\ (no surprise reset).
+- showContactSuggestions: ZERO matches.
+- handleToChange: ZERO matches (the To-only handler is gone).
+- canSend === false outside the Send-button ternary copy: ZERO.
+  The two remaining hits at lines 1456 and 1476 are inside the
+  three-way label tree (Send / Verifying… / Send anyway) and are
+  correct.
+- "Please provide at least one valid recipient address." throw
+  path: ZERO. The string only appears once now, at line 906 in
+  the pre-isSending guard.
+
+Reviewer-Focus Answers
+----------------------
+GPT's summary did not include an explicit Reviewer Focus block.
+The five reviewer-perspective gotchas from opu.phase3.handoff.txt
+sections 1-4 that applied to compose work were:
+
+  Section #1 (don't delete the stale commented handleSend block,
+              lines 631-718, in the same patch as FIX-39):
+    [respected] The commented block is still present at line
+    806-893. No commit-mixing.
+
+  Section #3 (NotificationProvider addNotification signature —
+              spread options FIRST in the object literal):
+    [n/a] Batch 16 does not introduce new dashboard-toast
+    emissions. setError stays inline; markSendFailed routes
+    through onSendFailure as before.
+
+  Section #4 (cancelledRef contract — five gates in send-poll
+              must survive any refactor; autosave timer is parallel
+              work, don't confuse refs):
+    [respected] All five cancelledRef gates intact (lines 962,
+    967, 993, 1017, 1027). The new autosaveTimerRef and
+    saveDraftInFlightRef are separate refs and never share state
+    with cancelledRef. The autosave's deferred handler re-checks
+    cancelledRef inside handleSaveDraft (line 502, 549, 555, 563,
+    582, 587).
+
+  Reviewer-side conclusion: the new autosave timer pattern is
+  modelled on the same shape as the send-poll loop (timer + ref +
+  early-return on shutdown) without sharing primitives. Good
+  separation.
+
+Out-of-Scope Observations
+-------------------------
+Recorded in docs\cla.bugs.txt:
+
+  BUG-49 (LOW, mount-time hygiene) — The FIX-40 persistence effect
+    at ComposeModal.jsx:405-414 fires on the FIRST mount of every
+    modal-open lifecycle and writes whatever readStoredShowAdvanced
+    returned back into localStorage. The value being written equals
+    the value just read, so this is a no-op write. It is harmless
+    (the localStorage layer is synchronous and fast), but if a
+    future change adds side effects to this effect (e.g. analytics
+    for "advanced opened/closed"), the no-op write will fire one
+    spurious "opened to last-known state" event per session.
+    Suggested fix: track an initialMount ref and skip the first
+    write, OR move the write into the toggle button's onClick
+    instead of useEffect. Either is fine; decision-only.
+
+Pre-existing concerns from earlier batches still applicable:
+  - The 80+ line commented handleSend block (line 806-893) is the
+    same dead code opu.phase3.handoff.txt warned about. It is
+    deliberately untouched in this batch. A standalone cleanup
+    commit is a reasonable next move (NOT in Batch 17 — that
+    touches different files). No new bug; the original guidance
+    holds.
+
+The five LOW/INFO ledger entries that were NOT bundled into Batch
+16 stand unchanged:
+
+  BUG-44  DRD "Add to My Contacts" saved-state — bundle with
+          Batch 17 alongside FIX-42.
+  BUG-46  Search "Showing top 50 results" 50-exact false positive.
+          Backend-blocked on CORE-K. Hold.
+  BUG-47  ContactsPane undo-toast setContacts after unmount.
+          Bundle with Batch 17.
+  BUG-48  ContactsPane delete-error pattern inconsistency.
+          Bundle with Batch 17 (decision-only).
+  BUG-45  INFO docs-only, already handled in Batch 15 docs cleanup.
+
+Next BUG number to use is BUG-50.
+
+Regression Checklist
+--------------------
+Static / code-level verification only — live backend not exercised.
+
+  [code-level pass] Send poll loop cancellation gates (FIX-13/14/15-
+    related) — five cancelledRef checks intact (lines 962, 967,
+    993, 1017, 1027). Section #4 of the handoff explicitly called
+    this out as load-bearing.
+  [code-level pass] FIX-04 draft hydrate — composeContext draft
+    branch (line 219-255) untouched. touchedFields initialization
+    by hydrated-content presence preserved.
+  [code-level pass] FIX-06 forward / FIX-07 reply-all body
+    construction untouched (line 256-354).
+  [code-level pass] FIX-09 touchedFields contract preserved —
+    autosave reuses the same draftData construction as manual save
+    (line 534-538).
+  [code-level pass] FIX-02 attachment staging + size/path limits
+    untouched (line 596-700).
+  [code-level pass] FIX-17 dashboard clickable-pending-toast
+    contract — ComposeModal does not emit pending toasts; routes
+    failures through onSendFailure (the dashboard's translator).
+    Unchanged.
+  [code-level pass] FIX-33 (markSendFailed contract) — the helper
+    body is unchanged; only the call-site for the recipient
+    validation case moved earlier in handleSend.
+  [code-level pass] FIX-46 italic empty-body preview (Batch 15)
+    untouched — buildPreviewState lives in QMailDashboard.jsx and
+    ComposeModal does not touch list-row preview rendering.
+
+Live-Backend Verification Pending
+---------------------------------
+The summary lists six live checks; they remain valid and necessary
+before ship gate:
+
+  - Type in subject/body, idle ~5s, confirm an autosave fires and
+    the "Saved" indicator flashes (FIX-39).
+  - Verify autosave is suppressed while sending, during the 1500ms
+    Sent flash, and after the modal closes (FIX-39 guards).
+  - Open Advanced, close compose, reopen — Advanced persists.
+    Verify across full app restart, not just modal close/reopen
+    (FIX-40).
+  - Use contact picker + autocomplete on each of To, Cc, Bcc; type
+    a partial, click a suggestion, confirm prior comma-separated
+    recipients are preserved (FIX-41).
+  - In To, type only commas / whitespace and click Send. Confirm
+    ONLY the modal error appears; no dashboard toast (BUG-43).
+  - Force a RAIDA insufficiency (stop enough servers, or unplug
+    network briefly), click Retry, confirm the RefreshCw icon
+    spins while the recheck runs (BUG-38).
+
+These pile onto the existing Phase 2 + Batch 15 manual checklists.
+
+Phase 3 Status
+--------------
+GUI-side Phase 3 progress:
+  Batch 15 (list / dashboard polish): COMPLETE.
+    FIX-38, FIX-44, FIX-46, FIX-47 + BUG-39/40/41/42.
+  Batch 16 (compose polish): COMPLETE — this review.
+    FIX-39, FIX-40, FIX-41 + BUG-37/38/43.
+  Batch 17 (contacts / nav / account): NOT STARTED.
+    Targets FIX-42, FIX-43, FIX-45 + BUG-44/47/48.
+  Backend-blocked: BUG-46 (CORE-K).
+
+Phase 2 status unchanged: GUI-side complete through Batch 14;
+backend-blocked tickets (FIX-18, FIX-23, FIX-26) outstanding.
+
+Next Target
+-----------
+Batch 17 — contacts / nav / account polish.
+  FIX-42 (SN ↔ email lookup helper) and BUG-44 share a
+    normalize-and-compare helper. Build once, reuse for both.
+  FIX-43 (folderIcons default map).
+  FIX-45 (rename network-status balance-card classes).
+  BUG-47 (ContactsPane undo onClick after unmount) — natural fit
+    with FIX-42 since both touch ContactsPane.
+  BUG-48 (ContactsPane delete-error pattern) — decision-only.
+    Easiest to resolve in the same pass.
+
+Touched files will be ContactsPane.jsx, AccountPane.jsx (FIX-45),
+the folder-icon map (probably NavigationPane.jsx or a constants
+file). None of these overlap with ComposeModal.jsx, so a standalone
+cleanup commit for the 80-line dead handleSend block (line 806-893)
+could be safely sequenced before, after, or during Batch 17.
+
+End of file.

@@ -1,0 +1,1234 @@
+opu QMail-GUI usability findings
+Date: 2026-05-21
+Model: claude-opus-4-7 (filename prefix: opu)
+
+Scope
+=====
+This is the usability/functionality audit requested in
+  D:\Code\src\C\rest_core\docs\opu.handoff.qmail-gui-usability.txt
+It is NOT a repeat of the API-correctness pass in opu.gui.findings.
+The question this file answers is: "If I were a non-technical user
+trying to send and receive email with this app, would the GUI cover
+the journeys I expect, and where would I get stuck or confused?"
+
+Findings are organized by user journey, then severity-graded:
+  High    - the journey is broken or visibly wrong on first contact
+  Medium  - the journey works but the UX is off enough to erode trust
+  Low     - rough edges; would not block a real user but worth noting
+
+Each finding follows the requested shape:
+  Symptom        - what the user sees
+  Impact         - why it matters to a real user
+  Suggested Fix  - how to address it
+
+I read these screens to write this:
+  src\App.jsx
+  src\screens\ServiceSelectionScreen.jsx
+  src\qmail\QMail.jsx
+  src\qmail\screens\QMailDashboard.jsx
+  src\qmail\screens\WalletSetupScreen.jsx
+  src\qmail\screens\NavigationPane.jsx
+  src\qmail\screens\EmailListPane.jsx
+  src\qmail\screens\EmailListItem.jsx
+  src\qmail\screens\ReadingPane.jsx
+  src\qmail\screens\ComposeModal.jsx
+  src\qmail\screens\AccountPane.jsx
+  src\qmail\screens\ContactsPane.jsx
+  src\qmail\screens\AddContactModal.jsx
+  src\api\qmailApiServices.js   (spot reads only)
+I did not start the live dev server during this pass — the findings
+below are derived from reading the screens against the user journeys.
+A live walk-through is the natural follow-up; a few items below are
+explicitly tagged "verify in browser."
+
+
+First-run / setup
+=================
+
+H1. There is no path to create a brand-new identity from inside the GUI.
+    Symptom:
+      ServiceSelectionScreen offers exactly two buttons: "I Have a
+      Locker Code" and "Buy Locker Code" (which opens
+      distributedmailsystem.com/register in a new browser tab). There
+      is no flow inside the app that says "I want to create a new
+      QMail account / register a new identity."
+    Impact:
+      A user who downloads the app fresh, with no prior CloudCoin or
+      QMail knowledge, is dumped onto an external website and has to
+      figure out how to obtain a locker code there. The GUI looks
+      ready to receive an existing user but does not on-ramp a new
+      one. createMailbox() in qmailApiServices.js is commented out
+      and the backend has no replacement route (per opu.gui.findings
+      X1), so "create new" isn't just a missing UI - it's a missing
+      product capability.
+    Suggested Fix:
+      Either (a) integrate the registration flow inline as a step
+      after "Buy Locker Code" (open the purchase page, then accept
+      the resulting locker code in the same modal), or (b) put a
+      one-line "After you buy your locker code, come back here and
+      tap 'I Have a Locker Code'" hint so users understand the
+      hand-off. Long term, restoring a v2 mailbox-creation endpoint
+      and wiring it back into the GUI is the right answer.
+
+H2. importCredentials() failure modes are all collapsed into one
+    error message and do not tell the user what to do next.
+    Symptom:
+      handleImport in ServiceSelectionScreen sets
+        error = result.error || 'Locker is empty or invalid'
+      No matter why the import failed (locker key wrong, RAIDA
+      majority down, network unreachable, identity already imported
+      under a different wallet, locker_key valid but empty), the
+      user sees the same red text.
+    Impact:
+      The very first action a real user takes is "type the code I was
+      given and click Continue." When it fails, the user does not
+      know whether to (a) retype the code, (b) wait for the network,
+      (c) contact support, or (d) buy a new locker code. The fallback
+      message "Locker is empty or invalid" suggests "you typed it
+      wrong" even in cases where the locker is fine and the network
+      is the problem.
+    Suggested Fix:
+      Split the error states by HTTP status: 400 → "That doesn't look
+      like a valid locker code"; 404 → "We couldn't find anything in
+      that locker - it may already have been imported, or the code may
+      be wrong"; 5xx / network → "Network is unreachable. Make sure
+      the QMail backend is running and try again." The handler in
+      importCredentials() already returns response.status; surface it
+      in the screen.
+
+M3. Locker-code input still hints "Standard format: ABC-1234" even
+    after MVP-20 relaxed the validation.
+    Symptom:
+      The placeholder text now says "XXX-XXXXX or any locker key"
+      (good), but underneath the buttons the help text still reads
+      "Standard format: ABC-1234." If the user pastes a longer key
+      from another tool, the formatLockerCode bypass quietly lets it
+      through, but the visible help text contradicts that.
+    Impact:
+      Users with a non-standard key from another CloudCoin tool will
+      see the "Standard format: ABC-1234" hint, conclude their key is
+      wrong, and bounce.
+    Suggested Fix:
+      Change the help line to "Standard format is ABC-1234; longer
+      keys from other tools are also accepted." Or just drop it.
+
+M4. The WalletSetupScreen "Make Change" button does not tell the
+    user whether anything happened.
+    Symptom:
+      WalletSetupScreen.jsx:18 handleMakeChange awaits prepareChange()
+      and then just clears isProcessing. No state update, no toast, no
+      status text. The button spins briefly and goes back to idle.
+    Impact:
+      A first-run user sees a button labelled "Make Change", clicks
+      it, and has no feedback. They cannot tell if it worked, failed,
+      or did nothing. Worse, "Make Change" is an unfamiliar concept on
+      a welcome screen.
+    Suggested Fix:
+      Show success/error from the prepareChange() response and
+      explain what "Make Change" means in plain language (e.g. "Break
+      one large coin into smaller denominations so you can pay
+      per-send fees"). Consider whether this even belongs on the
+      first-run screen — the user has not opted into wallet
+      maintenance yet.
+
+L5. WalletSetupScreen "Heal Identity" button is always offered,
+    even when status === "healthy."
+    Symptom:
+      Line 47-55 unconditionally renders the "Heal Identity" button
+      regardless of the status banner above it. Healthy users get
+      "Your identity is healthy and verified." and then a "Heal
+      Identity" button in the same panel.
+    Impact:
+      Same UX quirk the handoff already flagged for AccountPane's
+      "Repair Now": offering a fix button next to a "nothing is wrong"
+      banner is confusing.
+    Suggested Fix:
+      Only render the Heal Identity button when status === "fracked."
+      Healthy first-run users should see Go to Dashboard and (maybe)
+      Make Change, nothing else.
+
+
+Read mail
+=========
+
+H6. There is no Forward action anywhere in the GUI.
+    Symptom:
+      ReadingPane.jsx exposes Reply, Move-to, and Delete/Trash. There
+      is no Forward button, no forwardEmail() in qmailApiServices.js,
+      and no keyboard shortcut. (Grep on the source tree returns zero
+      hits for "forward" outside the Forward icon import that is not
+      used.)
+    Impact:
+      Forward is one of the four customary mail actions (read /
+      reply / forward / delete). Its absence from a tool branded as
+      "the next generation of secure communication" will read as
+      "this isn't a real email program."
+    Suggested Fix:
+      Add a Forward button next to Reply that opens ComposeModal
+      pre-filled with the original subject prefixed by "Fwd:" and
+      the original body quoted underneath. No new backend endpoint
+      is needed — it's the same upload_and_tell call.
+
+H7. Reply-all is not available.
+    Symptom:
+      handleReply in QMailDashboard.jsx:564 only pre-fills the To
+      field with the original sender. Cc and Bcc of the original
+      message are discarded. There is no "Reply All" affordance.
+    Impact:
+      Threads with multiple recipients are a normal email use case.
+      A user replying to a 1:N message will appear to silently drop
+      everyone else from the conversation — exactly the kind of
+      mistake email clients have spent 30 years preventing.
+    Suggested Fix:
+      Add a Reply All button. Build it from the original Cc + To list,
+      excluding the current user's own address (whoami). If the user's
+      address can't be resolved, accept the small risk of self-cc;
+      that is conventional.
+
+M8. There is no "Mark as unread" path from the reading pane.
+    Symptom:
+      The mail list item exposes a click-to-toggle envelope icon
+      (EmailListItem.jsx:32) that flips read/unread. The reading pane
+      has no equivalent. Once the user opens a message, it is
+      auto-marked-read (QMailDashboard.jsx:500-509), and from inside
+      the reading pane the only way to flip it back is to click off
+      the message and click the tiny envelope icon in the list.
+    Impact:
+      "Mark unread" is the customary way users keep a message in the
+      "still needs my attention" pile after they've peeked at it.
+      Hiding it behind a list-item icon is unintuitive.
+    Suggested Fix:
+      Add a Mark Unread button to the reading pane's action row,
+      next to Reply / Move / Delete.
+
+M9. There is no Archive button at the message level, even though
+    Archive is a recognised folder.
+    Symptom:
+      NavigationPane.jsx maps "archive" to a folder icon and emails
+      land in archive only via the Move-to dropdown in ReadingPane.
+      One-click archive is the modern email convention (Gmail uses
+      "E"; mobile clients put it next to Trash). The dropdown is two
+      clicks plus a target selection.
+    Impact:
+      Users with non-trivial inbox volume cannot triage efficiently.
+      Move-to-via-dropdown is fine as the catch-all, but archive is
+      common enough that it deserves a direct button.
+    Suggested Fix:
+      Add a top-level Archive action in ReadingPane and as a hover
+      affordance on EmailListItem. Same code path as moveEmail(id,
+      "archive").
+
+H10. The "Encrypted Message (Tap to Download)" placeholder hides the
+     real subject and sender from the inbox list.
+    Symptom:
+      QMailDashboard.jsx:84-98 builds formattedPendingMails. For every
+      not-yet-downloaded notification, the subject in the list reads
+      literally "🔒 Encrypted Message (Tap to Download)" and the
+      preview reads "Encrypted payload waiting to be downloaded...".
+      The actual sender_address is shown, but the subject is hidden
+      until the user opens and decrypts.
+    Impact:
+      A user with 5 pending downloads sees 5 identical rows in the
+      inbox and cannot tell which one is the urgent message from
+      their boss. The whole point of an inbox preview is to triage
+      without committing.
+    Suggested Fix:
+      The notifications endpoint should expose at minimum a
+      sender-visible subject hint (or sealed/encrypted-subject), and
+      the GUI should show it in italics with the lock icon, so the
+      list is scannable. Falling back to "Encrypted Message" only
+      when no hint exists.
+
+M11. Auto-download on selection means a curious click triggers
+     network work the user did not intend.
+    Symptom:
+      handleSelectEmail (QMailDashboard.jsx:481-490) auto-calls
+      handleDownloadMail the moment the user clicks a pending row.
+      ReadingPane.jsx separately renders a "Download Message" button
+      for pending mails, but by the time the user reads that button,
+      handleDownloadMail is already running.
+    Impact:
+      The user has no chance to back out of an unwanted decrypt (e.g.
+      a suspicious message). It also conflicts visually with the
+      manual button in the reading pane.
+    Suggested Fix:
+      Pick one model. Either auto-download on click (and remove the
+      manual button), or keep the manual button and don't auto-fire.
+      The manual model is friendlier for cost-per-decrypt awareness.
+
+M12. Search results lose the active folder context.
+    Symptom:
+      EmailListPane's search box says "Search inbox..." or "Search
+      sent..." (depending on currentFolder), but handleSearch in
+      QMailDashboard.jsx:423 calls searchEmails(query, 50, 0) which
+      does not pass folder. The backend search appears to be
+      cross-folder (the result mapping at line 458 even guesses the
+      folder from a numeric value in the response).
+    Impact:
+      Users who type into the "Search inbox" box and get a result
+      from Trash or Sent are confused. The placeholder lies about
+      scope.
+    Suggested Fix:
+      Either (a) make search honor currentFolder and have
+      searchEmails accept a folder param, or (b) change the
+      placeholder to "Search all mail..." so the user knows search is
+      global.
+
+L13. Sort modes silently re-page to page 0 but the pagination control
+     can still show a stale "Page N of M."
+    Symptom:
+      handleSortChange (QMailDashboard.jsx:387) calls
+      setCurrentPage(0) at the end but the getMailList call is fired
+      with offset 0 before the state update settles. Visually fine in
+      most cases but the pagination "Page N of M" widget is keyed off
+      currentPage which is briefly stale.
+    Impact:
+      Cosmetic. A user on page 3 who clicks a sort label will see
+      "Page 3 of M" flash briefly with page 0 results in the list.
+    Suggested Fix:
+      Move setCurrentPage(0) before the API call, or compute the
+      effective page locally and use that for both the call and the
+      pagination widget.
+
+
+Send mail
+=========
+
+H14. Compose has no attachment UI even though the API now supports
+     attachments.
+    Symptom:
+      ComposeModal.jsx hard-codes attachments: [] on send
+      (line 489). The Paperclip icon is imported (line 5) but never
+      rendered. There is no file picker, no attach button, no list
+      of staged files. Per the recent fix, sendEmail() does iterate
+      emailData.attachments and append attachment_file_path entries -
+      but the modal never gives the user a way to populate it.
+    Impact:
+      Attachments are table stakes for any email app. The promise
+      "attachments work end-to-end" from the recent API patch is
+      half delivered: backend ready, GUI silent.
+    Suggested Fix:
+      Add a Paperclip button in the modal footer (next to Save Draft)
+      that opens a file picker. The Electron build can use the native
+      dialog via preload.cjs; the browser build can fall back to
+      <input type="file">. Stage selected files into a state array
+      and render them as removable chips above the body. On send,
+      push their absolute paths into emailData.attachments.
+
+H15. The Compose To-field placeholder says "write address here" and
+     the Cc / Bcc placeholders show RAIDA-style serial numbers like
+     "0006.1.87654321".
+    Symptom:
+      ComposeModal.jsx:674 placeholder "write address here". Line
+      781, 792 placeholders show CC and BCC as "0006.1.87654321 …".
+      The To/Cc/Bcc fields elsewhere accept human-readable
+      addresses (e.g. "alice@qmail.cloud") from the contact picker.
+    Impact:
+      First-time senders see the format hint and assume they need to
+      type a coin SN, which most users will not know. The placeholder
+      should suggest the email-address shape users were promised.
+    Suggested Fix:
+      Change To placeholder to a sample address (e.g. "alice@qmail.
+      cloud"), and align Cc/Bcc placeholders to the same shape. If
+      the system genuinely accepts SN-style addresses, mention that
+      as an "advanced" alternative in the Advanced section.
+
+M16. The Compose Send button is hard-gated on >= 6 RAIDAs reachable;
+     a brand-new user with a flaky network cannot send at all.
+    Symptom:
+      ComposeModal.jsx:227 sets sufficientServers = availableCount
+      >= 6; setCanSend(sufficientServers); the Send button is
+      disabled with title "Network unavailable - cannot send." If
+      getServers() fails or returns < 6 reachable, the user is
+      blocked entirely.
+    Impact:
+      The threshold may be correct for actual upload safety, but the
+      UX gives no recovery path: no retry button, no "I want to try
+      anyway" override, no estimate of when it might come back. A
+      user on a slow VPN may see "Network unavailable" forever
+      and just close the modal.
+    Suggested Fix:
+      (a) Add an explicit Retry button that re-runs
+      checkNetworkStatus. (b) Distinguish "network probe failed"
+      from "network probe succeeded but < 6 reachable" — the first
+      could be a transient client-side issue and is recoverable;
+      the second is a real warning. (c) Soften the gate to a warning
+      banner with a "Send anyway" affordance for advanced users (the
+      backend will fail safely if there really aren't enough RAIDAs).
+
+M17. The compose flow silently swallows draft cleanup on a successful
+     send.
+    Symptom:
+      handleSend in ComposeModal does not call deleteDraft after
+      success. If the user opened ComposeModal from an existing draft
+      (editDraft) and sent it, the draft stays in the Drafts folder.
+      QMailDashboard.handleSendEmail just reloads drafts; it doesn't
+      delete the source draft either.
+    Impact:
+      The user sends a message from a draft, switches to the Drafts
+      folder, and sees the same content sitting there. They will
+      either re-send it (creating duplicates) or wonder if the send
+      didn't actually work.
+    Suggested Fix:
+      After a successful send where currentDraftId is set, delete
+      the draft (existing /api/qmail/db/drafts/delete or equivalent)
+      and refresh the drafts list. Or move the draft into the Sent
+      folder server-side as part of upload_and_tell.
+
+M18. Send-progress messages come from the backend task, but the
+     wording is generic ("Processing…") and there is no
+     time-to-completion hint.
+    Symptom:
+      pollTaskStatus and the inline polling loop both surface
+      message || "Processing..." with progress percentage. A QMail
+      upload genuinely takes 4-30 seconds depending on RAIDA health
+      (per MVP-8 notes).
+    Impact:
+      Users staring at "Processing... (10%)" for 20 seconds will
+      assume the app is frozen. Especially because progress can
+      jump from 10% to 100% in one tick if the backend doesn't
+      emit fine-grained progress.
+    Suggested Fix:
+      Annotate the spinner with stage hints ("Encrypting locally...",
+      "Uploading to RAIDA...", "Notifying recipient...") and show
+      a typical-time estimate ("usually takes 5-15 seconds"). The
+      task message field can be augmented backend-side to expose
+      the current stage.
+
+M19. The Compose modal lets the user keep typing into a 1500ms
+     post-success window before it closes.
+    Symptom:
+      handleSend success path: setSendingStatus("completed"); then
+      setTimeout 1500ms before calling onSend(emailData) and
+      closing. The textarea is disabled (disabled={isSending}) but
+      isSending is set false right before onSend, so for the brief
+      "Sent!" window the buttons are reactive again.
+    Impact:
+      A double-tap of Send during the celebration window does not
+      re-fire a send (because isComposeOpen is mid-close), but the
+      Save Draft button could still fire on the now-sent message
+      and create a Drafts duplicate.
+    Suggested Fix:
+      Keep both buttons disabled through the entire setTimeout
+      window, or close the modal immediately on success and show
+      the "Email sent!" toast in the dashboard.
+
+L20. Save Draft has no autosave; users who close the modal lose
+     their work.
+    Symptom:
+      handleSaveDraft only fires on the Save Draft button click. If
+      the user types a 400-word reply and the browser tab dies or
+      they hit the X, the draft is gone.
+    Impact:
+      Standard email clients autosave drafts every 30s or on blur.
+      Without it, "I lost the email I was writing" is an MVP-day-one
+      complaint.
+    Suggested Fix:
+      Debounced autosave on body / subject change (e.g. 5 seconds
+      idle), reusing handleSaveDraft. Use the currentDraftId for
+      updates so we don't spawn a new draft on every keystroke.
+
+L21. The advanced-options panel collapses on every modal open, even
+     if the user expanded it on the previous compose.
+    Symptom:
+      useEffect on line 66 sets setShowAdvanced(false) every time
+      isOpen flips true.
+    Impact:
+      Power users who use Cc / Bcc / sub-subject on every message
+      have to expand the panel each time.
+    Suggested Fix:
+      Persist showAdvanced in localStorage, or at least within the
+      session.
+
+L22. Contact autocomplete only appears on the To field, not Cc/Bcc.
+    Symptom:
+      handleToChange wires showContactSuggestions for the To input.
+      The Cc and Bcc inputs use plain setCc / setBcc and have no
+      suggestions.
+    Impact:
+      Inconsistent. Users who memorized "I can type a name and pick"
+      will be surprised the same input behaves differently elsewhere
+      in the same form.
+    Suggested Fix:
+      Lift the suggestion logic into a small reusable component and
+      reuse it for Cc and Bcc.
+
+
+Contacts / address book
+=======================
+
+H23. The Add Contact modal collects (name, email) but the backend
+     wants (first_name, last_name, serial_number, description).
+    Symptom:
+      AddContactModal.jsx:4-21 has only two inputs: a Name/Alias and
+      an Email Address. ContactsPane.handleAddContact then splits
+      name into first/last on space and sets the email as the
+      description, with serial_number defaulted to "0".
+    Impact:
+      The user types "alice@qmail.cloud" into the Email field and
+      "Alice Johnson" into Name. The contact gets saved with
+      serial_number=0 and description="alice@qmail.cloud" — neither
+      what the backend's contact schema is designed for, nor what
+      the user expects. Worst case, the contact cannot be used in
+      Compose because the autoAddress field isn't populated correctly
+      (the To-field autocomplete reads contact.autoAddress).
+      Best case, the contact saves but appears with "alice@qmail.
+      cloud" as the description instead of the email and the user
+      can't actually pick it from the compose suggestions.
+    Suggested Fix:
+      Either (a) align the modal to the backend schema (first name,
+      last name, serial number, optional description) and have the
+      email autoderived, or (b) accept the email and split it into
+      the registered SN via /api/qmail/local/address/from-sn (or its
+      inverse). The current "string-split-on-space + email-as-
+      description" hack will silently produce broken contacts.
+
+M24. Deleting a contact uses a window.confirm() dialog which feels
+     out of place in this otherwise glass-styled app.
+    Symptom:
+      ContactsPane.handleDeleteContact line 150 calls window.confirm,
+      producing a native browser modal that breaks the design
+      language.
+    Impact:
+      Visual inconsistency; in the Electron build, the native dialog
+      can also steal focus oddly.
+    Suggested Fix:
+      Use a styled in-app confirm modal (the project already has
+      modal infrastructure for Compose and Add Contact). One-click
+      undo via a toast is the modern alternative.
+
+M25. The "Popular contacts" mode pulls from DRD but does not let the
+     user save one to their own address book.
+    Symptom:
+      ContactsPane only renders the trash button for contacts whose
+      source === "user" (line 355). DRD entries are display-only.
+    Impact:
+      A user finds a popular contact they want to message later,
+      and there is no obvious way to "Add to my contacts" without
+      retyping the name and address into the Add Contact modal.
+    Suggested Fix:
+      For DRD entries, render an Add icon that calls addContact()
+      with the DRD entry's fullName/autoAddress pre-populated.
+
+L26. There is no SN ↔ email helper visible in the Contacts UI.
+    Symptom:
+      convertSnToEmail() exists in qmailApiServices.js and is used
+      from QMailDashboard's handleReply. There is no place for a
+      user to paste a raw serial number and get an email back, or
+      vice versa. The handoff explicitly listed "Convert SN <->
+      email address" as a contacts journey.
+    Impact:
+      Power users (especially during onboarding from other
+      CloudCoin tools) cannot do the cross-walk inside the app.
+    Suggested Fix:
+      Add a small "Lookup" sub-tab in Contacts that exposes both
+      directions of the helper. Low priority but a nice power-user
+      feature.
+
+
+Folders
+=======
+
+H27. There is no Empty Trash / Permanent Delete All action.
+    Symptom:
+      EmailListPane has a per-message delete and a draft-batch
+      delete. There is no "Empty Trash" button anywhere. To purge
+      old trash, the user has to delete each message permanently
+      one at a time from the Reading Pane's "Delete Forever" button.
+    Impact:
+      A user with 200 messages in Trash will not realistically clean
+      it up. Mail storage on QMail costs CC; this is also a wallet
+      cost issue, not just a UX nit.
+    Suggested Fix:
+      Add an "Empty Trash" button in the EmailListPane header when
+      currentFolder === "trash". It should hit
+      /api/qmail/db/messages/delete in a loop, or - better - a new
+      backend batch endpoint /api/qmail/db/messages/empty?folder=trash.
+
+M28. The folder list comes from the backend but the GUI hard-codes
+     icons in NavigationPane only for {inbox, sent, drafts, trash,
+     starred, archive}; any new folder gets the default Mail icon.
+    Symptom:
+      NavigationPane.jsx:38-45 folderIcons mapping. If the backend
+      ever adds a folder (e.g. "spam"), it renders with the generic
+      Mail icon.
+    Impact:
+      Low. Not a problem today but will be the moment Spam / Junk /
+      custom labels arrive.
+    Suggested Fix:
+      Treat folderIcons as a default-with-override map; expose icon
+      hints from the backend folders list, or fall back gracefully
+      to the generic Mail icon (which is what already happens).
+
+M29. The Drafts row in the inbox uses a fake sender "You (Draft)"
+     and a fake email userAccount.email = "john.doe@qmail.cloud".
+    Symptom:
+      QMailDashboard.jsx:80 the default state for userAccount has
+      hard-coded email "john.doe@qmail.cloud". This is consumed by
+      loadEmails for drafts (line 296) where senderEmail is set to
+      userAccount.email. The userAccount state is updated via
+      handleAccountUpdate, but the dashboard never calls anything
+      to populate the real address.
+    Impact:
+      A draft in the list shows "john.doe@qmail.cloud" as the user's
+      own address regardless of who is actually logged in. If the
+      user shows their screen to anyone, this looks like an extra
+      identity floating in the inbox.
+    Suggested Fix:
+      Call /api/qmail/local/identity/get on mount and seed userAccount
+      with the real email + serial number. AccountPane already
+      receives userAccount as a prop; the dashboard is the right
+      seeding point.
+
+L30. Pagination only appears when totalCount > 50, but the page-size
+     50 is not exposed to the user.
+    Symptom:
+      EmailListPane.jsx:153 hard-codes "of {Math.ceil(totalCount /
+      50)}". If the EMAILS_PER_PAGE constant is ever changed in
+      QMailDashboard, the pagination math here is wrong.
+    Impact:
+      Drift hazard; not user-visible today.
+    Suggested Fix:
+      Pass the page size through as a prop.
+
+
+Account / settings
+==================
+
+H31. "Profile Information" only renders when a userAccount is
+     provided, which happens only via the WalletSetupScreen import
+     path. Users who land via "has_id but no identity" flow never
+     see their own address.
+    Symptom:
+      App.jsx:50-54 — if has_id returns true but getIdentity()
+      returned configured=false, the app jumps straight to QMAIL
+      without calling onSelectService(qmail, identity), so
+      provisioningData stays null. QMailDashboard then passes the
+      default placeholder userAccount (John Doe at john.doe@
+      qmail.cloud) down to AccountPane.
+    Impact:
+      A returning user who restarts the app sees "John Doe / john.
+      doe@qmail.cloud" as their own profile. The address bar in
+      Compose still works (the backend resolves the identity server-
+      side), but the visible profile is wrong.
+    Suggested Fix:
+      In QMailDashboard.loadInitialData, also call getIdentity() and
+      seed userAccount from the response. Then AccountPane shows the
+      real address regardless of how the user landed on the
+      dashboard.
+
+H32. There is no Sign Out / Switch Identity action.
+    Symptom:
+      AccountPane renders four "security actions" that all hit
+      handleSecurityAction(action) which just console.log()s the
+      action and does nothing else: Change Password, Two-Factor
+      Authentication, Backup Wallet, Delete Account. None of them
+      are wired to a backend; none have a Sign Out option at all.
+    Impact:
+      A user on a shared machine has no way to log out. A user with
+      multiple identities (Mail wallet vs. some other wallet) has
+      no way to switch between them inside the app. This is the
+      #1 surprise from any email program.
+    Suggested Fix:
+      Two separate items: (a) "Sign Out" — clears the resolved
+      wallet_path and bounces to ServiceSelectionScreen. (b) "Switch
+      Identity" — calls /api/wallets/list and lets the user pick a
+      different registered wallet (likely needs a backend route to
+      change the active "Mail" registration; talk to rest_core
+      about this). Both are big enough that they may not be MVP, but
+      at minimum the absence should be tracked.
+
+H33. "Change Password", "Two-Factor Authentication", "Backup Wallet",
+     and "Delete Account" are all visible, clickable, and do nothing.
+    Symptom:
+      AccountPane.jsx:730-787 — clicking any of these calls
+      handleSecurityAction which only console.log()s. No notification,
+      no toast, no "Coming soon" placeholder.
+    Impact:
+      A user who clicks "Delete Account" and gets no feedback will
+      either click again or assume it worked silently. This is a
+      visible UX bug and possibly a trust/safety bug for Delete
+      Account specifically.
+    Suggested Fix:
+      Either implement these (with appropriate backend support) or
+      mark them visually as "Coming soon" (greyed out with a
+      tooltip) so users don't waste a click. Hide Delete Account
+      entirely until it's real.
+
+H34. Application Settings toggles (Notifications / Dark Mode /
+     Auto-Sync / Biometric) are local state only; they do nothing.
+    Symptom:
+      AccountPane.jsx:289 handleSettingToggle just flips a state
+      flag. Nothing reads that flag elsewhere — dark mode is always
+      on (the whole app is dark-themed), notifications are always
+      checked every 10s, autoSync never ran (and was the dead
+      endpoint), biometric isn't wired to anything.
+    Impact:
+      The user toggles "Dark Mode" off and nothing changes. They
+      assume the whole app is broken.
+    Suggested Fix:
+      Remove the entire Application Settings section until at least
+      one toggle is real. Reintroducing it one toggle at a time as
+      they get wired up is cleaner than leaving four dead switches.
+
+H35. The "Repair Now" warning panel triggers on
+     walletBalance.folders.fracked.coins > 0, not on the identity's
+     own health.
+    Symptom:
+      AccountPane.jsx:499 wraps the warning panel in:
+        {walletBalance?.folders.fracked.coins > 0 && (
+      A user can have a healthy identity coin and unrelated fracked
+      coins in their wallet (e.g. payment coins that got into a bad
+      state), and the screen will still flash "Identity Coin Needs
+      Healing." Conversely, if the identity coin itself is fracked
+      but folders.fracked.coins reports it under a different folder,
+      the warning never appears.
+    Impact:
+      False positives erode trust ("the app keeps yelling at me but
+      Repair Now does nothing"); false negatives mean the recovery
+      path is invisible exactly when it's needed.
+    Suggested Fix:
+      Drive the panel off /api/qmail/raida/identity/heal pre-flight
+      (or /api/qmail/local/identity/exists with a health hint), not
+      a generic wallet-folder count. This is the "should the button
+      be hidden when identity is healthy" question the handoff
+      called out — answer: yes, and the trigger should be identity-
+      specific, not wallet-fracked-count.
+
+M36. The "Parity Server Configuration" section is permanently
+     stuck on "Not Configured" because getParityServer() always
+     returns failure.
+    Symptom:
+      qmailApiServices.js:981 getParityServer() returns
+      { success: false } unconditionally — the API was removed. But
+      AccountPane.jsx:640-715 still renders an entire section for
+      "Parity Server Configuration" with a Refresh button, a
+      Configuration Status row, and a Message row. Clicking Refresh
+      shows "Failed to load parity server: Parity server endpoint
+      removed" — surfaced through showNotification.
+    Impact:
+      A whole panel dedicated to a feature that no longer exists.
+      Refresh is a footgun: it makes the app pop a red error toast
+      for what is actually a removed feature.
+    Suggested Fix:
+      Delete the entire Parity Server section, or replace it with a
+      single read-only line "Parity not used in QMail v2." Either way,
+      remove the Refresh button.
+
+M37. Server Status section is hard-coded to "healthy."
+    Symptom:
+      AccountPane.jsx:42-47 initial state:
+        { status: "healthy", service: "QMail Client Core",
+          version: "1.0.0", timestamp: Date.now() }
+      The Service Status row reads from this static state forever.
+      The comment on line 41 explicitly says "Initialize with
+      static healthy data to bypass API."
+    Impact:
+      A user looking at the Account screen sees a permanent green
+      "healthy" indicator regardless of what is actually happening.
+      That contradicts the entire NavigationPane RAIDA-dot widget
+      which can show red. And it bakes in the worst MVP failure
+      mode in MVP-3: "green status that doesn't reflect reality."
+    Suggested Fix:
+      Either remove the Server Status panel (the NavigationPane
+      already covers per-server health honestly) or wire it to a
+      live endpoint. If no consolidated /api/health endpoint exists,
+      derive an aggregate state from /api/raida/echo summary fields.
+
+M38. The Server Details list shows only the first 10 RAIDAs.
+    Symptom:
+      AccountPane.jsx:618: raidaServers.slice(0, 10).map(...).
+      And per opu.gui.findings M1, /qmail/local/status only returns
+      8 RAIDAs total anyway.
+    Impact:
+      A user expecting to see all 25 (or even 22) RAIDAs as the
+      NavigationPane dot-grid suggests will be confused when the
+      Server Details list shows 8 entries (the topology), all
+      potentially marked "available" or "unavailable" with no
+      explanation of why the count differs from the dots above.
+    Suggested Fix:
+      Either show all servers (drop the slice) or stop showing the
+      list at all and rely on the dot-grid as the single source of
+      truth. If you keep the list, drive it off /raida/echo so the
+      count matches the dots.
+
+L39. The "Online / Offline" balance cards on the Account screen are
+     just labels with the wrong colour codes (suspect = uptime).
+    Symptom:
+      AccountPane.jsx:584-604 — three balance cards labelled
+      "Online", "Offline", "Uptime" share the same balance-card
+      element class as Bank / Fracked / Limbo above them. The
+      "Online" card uses class "verified" (success green) and
+      "Offline" uses "counterfeit" (danger red). It is visually
+      coherent but mixes wallet semantics ("verified", "counterfeit",
+      "suspect") with network semantics, which is confusing on
+      hover-titles or to anyone reading the class names.
+    Impact:
+      Cosmetic.
+    Suggested Fix:
+      Rename the network-status cards' modifier classes to
+      "online"/"offline"/"unknown" so the CSS reflects what they
+      mean.
+
+
+Notifications
+=============
+
+H40. New-mail notification does not surface a downloadable preview
+     of the sender on the toast.
+    Symptom:
+      QMailDashboard.loadMailCounts (line 262) sets notification to
+      "N new emails arrived!" when inbox total grows. The notif then
+      auto-dismisses after 3s (line 154). There is no click-to-
+      navigate, no sender preview.
+    Impact:
+      User briefly sees "3 new emails arrived!" and that's it. They
+      have to switch to inbox manually to triage. Compare to any
+      modern mail client which shows the first sender on the toast.
+    Suggested Fix:
+      Have the toast carry the sender of the most recent new mail
+      and become clickable (focus the new mail in the list).
+
+M41. The "checkForNewMail" / pingQMail flow is commented out;
+     instant-arrival detection relies on a 60s mailcount poll.
+    Symptom:
+      pingQMail is imported in QMailDashboard (line 9) but its only
+      caller is the commented-out checkForNewMail() block (line 221).
+      The fastest the user is told about new mail today is whenever
+      the 60s mailCountInterval next fires.
+    Impact:
+      A user expecting "I just sent you something" → "you got it"
+      will see up to a full minute of latency.
+    Suggested Fix:
+      Either delete the dead pingQMail import (clean), or wire
+      checkForNewMail back into the watch-for-notifications loop
+      and shrink the perceived latency. If pingQMail is more
+      efficient than getMailCount, prefer it.
+
+M42. The pending-notifications watcher polls every 10 seconds but
+     never tells the user it is alive.
+    Symptom:
+      QMailDashboard.jsx:106-125 polls /api/qmail/db/notifications/
+      list every 10s and pushes new entries into the inbox display.
+      No "syncing" indicator, no last-poll timestamp.
+    Impact:
+      A user who hasn't received anything in a while may wonder if
+      the client is even listening.
+    Suggested Fix:
+      Optional — add a small "last checked: 2s ago" line in the
+      sidebar near the RAIDA dots, or a subtle pulse animation tied
+      to the poll cycle. Low priority.
+
+M43. There is no UI for "send-failure" beyond a red error box inside
+     the modal; if the modal is closed, the failure is gone.
+    Symptom:
+      handleSend in ComposeModal sets local error state and shows
+      it in the modal. There is no notification to the dashboard
+      level on failure. If the user has clicked elsewhere or closed
+      the modal, the failure disappears.
+    Impact:
+      A user can think they sent a message that actually failed and
+      get no Sent-folder confirmation, no Outbox waiting state, no
+      red toast.
+    Suggested Fix:
+      Either (a) keep the modal open on failure with a clear retry
+      affordance (Send is currently still disabled with no obvious
+      retry trigger), or (b) push the failure to the dashboard
+      notification system. Bonus: add an Outbox folder for messages
+      mid-flight.
+
+M44. The send-progress poll loops forever (until cancelledRef flips
+     on close) if the backend stops returning isFinished. There is
+     no client-side timeout.
+    Symptom:
+      ComposeModal.jsx:501 while (!taskFinished && !cancelledRef.
+      current) — no max retries, no max time. If getTaskStatus
+      starts returning success: true but state stays "running" with
+      no isFinished flag forever, the UI hangs in "Sending…" for as
+      long as the modal is open.
+    Impact:
+      Pathological backend behaviour leaves the UI feeling broken
+      with no recovery.
+    Suggested Fix:
+      Cap the poll at ~60s; on timeout, mark sendingStatus failed
+      with "Send is taking longer than expected. The message may
+      still arrive — check Sent in a few minutes."
+
+
+Cross-cutting / general
+=======================
+
+M45. Two notification systems coexist with different visual styles.
+    Symptom:
+      QMailDashboard uses a `setNotification(string)` + 3s timeout
+      that renders as `notification-popup`. AccountPane uses its own
+      `showNotification(message, type)` rendering as a `notification-
+      banner` at the top. App.jsx imports a third
+      NotificationProvider/NotificationContainer wrapper.
+    Impact:
+      Inconsistent look-and-feel between the dashboard and the
+      account pane; errors that originate in one place do not
+      surface in the other.
+    Suggested Fix:
+      Migrate everything to the NotificationProvider system that
+      wraps the app in App.jsx. The per-pane setNotification
+      mechanisms should go away.
+
+L46. The QMailDashboard preview text comes from email.preview when
+     present, but falls back to "No preview available..." for
+     downloaded-but-empty messages. The list will show "No preview
+     available..." for any mail with an empty body.
+    Symptom:
+      EmailListItem.jsx renders email.preview verbatim. Empty mail
+      will read "No preview available..." in the list, which is
+      indistinguishable from "list failed to render" to a user.
+    Impact:
+      Cosmetic.
+    Suggested Fix:
+      Use an italicised "(no message body)" placeholder for empty
+      mail.
+
+L47. The default placeholder identity ("John Doe / john.doe@qmail.
+     cloud") is baked into QMailDashboard initial state and may be
+     visible in the AccountPane during the brief window before the
+     real identity loads.
+    Symptom:
+      Same root cause as H31 above, listed here as the visual flash
+      symptom: until identity is fetched, AccountPane renders "John
+      Doe" briefly.
+    Impact:
+      Hilarious in screenshots, embarrassing in demos.
+    Suggested Fix:
+      Initialize userAccount to null and render a "Loading…"
+      placeholder in AccountPane until the real identity arrives.
+
+
+MVP-blocking candidates
+=======================
+Per the handoff scope-guardrails: I think the following items from
+above are MVP-blocking and should be moved into
+D:\Code\src\C\rest_core\docs\mvp-fixes-needed.txt. The remaining items
+are post-MVP polish.
+
+  Add: MVP-21 (gui) - No Forward action
+       [H6 above]. Forward is one of the four customary mail actions.
+       Shipping a mail product without it is the kind of "this isn't
+       a real email program" symptom MVP tries to avoid.
+
+  Add: MVP-22 (gui) - No Reply All action
+       [H7 above]. Silently dropping cc'd participants from a reply
+       is a correctness bug as well as a usability one.
+
+  Add: MVP-23 (gui) - Attachments cannot be added in Compose
+       [H14 above]. The backend half of attachments was just wired
+       up; without the modal UI, that work is invisible to users.
+
+  Add: MVP-24 (gui) - Add Contact modal does not match backend schema
+       [H23 above]. Without this, the address book functionally does
+       not work and the contact-autocomplete in Compose is empty.
+
+  Add: MVP-25 (gui) - No Sign Out path
+       [H32 above]. Any shared-machine or multi-identity scenario is
+       broken. Could also be argued post-MVP if the assumption is
+       single-user-on-personal-machine.
+
+  Add: MVP-26 (gui) - Dead "Security Actions" and Application Settings
+       [H33 + H34 above]. Visible-but-dead controls are the worst
+       case for trust. Removing or greying them out is small.
+
+  Add: MVP-27 (gui) - "Repair Now" warning panel triggers on wrong
+       signal
+       [H35 above]. False positives undermine the recovery path.
+
+  Add: MVP-28 (gui) - Account Server Status is statically "healthy"
+       [H37 above]. This is the same shape of bug as MVP-3 in the
+       backend: a green indicator that doesn't reflect reality.
+       Easier to fix on the GUI side than to wait for the backend
+       health-pipeline fix.
+
+  Add: MVP-29 (gui) - First-run identity import error messages are
+       unhelpful
+       [H2 above]. Opening-screen failures with no recovery path
+       are the worst first impression.
+
+  Add: MVP-30 (gui) - No path to create a new identity from the GUI
+       [H1 above]. Arguably product-level rather than gui-level.
+       Flagged here so it doesn't fall between the cracks.
+
+If you want a smaller MVP set, the four I'd insist on are MVP-23
+(attachments), MVP-24 (contacts schema), MVP-26 (dead controls), and
+MVP-28 (static green). Those have the most "this app is broken"
+energy on first contact.
+
+
+Positive notes
+==============
+- The recent API-correctness pass is clean. sendEmail correctly
+  posts to upload_and_tell, the duration parameter is right, and
+  the task-polling loop is well structured (with a cancellation
+  ref). Reading the call sites against the spec was reassuring.
+- The pending-notification-and-then-decrypt flow is a fun and
+  unusual UX, and the "Secure Encrypted Payload" reading-pane
+  treatment communicates the model nicely.
+- NavigationPane's per-RAIDA dot grid is a great minimal way to
+  surface network health at a glance. It's the honest view of
+  network state — the AccountPane should aspire to match it.
+- The sort bar in EmailListPane (Newest / Unread / Highest Paying /
+  Starred) is a smart spin on the standard inbox controls and
+  takes advantage of QMail's economic model in a way other mail
+  programs can't.
+- BUG-21/22 fixes (request-ID dedupe, ref-based debounce, polling-
+  cancellation ref) suggest the codebase is being maintained with
+  some discipline. The dashboard handles race conditions better
+  than a lot of comparable React frontends I've reviewed.
+- The "MVP-20 relaxed locker-code mask" + "accept any string" path
+  is a nice example of the GUI choosing to be friendlier than the
+  API requires. More of that, please.
+
+
+Verify-in-browser checklist
+===========================
+The audit above is source-only. The next person who has a live
+backend (or `npm run dev`) handy should explicitly verify:
+  - H10: confirm the pending-notification rows really do all read
+         "🔒 Encrypted Message" with no per-message hint.
+  - H35: trigger an identity-fracked state and see whether the
+         Repair Now panel appears, and whether handleRepairIdentity
+         clears it once the heal succeeds.
+  - M16: simulate < 6 RAIDAs and confirm the Send button is
+         actually unrecoverable (no retry path) from inside the
+         modal.
+  - M17: send from a draft; confirm the draft remains in Drafts.
+  - M43: force a send to fail mid-stream; confirm the failure
+         message persists or disappears with the modal.
+  - H31/L47: open the app cold (no provisioning hand-off), navigate
+         straight to Account; confirm whether "John Doe" briefly or
+         persistently shows.
+
+Cross-model reconciliation
+==========================
+After writing the above I read the two sibling findings files:
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gem.usability.findings.txt
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.findings.txt
+
+This section calls out (a) findings the other models caught that I
+missed, (b) places where I disagree with them, and (c) where we agree
+so future readers can triangulate confidence.
+
+Findings from gpt that I missed and now endorse
+-----------------------------------------------
+
+R1 (was gpt #2, severity Critical). Pending-download response is
+   treated as the final decrypted body, but the backend download
+   endpoint returns metadata (email_id, sender_sn, stripes_downloaded,
+   stripes_recovered) not the full body. The body lives in
+   /api/qmail/db/messages/get afterwards.
+     Where I missed it: QMailDashboard.handleDownloadMail
+     (QMailDashboard.jsx:700-766) does
+       const decryptedBody = responseData.body || "";
+     which is the wrong assumption — the body is "" for the real
+     response shape and the user sees an empty reading pane.
+     Severity: I agree this is Critical. It defeats the entire
+     "open an encrypted message" journey and should be in any MVP
+     punch list. Promote to my MVP candidates (call it MVP-31).
+     Fix: after a successful download, call getEmailById(email_id)
+     and getEmailAttachments(email_id) to populate the reading pane,
+     and refresh the list/counts so the row flips from pending to
+     downloaded.
+
+R2 (was gpt #3, severity High). Sent mail does not appear in Sent.
+   The Sent folder is exposed by /db/folders/list, but the
+   upload_and_tell path appears to write receipts only, not a row
+   into qmail_emails with folder=Sent. After a user sends, switching
+   to Sent shows nothing.
+     Where I missed it: I didn't trace the post-send write path. I
+     did note in M17 that drafts aren't deleted on send, but the
+     "where did my sent message go?" question is more fundamental.
+     Severity: I agree this is High. Promote to MVP candidates as
+     MVP-32. This is a backend question as well as a GUI one — flag
+     for rest_core: either persist Sent server-side, or expose a
+     receipts-as-Sent adapter the GUI can read.
+
+R3 (was gpt #5, severity High). Drafts cannot be reopened with full
+   content and recipients.
+   /db/drafts/list returns preview metadata only (subject,
+   body_preview, recipient_count, timestamps). The GUI passes those
+   directly into ComposeModal as editDraft, so the body, To, Cc, and
+   Bcc are empty when the user clicks a draft. Worse, saving from
+   that compose session can overwrite the original draft with
+   incomplete data.
+     Where I missed it: my M17 noted that drafts persist after a
+     successful send, but not that the draft you reopen is hollow.
+     Severity: I agree this is High. Drafts that can't be edited
+     defeat the feature. Promote to MVP candidates as MVP-33.
+     Fix: when handleSelectEmail sees email.isDraft, call
+     getEmailById(draft.id) (or a drafts-specific GET) before
+     opening ComposeModal.
+
+R4 (was gpt #6, severity Medium). Starred is implemented as a flag
+   AND as a folder, and the two don't interlock.
+   starEmail() calls /db/messages/set-star (flag), while the
+   navigation pane lists folder ID 4 as "Starred" and ReadingPane
+   even offers "Move to Starred" as a folder move. A user who stars
+   from the list and then opens Starred sees an inconsistent view
+   depending on which mechanism populated the row.
+     Where I missed it: I treated Starred as a single coherent
+     virtual view and didn't notice the dual code paths.
+     Severity: I agree this is Medium. Pick one model; my
+     preference matches gpt's — flag-only virtual view, with
+     /db/messages/list adopting a starred=true filter and "Move to
+     Starred" removed from the dropdown.
+
+R5 (was gpt #11, severity Medium). Attachment dangerous/warning
+   metadata is dropped by the GUI mapper, and the download helper
+   is called without the known filename.
+   The attachments-list endpoint returns dangerous + warning fields,
+   but getEmailAttachments() does not map them, and ReadingPane
+   doesn't show any warning. handleDownloadAttachment passes
+   (emailId, attachmentIndex) into downloadMailAttachment but drops
+   attachmentName, so the helper falls back to "downloaded_file"
+   when Content-Disposition is missing.
+     Where I missed it: I read the attachment download path but
+     didn't check for the dangerous flag in the API.
+     Severity: I agree this is Medium and call it out as a
+     safety/security finding rather than pure UX. A user who
+     downloads an .exe presented as an .invoice without a warning
+     is a real risk. Fix is small and well-scoped.
+
+R6 (was gpt #1, severity High). First-run import does not verify or
+   display the actual QMail identity.
+   ServiceSelectionScreen.handleImport receives result.data from
+   importCredentials and hands it straight to WalletSetupScreen,
+   which reads accountData.email_address, accountData.pretty_address,
+   accountData.needs_healing. The import response does not contain
+   those fields (it contains coins_found, coins_saved, wallet_path,
+   mail_wallet_path).
+     Where I half-missed it: my H31 caught the John-Doe placeholder
+     leaking into AccountPane via the has_id fallback path. But I
+     didn't notice that even the "happy path" (locker import →
+     WalletSetupScreen) doesn't have a real identity to display —
+     the user sees blank/undefined values in the welcome header.
+     Severity: I agree High. This is a more general statement of
+     my H31 and supersedes it. Fix: insert a getIdentity() /
+     identity/exists call between importCredentials() success and
+     onSelectService('qmail', identity).
+
+R7 (was gpt #10, severity Medium). "Check Connection" button label
+   suggests it checks for new mail, but it only refreshes local
+   counts and RAIDA echo. The actual beacon/peek path (which would
+   prompt the network to surface new tells) is not wired to any
+   visible control.
+     Where I missed it: I didn't trace the difference between
+     "refresh inbox counts" and "ask RAIDA whether there's anything
+     new." NavigationPane labels the button "Check Connection" but
+     the surrounding handler is handleRefresh which is just a list
+     refresh.
+     Severity: I agree Medium. Adds nuance to my M41 (pingQMail is
+     commented out) — the missing semantic is "ask the network" not
+     just "redraw locally." Fix: either add a separate Check Mail
+     button wired to /api/qmail/net/beacon/peek, or label the
+     existing button more honestly.
+
+R8 (was gpt #12 / partial). canSend initial state is true, so the
+   Send button is briefly enabled before the network preflight
+   finishes.
+     This is the opposite framing of my M16. My M16 complained that
+     once preflight fails the user is stuck; gpt's framing is that
+     before preflight finishes the user might click Send on a
+     pessimistic network. Both are right, and the fix is symmetric:
+     start with canSend=false (or canSend=null = "checking…"), set
+     to true only when checkNetworkStatus succeeds with >= 6, and
+     add a retry affordance when it fails. Adopting gpt's framing
+     improves M16.
+
+Findings where gem and I agree
+------------------------------
+
+  - Service Health Regression (gem section E) ≡ my H37 (Account
+    serverHealth hard-coded "healthy"). gem's recommendation matches
+    mine: re-enable a real health endpoint and display it live.
+  - Outgoing attachments missing (gem section B / "MISSING") ≡ my
+    H14. gem adds a concrete implementation note I find useful: use
+    IPC handlers in electron.cjs + a button in ComposeModal. Worth
+    incorporating into the H14 suggested fix — in the Electron
+    build, dialog.showOpenDialog returns absolute filesystem paths
+    that the backend can read directly; for the browser-only build
+    a staging upload would be needed.
+  - Identity-healing UX (gem section 3) ≡ my H35 (Repair Now panel
+    triggers on wrong signal). gem proposes a proactive banner in
+    QMailDashboard when identity is fracked; that's a reasonable
+    addition to my "trigger off identity health not wallet-folder
+    count" fix.
+
+Findings I had that the others did not
+--------------------------------------
+For completeness, these are mine that neither gem nor gpt called
+out, so future reviewers should give them a bit more skepticism /
+verification:
+
+  - H1: no in-GUI path to create a new identity (also raised this
+    as a product-level question)
+  - H2: first-run import errors collapse into one unhelpful message
+  - H6/H7: no Forward, no Reply All
+  - H10: pending-notification rows hide the real subject
+  - H27: no Empty Trash
+  - H32: no Sign Out
+  - H33: dead Security Actions
+  - H34: dead Application Settings toggles
+  - H40: new-mail toast has no sender preview, no click-through
+  - M4: WalletSetupScreen Make Change button has no feedback
+  - M11: auto-download on click conflicts with the manual button
+  - M18: send-progress wording is generic
+  - M28-M29 folder/icon hard-coding and "You (Draft)" placeholder
+  - M36: Parity section still rendered even though endpoint removed
+  - M38: AccountPane Server Details slice(0,10) doesn't match the
+    dot-grid
+
+I stand by all of these.
+
+Findings the others had that I'd push back on (mildly)
+------------------------------------------------------
+
+  - gem section A "First-Run: Functional. Robust." — disagree. As
+    gpt #1 (and my H31) shows, first-run identity verification is
+    not robust; WalletSetupScreen reads fields that aren't there.
+    The locker import call works; the identity-display step does
+    not. gem's audit reads as more optimistic than the source
+    supports.
+
+Updated MVP-blocking candidates (consolidating across all three)
+----------------------------------------------------------------
+
+Adding the cross-model items, my consolidated MVP punch-list is:
+
+  MVP-21 (gui): No Forward action [opu H6]
+  MVP-22 (gui): No Reply All action [opu H7]
+  MVP-23 (gui): Attachments can't be added in Compose [opu H14,
+                gem section B, gpt #4]  *** strong consensus ***
+  MVP-24 (gui): Add Contact modal doesn't match backend schema
+                [opu H23, gpt #7]  *** strong consensus ***
+  MVP-25 (gui): No Sign Out path [opu H32]
+  MVP-26 (gui): Dead Security Actions + Settings toggles [opu H33/H34]
+  MVP-27 (gui): "Repair Now" triggers on wrong signal [opu H35,
+                gem section 3]
+  MVP-28 (gui): AccountPane serverHealth hard-coded "healthy"
+                [opu H37, gem section E, gpt #9]
+                *** strong consensus ***
+  MVP-29 (gui): First-run import errors collapse to one message
+                [opu H2]
+  MVP-30 (gui): No path to create a new identity from inside the
+                GUI [opu H1]
+  MVP-31 (gui): Pending-message download leaves the reading pane
+                empty [gpt #2]  *** Critical ***
+  MVP-32 (gui+core): Sent mail doesn't appear in Sent [gpt #3]
+  MVP-33 (gui): Drafts reopen with empty body/recipients [gpt #5]
+  MVP-34 (gui): First-run identity not verified before
+                WalletSetupScreen renders [gpt #1, partial overlap
+                with opu H31]
+
+If the team can fix only five, my picks are MVP-31 (pending download
+- Critical), MVP-23 (attachments), MVP-33 (drafts reopen), MVP-34
+(first-run identity), and MVP-28 (static green). Those have the
+highest "this is just broken" energy on first contact.
+
+End of file.

@@ -1,0 +1,103 @@
+Batch 12 Summary - FIX-20 + FIX-33 + FIX-34
+==========================================
+
+Scope
+-----
+Implemented Phase 2 Batch 12:
+- FIX-20: Unified Refresh.
+- FIX-33: Send failure and polling resiliency.
+- FIX-34: Notification unification.
+
+Changes
+-------
+FIX-20:
+- NavigationPane now labels the manual action as "Refresh" and uses the
+  dashboard refresh handler as the only click path.
+- QMailDashboard.handleRefresh() now runs the refresh chain in order:
+  checkMailNow(), echoRaida(), getMailNotifications(), loadMailCounts(),
+  and loadEmails(currentFolder).
+- Each refresh step is isolated in its own try/catch so a failed service
+  does not block later steps.
+- The single refresh spinner remains active for the full chain and is cleared
+  in a finally block.
+- Added checkMailNow() for POST /api/qmail/net/beacon/ping.
+- Renamed the non-forcing beacon read helper to peekBeacon() for
+  /api/qmail/net/beacon/peek, with pingQMail kept as a compatibility alias.
+- Refresh now pushes the RAIDA echo snapshot into NavigationPane so the dot
+  grid updates from the unified refresh.
+
+FIX-33:
+- ComposeModal send polling is capped at 60 seconds.
+- Each getTaskStatus() poll is isolated in its own try/catch.
+- Transient task-status failures are retried and only fail the send after
+  3 consecutive polling failures.
+- The timeout message is:
+  "Send is taking longer than expected. Check Sent in a few minutes."
+- Final send failures are surfaced through QMailDashboard's notification
+  provider so the error remains visible if the modal closes.
+- cancelledRef.current break behavior is preserved throughout the poll loop.
+
+FIX-34:
+- QMailDashboard local notification state/rendering was migrated to
+  NotificationProvider.
+- AccountPane local notification banner state/rendering was migrated to
+  NotificationProvider.
+- NotificationProvider now accepts options objects in addition to numeric
+  durations, preserving clickable payload metadata.
+- NotificationContainer supports clickable notifications with keyboard
+  activation and close-button event isolation.
+- Clickable mail toasts preserve targetPendingGuid and targetEmailId behavior
+  and route to the matching pending or inbox message.
+- Removed the old dashboard notification-popup and account notification-banner
+  CSS paths.
+
+Files Changed
+-------------
+- src/api/qmailApiServices.js
+- src/components/common/notifications/NotificationContext.jsx
+- src/components/common/notifications/NotificationContainer.jsx
+- src/components/common/notifications/NotificationContainer.css
+- src/qmail/screens/AccountPane.jsx
+- src/qmail/screens/AccountPane.css
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/NavigationPane.jsx
+- src/qmail/screens/QMailDashboard.jsx
+- src/qmail/screens/QMailDashboard.css
+- docs/gpt.usability.batch12.summary.txt
+
+Verification
+------------
+PASS: npm run build
+PASS: npx eslint src/api/qmailApiServices.js src/components/common/notifications/NotificationContext.jsx src/components/common/notifications/NotificationContainer.jsx src/qmail/screens/AccountPane.jsx src/qmail/screens/ComposeModal.jsx src/qmail/screens/QMailDashboard.jsx src/qmail/screens/NavigationPane.jsx --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for the Batch 12 files
+PASS: stale source scan for setNotification(), notification-popup,
+      notification-banner, "Check Connection", getParityServer,
+      "Parity Server", "John Doe", and "john.doe"
+
+Repo-wide lint note:
+- npm run lint still fails on pre-existing unrelated files under
+  src/api/useGlassSounds.js, src/qmail/screens/SenderAvatar.jsx,
+  src/qmail/screens/WalletSetupScreen.jsx, src/wallet/**, and vite.config.js.
+
+Manual Verification Notes
+-------------------------
+Pending live app checks:
+- Refresh shows one spinner through beacon ping, RAIDA echo, notifications,
+  counts, and current-folder reload.
+- A failed refresh step does not prevent later refresh steps from running.
+- NavigationPane RAIDA dots update after manual Refresh.
+- Compose send polling tolerates transient status failures and times out after
+  60 seconds with the required message.
+- Send failures remain visible as dashboard notifications after closing the
+  compose modal.
+- New-mail notifications still focus the pending or inbox message when clicked.
+- AccountPane server refresh notifications use the global toast style.
+
+Reviewer Focus
+--------------
+- showDashboardNotification() is the compatibility layer for dashboard message
+  callers and preserves the old clickable mail-toast payloads.
+- pingQMail remains exported as an alias to avoid breaking any older imports,
+  but new forced refresh behavior uses checkMailNow().

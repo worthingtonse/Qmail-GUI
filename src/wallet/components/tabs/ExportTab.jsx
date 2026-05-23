@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, Wrench, X, Info } from 'lucide-react';
 import { exportCloudCoins, getWalletBalance, fixFrackedCoins, getDropdownData, saveExportLocation, listWallets } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
@@ -37,6 +37,8 @@ const ExportTab = () => {
     loadExportLocations();
     loadAvailableWallets();
     checkForFrackedCoins();
+    // Export tab bootstrap intentionally runs once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle click outside dropdown to close it
@@ -588,13 +590,13 @@ const ExportTab = () => {
                           <ul>
                             <li><strong>Bank:</strong> Fully healed coins (25/25 RAIDAs)</li>
                             <li><strong>Fracked:</strong> Partially improved coins (13-24/25 RAIDAs)</li>
-                            <li><strong>Counterfeit:</strong> Coins that couldn't be healed (&lt;13/25 RAIDAs)</li>
+                            <li><strong>Counterfeit:</strong> Coins that couldn&apos;t be healed (&lt;13/25 RAIDAs)</li>
                           </ul>
                           <p>Check your wallet folders to see where each coin ended up.</p>
                         </div>
                       </div>
                       
-                      <p className="receipt-note">Check your wallet's Receipts folder for detailed healing results.</p>
+                      <p className="receipt-note">Check your wallet&apos;s Receipts folder for detailed healing results.</p>
                     </>
                   )}
                 </div>

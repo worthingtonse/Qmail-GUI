@@ -12,5 +12,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Add file reading support for EFF wordlist
   readFile: (filename) => ipcRenderer.invoke('read-file', filename),
   // BUG-08 FIX: Get home directory for path expansion
-  getHomeDir: () => ipcRenderer.invoke('get-home-dir')
+  getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
+  // FIX-02 (Batch 5): open a multi-select file picker for ComposeModal
+  // attachments. Resolves to an Array<{path, name, size}>, or [] if
+  // the user cancels. ComposeModal checks for window.electronAPI
+  // before calling — falls back to a disabled-button state in the
+  // browser/Vite build.
+  pickAttachments: () => ipcRenderer.invoke('compose:pickFiles')
 });

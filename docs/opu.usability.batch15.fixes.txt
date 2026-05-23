@@ -1,0 +1,320 @@
+Batch 15 Review (FIX-38 + FIX-44 + FIX-46 + FIX-47 + BUG-39/40/41/42)
+=====================================================================
+Reviewer: Claude Opus 4.7 (Phase 3)
+Implementer: GPT (gpt.usability.batch15.summary.txt)
+Date: 2026-05-23
+
+Reviewed Files
+--------------
+- src/api/qmailApiServices.js
+- src/qmail/screens/QMailDashboard.jsx
+- src/qmail/screens/EmailListPane.jsx
+- src/qmail/screens/EmailListPane.css
+- src/qmail/screens/EmailListItem.jsx
+- src/qmail/screens/ReadingPane.jsx
+- docs/cla.bugs.txt          (BUG-32 STATUS line)
+- docs/opu.phase2.tickets.txt (Batch 14 closing line)
+- docs/gpt.usability.batch15.summary.txt
+
+Verdict
+-------
+APPROVED — no code fixes required.
+
+Batch 15 implements FIX-38, FIX-44, FIX-46, and FIX-47 exactly per the
+master plan, and folds in the four low-severity reviewer BUGs flagged
+in opu.phase3.handoff.txt for this batch (BUG-39, BUG-40, BUG-41,
+BUG-42). The two docs-only follow-ups I recommended (BUG-32 status
+line; opu.phase2.tickets.txt FIX-28 closing note) are also done.
+
+Phase 3 Batch 15 is complete and clears the way for Batch 16 (compose
+polish — FIX-39/40/41 + BUG-37/38/43).
+
+Spec Verification Checklist
+---------------------------
+FIX-38 (Reset list pagination before sort reloads)
+  Plan text: "Move setCurrentPage(0) before the API call in
+  handleSortChange so the pagination widget doesn't briefly show a
+  stale 'Page N of M.'"
+  [x] QMailDashboard.handleSortChange (line 643-695) sets
+      setCurrentPage(0) BEFORE bumping loadEmailsRequestRef and
+      calling getMailList. Offset passed to getMailList is hard-zero,
+      not derived from currentPage, so a stale page can't sneak in.
+  [x] setSearchResultCapHit(false) also fires before the request,
+      matching the FIX-25 contract that the cap notice only renders
+      while a fresh search response is live.
+  [x] requestId discipline preserved: the response handler bails out
+      if a newer loadEmails/sort request has been issued.
+
+FIX-44 (EmailListPane pagination consumes pageSize as a prop)
+  Plan text: "EmailListPane pagination should consume page-size as a
+  prop instead of hard-coding 50."
+  [x] QMailDashboard passes pageSize={EMAILS_PER_PAGE} on the
+      EmailListPane render (line 1653) and keeps EMAILS_PER_PAGE as
+      the single source of truth in the dashboard (line 115).
+  [x] EmailListPane accepts pageSize with a default of 50 (line 32) —
+      back-compat for any future caller that forgets the prop, and
+      keeps the eslint react/prop-types disable honest.
+  [x] Pagination visibility gate uses pageSize (line 200):
+        totalCount > pageSize
+      Previously: totalCount > 50.
+  [x] Page-count text uses pageSize (line 210):
+        Math.ceil(totalCount / pageSize)
+  [x] Next-button disabled logic uses pageSize (line 214):
+        (currentPage + 1) * pageSize >= totalCount
+  [x] No remaining hard-coded "50" in EmailListPane.jsx in a
+      pagination context. The two `50` occurrences are the prop
+      default (intentional back-compat) and the FIX-25 search cap
+      copy ("Showing top 50 results...") — both unrelated.
+
+FIX-46 (Italic "(no message body)" placeholder)
+  Plan text: "Use italicised '(no message body)' placeholder for
+  empty mail in the list."
+  [x] QMailDashboard defines EMPTY_BODY_PREVIEW = "(no message body)"
+      (line 45) as a single source of truth.
+  [x] buildPreviewState() (line 52-70) is the single normalizer for
+      list-row preview copy. It walks candidate preview strings
+      first; falls back to a 100-char snip of the body if the body
+      is non-blank; only when ALL of those are blank does it return
+      { preview: "(no message body)", isEmptyBodyPreview: true }.
+  [x] Both downloaded and local (drafts) rows are normalized through
+      buildPreviewState — see loadEmails draft branch (line 520)
+      and folder branch (line 567). Search results also use it
+      (line 711-716).
+  [x] EmailListItem applies the empty-body class only when
+      isEmptyBodyPreview is set (line 128-131):
+        <div className={`email-preview ${
+          email.isEmptyBodyPreview ? "empty-body-preview" : ""
+        }`}>
+  [x] EmailListPane.css adds the italic styling without changing
+      colour, weight, or line-height (line 485-487):
+        .email-preview.empty-body-preview { font-style: italic; }
+  [x] Pending rows DO NOT carry isEmptyBodyPreview — the
+      formattedPendingMails builder (line 165-195) constructs the
+      preview directly as "Waiting to decrypt. Arrived ...", never
+      goes through buildPreviewState, and emits isPending:true.
+      No italic regression on the encrypted-message placeholder.
+  [x] Placeholder-subject styling (.placeholder-subject) is separate
+      from this class and unchanged. FIX-46 is purely additive.
+
+FIX-47 (pingQMail/checkForNewMail cleanup)
+  Plan text: "Either delete the dead pingQMail import (clean) or
+  wire checkForNewMail back in. Optionally show a 'last checked Xs
+  ago' indicator near the RAIDA dots."
+  [x] Resolved by deletion (the clean option). Grep across src\ for
+      both pingQMail and checkForNewMail returns zero matches.
+  [x] qmailApiServices.js no longer exports a pingQMail alias.
+  [x] QMailDashboard.jsx no longer holds the commented
+      checkForNewMail call in startup.
+  [x] Decision is consistent with project conventions: "discourage
+      backwards-compat shims when you can just change the code."
+  [x] Optional "last checked Xs ago" indicator was NOT added. That
+      decision is fine — the plan calls it Optional, and the RAIDA
+      echo snapshot from the unified Refresh chain (Batch 12) is
+      already wired into NavigationPane. Adding a timestamp later
+      can use that snapshot without a second network call.
+
+Reviewer BUG Coverage (BUG-39, BUG-40, BUG-41, BUG-42)
+------------------------------------------------------
+BUG-39 (LOW — ReadingPane Mark Unread shown on unread messages)
+  [x] ReadingPane.jsx line 261:
+        {onMarkAsRead && email.isRead && (...)}
+      The Mark Unread button now only renders when email.isRead is
+      true. Click-on-unread no longer surfaces a misleading
+      affordance, and the unified notification system won't fire a
+      "Marked as unread" toast on an already-unread message.
+
+BUG-40 (LOW — duplicate Archive paths in inbox)
+  [x] ReadingPane.jsx line 156-160: showArchiveButton is true on
+      non-archive, non-trash, non-isTrashed messages — the same gate
+      that decides whether the dedicated Archive button renders.
+  [x] ReadingPane.jsx line 161-170: moveOptions filter now removes
+      "archive" whenever showArchiveButton is true. The Move-to...
+      dropdown no longer offers Archive in parallel with the button.
+      Archive is still reachable from folders where the dedicated
+      button is hidden (e.g. when the message is already in Archive
+      itself, but currentFolder === "archive" is excluded by the
+      first filter clause anyway — net behavior matches the bug
+      report).
+
+BUG-41 (LOW — Refresh chain double-notifies on loadEmails failure)
+  [x] QMailDashboard.loadEmails (line 508-628) accepts an options
+      object: { notifyOnError = true }. Default preserves all
+      existing callers' behavior (toasts on failure).
+  [x] The Refresh chain's "Message list" step (line 805-813) opts
+      out with notifyOnError: false so a failure flows ONLY through
+      the aggregate "Refresh completed with some service errors."
+      warning toast.
+  [x] notifyOnError is honored in both branches of loadEmails:
+        - the error-return branch (line 609-611)
+        - the catch branch (line 618-620)
+      Both gate the showDashboardNotification call on the flag.
+  [x] requestId discipline preserved in both branches — the catch
+      handler still skips state updates if a newer load has been
+      started.
+  [x] Other refresh steps (RAIDA echo, Mail notifications, Mail
+      counts) already throw via runRefreshStep without emitting
+      their own toasts, so this fix actually unifies the contract.
+
+BUG-42 (LOW — pingQMail backwards-compat alias unused)
+  [x] Resolved together with FIX-47. The alias export is gone from
+      qmailApiServices.js; zero callers in src\.
+
+Build / Lint Status
+-------------------
+PASS: npm run build
+       1759 modules transformed (Batch 14: 1754) — +5 modules.
+       dist/assets/index-ad023d6e.js 395.73 KB
+       dist/assets/index-d0bb0991.css 214.12 KB
+       Build time ~2.21s.
+
+PASS: ./node_modules/.bin/eslint
+        src/qmail/screens/QMailDashboard.jsx
+        src/qmail/screens/EmailListPane.jsx
+        src/qmail/screens/EmailListItem.jsx
+        src/qmail/screens/ReadingPane.jsx
+        src/api/qmailApiServices.js
+        --report-unused-disable-directives --max-warnings 0
+      Clean across all five touched files.
+
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+
+Grep cross-checks
+-----------------
+- pingQMail / checkForNewMail in src\: ZERO matches.
+- "(no message body)" hardcoded in JSX: ZERO outside the
+  EMPTY_BODY_PREVIEW constant.
+- isEmptyBodyPreview references: EmailListItem applies it; QMail
+  Dashboard sets it on three list-row constructions
+  (drafts, folder list, search results). No orphan reference.
+- Hard-coded 50 in EmailListPane.jsx pagination: ZERO. The two `50`
+  remaining are the prop default and the FIX-25 search-cap copy.
+
+Reviewer-Focus Answers
+----------------------
+GPT's summary did not include a Reviewer Focus block. Nothing
+outstanding to answer.
+
+Out-of-Scope Observations
+-------------------------
+None new. The five remaining LOW/INFO entries from the BUG-37..48
+ledger that were NOT bundled into Batch 15 stand unchanged:
+
+  BUG-37  ComposeModal handleSaveDraft indentation drift.
+          Bundle into Batch 16 (compose polish) — file opens there
+          for FIX-39/40/41.
+  BUG-38  Network-warning Retry spinner unreachable.
+          Bundle into Batch 16.
+  BUG-43  markSendFailed validation-throw double-notification.
+          Bundle into Batch 16.
+  BUG-44  DRD "Add to My Contacts" local saved-state lost on remount.
+          Bundle into Batch 17 alongside FIX-42 (normalize+compare
+          helper is shared).
+  BUG-45  INFO — Batch 13 Notes section incorrect about
+          window.confirm. Docs-only; already accounted for by the
+          Batch 15 BUG-32 RESOLVED line.
+  BUG-46  Search "Showing top 50 results" 50-exact false positive.
+          Backend-blocked on CORE-K (search pagination). Hold.
+  BUG-47  ContactsPane undo-toast setContacts after unmount.
+          Bundle into Batch 17 (contacts).
+  BUG-48  ContactsPane delete-error pattern inconsistency.
+          Bundle into Batch 17 (contacts) — decision-only.
+
+No new bugs were uncovered while reviewing Batch 15. The next BUG
+number to use is still BUG-49.
+
+Regression Checklist
+--------------------
+Static / code-level verification only — live backend not exercised.
+
+  [code-level pass] FIX-04 draft-hydrate spinner still gates on
+    isLoadingDraft (EmailListItem.jsx line 24, 28). Unchanged.
+  [code-level pass] FIX-17 clickable-pending-toast contract intact —
+    showDashboardNotification is still the only emitter for the
+    refresh-summary toast. notifyOnError opt-in does NOT bypass
+    showDashboardNotification's payload translation.
+  [code-level pass] FIX-25 search-cap notice three-way guard
+    unchanged: searchQuery.trim() && searchResultCapHit && !isLoading
+    (EmailListPane.jsx line 147).
+  [code-level pass] FIX-28 ContactsPane delete-confirm modal +
+    undo toast untouched.
+  [code-level pass] FIX-29 trash "delete this page" confirm modal
+    untouched.
+  [code-level pass] FIX-30 "Loading…" placeholder pattern not
+    affected — buildPreviewState exits before it touches anything
+    AccountPane-related.
+  [code-level pass] FIX-32 AccountPane Server Details slice
+    untouched.
+  [code-level pass] BUG-12 stale-currentPage and BUG-21 stale-load
+    fixes in loadEmails are preserved — request-id check still
+    governs every state mutation in both branches.
+  [code-level pass] Batch 12 unified Refresh chain: aggregate
+    success/warning toast still the only emitter for the refresh
+    outcome. notifyOnError:false on the Message list step is what
+    makes that promise true again after a long-standing leak.
+  [code-level pass] Batch 13 placeholder-subject styling unchanged.
+  [code-level pass] Batch 14 ContactsPane CSS untouched.
+  [unchanged] Theme-plan docs are unrelated to Batch 15. No code in
+    src\ was touched by the theming workstream.
+
+Docs cleanup verification (the two follow-ups I asked for)
+----------------------------------------------------------
+1. docs\cla.bugs.txt: BUG-32 (line 798-818) now carries the line
+     "STATUS: RESOLVED (Batch 13+14, FIX-28)"
+   immediately below the heading. Original body preserved — historical
+   record intact. CONFIRMED.
+
+2. docs\opu.phase2.tickets.txt: the Batch 14 entry (line 72-77) now
+   ends with
+     "Status: complete. FIX-28 split across Batch 13 (JSX/logic)
+      and Batch 14 (CSS)."
+   CONFIRMED.
+
+3. gpt.usability.batch13.summary.txt left untouched (implementer's
+   record — read-only per BUG-45 guidance). CONFIRMED.
+
+Live-Backend Verification Pending
+---------------------------------
+NOT exercised in this review. The Batch 15 summary lists the live
+checks that should happen before ship gate; they remain valid:
+
+  - Navigate to page 2+ of a folder, change sort, confirm the
+    pagination widget immediately snaps to "Page 1 of N" before the
+    request completes (FIX-38).
+  - Confirm empty downloaded/local rows render italic
+    "(no message body)" while pending encrypted rows keep their
+    non-italic "Waiting to decrypt..." copy (FIX-46).
+  - Trigger Refresh with a forced message-list failure and confirm
+    ONLY the aggregate refresh warning fires — no separate
+    "Failed to load emails" toast (BUG-41).
+  - Confirm unread messages do not show the Mark Unread button in
+    ReadingPane (BUG-39).
+  - Confirm inbox messages do not show Archive in both the button
+    row AND the Move-to... dropdown (BUG-40).
+
+These pile onto the existing Phase 2 manual checklist at the bottom
+of docs\opu.phase2.tickets.txt.
+
+Phase 3 Status
+--------------
+GUI-side Phase 3 progress:
+  Batch 15 (list / dashboard polish): COMPLETE — this review.
+    FIX-38, FIX-44, FIX-46, FIX-47 + BUG-39/40/41/42.
+  Batch 16 (compose polish): NOT STARTED.
+    Targets FIX-39, FIX-40, FIX-41 + BUG-37, BUG-38, BUG-43.
+  Batch 17 (contacts / nav / account): NOT STARTED.
+    Targets FIX-42, FIX-43, FIX-45 + BUG-44, BUG-47, BUG-48.
+  Backend-blocked: BUG-46 (CORE-K).
+
+Phase 2 status unchanged: GUI-side complete through Batch 14;
+backend-blocked tickets (FIX-18, FIX-23, FIX-26) still outstanding.
+
+Next Target
+-----------
+Batch 16 — compose polish. ComposeModal.jsx is the single biggest
+file in the worktree (1300+ lines) and FIX-39 (autosave) will touch
+it heavily. Reviewer-perspective gotchas for that batch are already
+documented in opu.phase3.handoff.txt sections 1, 3, and 4 — re-read
+those before reviewing Batch 16's summary.
+
+End of file.

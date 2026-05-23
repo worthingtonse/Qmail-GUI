@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+/* eslint-disable react/prop-types */
+import { useState, useEffect } from 'react';
 import { Dices, Download, Printer, Cloud, ArrowLeft } from 'lucide-react';
 import './DicewarePasswordCreator.css';
 
@@ -321,50 +322,50 @@ NEVER store your passphrase in plain text in cloud storage!`);
 
   if (isLoadingWordlist) {
     return (
-      <div className="diceware-screen">
-        <div className="diceware-main-container">
-          <div className="diceware-loading">
+      <main className="diceware-screen">
+        <section className="diceware-main-container" aria-busy="true">
+          <div className="diceware-loading" role="status">
             <h3>Loading EFF Wordlist...</h3>
             <p>Please wait while we load the diceware dictionary.</p>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     );
   }
 
   if (showPdfOptions) {
     return (
-      <div className="diceware-screen">
-        <div className="diceware-main-container">
-          <div className="diceware-pdf-screen">
-            <div className="diceware-pdf-header">
+      <main className="diceware-screen">
+        <section className="diceware-main-container">
+          <section className="diceware-pdf-screen">
+            <header className="diceware-pdf-header">
               <h3>Passphrase Created Successfully!</h3>
               <p>Your secure passphrase is ready. We strongly recommend creating a backup before proceeding.</p>
-            </div>
+            </header>
 
-            <div className="diceware-passphrase-display">
+            <section className="diceware-passphrase-display">
               <h4>Your Passphrase:</h4>
               <div className="diceware-passphrase-text">{userPassphrase}</div>
-            </div>
+            </section>
 
-            <div className="diceware-backup-section">
+            <section className="diceware-backup-section">
               <h4>Backup Options (Highly Recommended)</h4>
               <p>
                 Create a backup of your passphrase before proceeding. If you lose your passphrase, your CloudCoins cannot be recovered.
               </p>
               
               <div className="diceware-backup-buttons">
-                <button onClick={generatePDF} className="btn-backup">
+                <button type="button" onClick={generatePDF} className="btn-backup">
                   <Download size={18} />
                   <span>Download HTML Backup</span>
                 </button>
                 
-                <button onClick={printPassphrase} className="btn-backup secondary">
+                <button type="button" onClick={printPassphrase} className="btn-backup secondary">
                   <Printer size={18} />
                   <span>Print Backup</span>
                 </button>
 
-                <button onClick={openCloudStorageInfo} className="btn-backup info">
+                <button type="button" onClick={openCloudStorageInfo} className="btn-backup info">
                   <Cloud size={18} />
                   <span>Cloud Storage Tips</span>
                 </button>
@@ -373,39 +374,39 @@ NEVER store your passphrase in plain text in cloud storage!`);
               <p className="diceware-backup-tip">
                 <strong>Tip:</strong> Store physical copies in multiple secure locations (safe, safety deposit box, etc.)
               </p>
-            </div>
+            </section>
 
-            <div className="diceware-final-actions">
+            <footer className="diceware-final-actions">
               <div className="diceware-action-buttons">
-                <button onClick={() => setShowPdfOptions(false)} className="btn-back">
-                  <ArrowLeft size={18} style={{ marginRight: '8px' }} />
+                <button type="button" onClick={() => setShowPdfOptions(false)} className="btn-back">
+                  <ArrowLeft size={18} className="diceware-button-icon" />
                   Back to Edit
                 </button>
                 
-                <button onClick={proceedWithoutBackup} className="btn-continue">
+                <button type="button" onClick={proceedWithoutBackup} className="btn-continue">
                   Continue with This Passphrase
                 </button>
               </div>
               
               <p className="diceware-final-note">
-                Make sure you've saved a backup before continuing.
+                Make sure you&apos;ve saved a backup before continuing.
               </p>
-            </div>
-          </div>
-        </div>
-      </div>
+            </footer>
+          </section>
+        </section>
+      </main>
     );
   }
 
   return (
-    <div className="diceware-screen">
-      <div className="diceware-main-container">
-        <div className="diceware-header">
+    <main className="diceware-screen">
+      <section className="diceware-main-container">
+        <header className="diceware-header">
           <h3>Create Your Secure Passphrase</h3>
           <p>Use a physical die to roll 25 times. Enter each result in the grid below, then generate your words.</p>
-        </div>
+        </header>
 
-        <div className="diceware-instructions">
+        <section className="diceware-instructions">
           <h4>
             <Dices size={20} />
             How to Use Physical Dice
@@ -414,25 +415,25 @@ NEVER store your passphrase in plain text in cloud storage!`);
             <li>Get a physical 6-sided die</li>
             <li>Roll the die and enter the result (1-6) in the first empty cell</li>
             <li>Continue rolling and filling cells from left to right, top to bottom</li>
-            <li>When a row is complete (5 dice values), click "Generate Word" for that row</li>
+            <li>When a row is complete (5 dice values), click &quot;Generate Word&quot; for that row</li>
             <li>Repeat until all 5 rows are complete</li>
             <li>Create your passphrase using the generated words</li>
           </ol>
-        </div>
+        </section>
 
-        <div className="diceware-dice-section">
-          <div className="diceware-section-header">
+        <section className="diceware-dice-section">
+          <header className="diceware-section-header">
             <h4>Dice Grid (5 rows × 5 columns):</h4>
             <div className="diceware-button-group">
-              <button onClick={autoGenerateAll} className="btn-auto-generate">
+              <button type="button" onClick={autoGenerateAll} className="btn-auto-generate">
                 <Dices size={18} />
                 Auto Generate All
               </button>
-              <button onClick={clearGrid} className="btn-clear">
+              <button type="button" onClick={clearGrid} className="btn-clear">
                 Clear All
               </button>
             </div>
-          </div>
+          </header>
           
           {diceGrid.map((row, rowIndex) => (
             <div key={rowIndex} className="diceware-row">
@@ -442,6 +443,8 @@ NEVER store your passphrase in plain text in cloud storage!`);
                   <input
                     key={`cell-${rowIndex}-${colIndex}`}
                     type="text"
+                    inputMode="numeric"
+                    aria-label={`Row ${rowIndex + 1}, die ${colIndex + 1}`}
                     value={cell}
                     onChange={(e) => handleCellChange(rowIndex, colIndex, e.target.value)}
                     maxLength="1"
@@ -452,6 +455,7 @@ NEVER store your passphrase in plain text in cloud storage!`);
               </div>
               
               <button
+                type="button"
                 onClick={() => generateWordForRow(rowIndex)}
                 disabled={!isRowComplete(rowIndex)}
                 className="btn-generate-word"
@@ -466,26 +470,26 @@ NEVER store your passphrase in plain text in cloud storage!`);
               )}
             </div>
           ))}
-        </div>
+        </section>
 
         {generatedWords.filter(Boolean).length > 0 && (
-          <div className="diceware-words-display">
+          <section className="diceware-words-display">
             <h4>Your Words:</h4>
             <div className="diceware-words-list">
               {generatedWords.filter(word => word && !word.includes('not found')).join(', ')}
             </div>
-          </div>
+          </section>
         )}
 
         {allRowsComplete() && generatedWords.filter(word => word && !word.includes('not found')).length === 5 && (
-          <div className="diceware-passphrase-card">
+          <section className="diceware-passphrase-card">
             <h4>Create Your Passphrase</h4>
             <p>
               Create a sentence using at least 2 of your words. Minimum 16 characters. Include punctuation if desired.
-              Case doesn't matter, but don't end with spaces.
+              Case doesn&apos;t matter, but don&apos;t end with spaces.
             </p>
             <p>
-              Example: "I am fasting because the food here is sludge."
+              Example: &quot;I am fasting because the food here is sludge.&quot;
             </p>
             
             <textarea
@@ -501,20 +505,20 @@ NEVER store your passphrase in plain text in cloud storage!`);
             </div>
             
             {userPassphrase.length >= 16 && (
-              <button onClick={handleCreatePassphrase} className="btn-use-passphrase">
+              <button type="button" onClick={handleCreatePassphrase} className="btn-use-passphrase">
                 Use This Passphrase
               </button>
             )}
-          </div>
+          </section>
         )}
 
-        <div className="diceware-warning">
+        <aside className="diceware-warning">
           <p>
             <strong>⚠ Important:</strong> If you lose your passphrase, you will lose your coins. Lost coins cannot be recovered.
           </p>
-        </div>
-      </div>
-    </div>
+        </aside>
+      </section>
+    </main>
   );
 };
 

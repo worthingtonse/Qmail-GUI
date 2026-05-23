@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+/* eslint-disable react/prop-types */
+import { useState, useEffect, useCallback } from "react";
 import {
   Mail,
   Inbox,
@@ -22,6 +23,41 @@ const formatBalance = (value) => {
 
 const RAIDA_COUNT = 25;
 
+const DEFAULT_FOLDER_ICONS = {
+  inbox: Inbox,
+  sent: Send,
+  drafts: FileEdit,
+  trash: Trash2,
+  starred: Star,
+  archive: Archive,
+};
+
+const ALLOWED_FOLDER_ICONS = {
+  archive: Archive,
+  draft: FileEdit,
+  drafts: FileEdit,
+  fileedit: FileEdit,
+  inbox: Inbox,
+  mail: Mail,
+  send: Send,
+  sent: Send,
+  star: Star,
+  starred: Star,
+  trash: Trash2,
+};
+
+const normalizeIconName = (value) =>
+  String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const getFolderIcon = (folder) => {
+  const override =
+    ALLOWED_FOLDER_ICONS[normalizeIconName(folder.iconName)] ||
+    ALLOWED_FOLDER_ICONS[normalizeIconName(folder.icon)];
+  if (override) return override;
+
+  return DEFAULT_FOLDER_ICONS[normalizeIconName(folder.name)] || Mail;
+};
+
 const NavigationPane = ({
   activeView,
   setActiveView,
@@ -29,167 +65,165 @@ const NavigationPane = ({
   mailCounts,
   onRefresh,
   isRefreshing,
-  draftsCount,
-  serverHealth,
   walletBalance,
-  folders
+  folders,
+  raidaEchoSnapshot,
 }) => {
-  // Icon mapping — includes starred and archive
-  const folderIcons = {
-    inbox: Inbox,
-    sent: Send,
-    drafts: FileEdit,
-    trash: Trash2,
-    starred: Star,
-    archive: Archive,
-  };
-
-  // Per-server health state: array of 25 booleans (true = online)
   const [raidaHealth, setRaidaHealth] = useState(null);
   const [healthSummary, setHealthSummary] = useState(null);
 
-  const checkServerHealth = async () => {
+  const applyRaidaEcho = useCallback((data) => {
+    if (!data || !Array.isArray(data.raidas)) return;
+    const statuses = data.raidas.map((raida) => raida.status === "Ready");
+    setRaidaHealth(statuses);
+    setHealthSummary({
+      available: data.totalAvailable,
+      error: data.totalError,
+      timeout: data.totalTimeout,
+      usable: data.arrayUsable,
+    });
+  }, []);
+
+  const checkServerHealth = useCallback(async () => {
     const result = await echoRaida();
     if (result.success) {
-      const statuses = result.data.raidas.map((r) => r.status === "Ready");
-      setRaidaHealth(statuses);
-      setHealthSummary({
-        available: result.data.totalAvailable,
-        error: result.data.totalError,
-        timeout: result.data.totalTimeout,
-        usable: result.data.arrayUsable,
-      });
+      applyRaidaEcho(result.data);
     }
-  };
+  }, [applyRaidaEcho]);
 
-  // Check health on mount and every 2 minutes
   useEffect(() => {
     checkServerHealth();
     const interval = setInterval(checkServerHealth, 120000);
     return () => clearInterval(interval);
-  }, []);
+  }, [checkServerHealth]);
+
+  useEffect(() => {
+    applyRaidaEcho(raidaEchoSnapshot);
+  }, [applyRaidaEcho, raidaEchoSnapshot]);
 
   return (
     <aside className="navigation-pane">
-      <div className="compose-button-container">
-        <button className="compose-button primary" onClick={onComposeClick}>
+      <header className="navigation-pane__compose">
+        <button
+          className="navigation-pane__compose-button"
+          onClick={onComposeClick}
+          type="button"
+        >
           <FileEdit size={18} />
           <span>Compose</span>
         </button>
-      </div>
-      <nav className="nav-links">
-        {folders && folders.map((folder) => {
-          const IconComponent = folderIcons[folder.name] || Mail;
-          const count = mailCounts[folder.name];
+      </header>
 
-          return (
-            <a  key={folder.name}
-              href="#"
-              className={`nav-link ${activeView === folder.name ? "active" : ""}`}
-              onClick={(e) => {
-                e.preventDefault();
-                setActiveView(folder.name);
-              }}
-            >
-              <IconComponent size={18} />
-              <span>{folder.displayName}</span>
-              {count && count.unread > 0 && folder.name !== 'trash' && (
-                <span className="email-count">{count.unread}</span>
-              )}
-              {count && count.unread === 0 && count.total > 0 && folder.name !== 'inbox' && folder.name !== 'trash' && (
-                <span className="email-count-info">{count.total}</span>
-              )}
-            </a>
-          );
-        })}
+      <nav className="navigation-pane__nav" aria-label="Mailbox folders">
+        {folders &&
+          folders.map((folder) => {
+            const IconComponent = getFolderIcon(folder);
+            const count = mailCounts[folder.name];
+            const isActive = activeView === folder.name;
 
-        <a
-          href="#"
-          className={`nav-link ${activeView === "contacts" ? "active" : ""}`}
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveView("contacts");
-          }}
+            return (
+              <button
+                key={folder.name}
+                type="button"
+                className={`navigation-pane__link ${
+                  isActive ? "navigation-pane__link--active" : ""
+                }`}
+                onClick={() => setActiveView(folder.name)}
+              >
+                <IconComponent size={18} />
+                <span className="navigation-pane__link-label">
+                  {folder.displayName}
+                </span>
+                {count && count.unread > 0 && folder.name !== "trash" && (
+                  <span className="navigation-pane__count">{count.unread}</span>
+                )}
+                {count &&
+                  count.unread === 0 &&
+                  count.total > 0 &&
+                  folder.name !== "inbox" &&
+                  folder.name !== "trash" && (
+                    <span className="navigation-pane__count navigation-pane__count--info">
+                      {count.total}
+                    </span>
+                  )}
+              </button>
+            );
+          })}
+
+        <button
+          type="button"
+          className={`navigation-pane__link ${
+            activeView === "contacts" ? "navigation-pane__link--active" : ""
+          }`}
+          onClick={() => setActiveView("contacts")}
         >
           <Users size={18} />
-          <span>Contacts</span>
-        </a>
-        <a
-          href="#"
-          className={`nav-link ${activeView === "account" ? "active" : ""}`}
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveView("account");
-          }}
-        >
-          <Wallet size={18} />
-          <span>Wallet</span>
-          {walletBalance && (
-            <span className="wallet-balance-inline">{formatBalance(walletBalance.totalValue)} CC</span>
-          )}
-        </a>
-      </nav>
-
-      {/* Labels — not yet implemented, commented out for now */}
-      {/* <div className="labels-section">
-        <h3 className="labels-title">
-          <Tag size={16} />
-          <span>Labels</span>
-        </h3>
-        <div className="label-links">
-          <a href="#" className="label-link">
-            <span className="label-dot label-work"></span>
-            <span>Work</span>
-          </a>
-          <a href="#" className="label-link">
-            <span className="label-dot label-development"></span>
-            <span>Development</span>
-          </a>
-          <a href="#" className="label-link">
-            <span className="label-dot label-personal"></span>
-            <span>Personal</span>
-          </a>
-          <a href="#" className="label-link">
-            <span className="label-dot label-deployment"></span>
-            <span>Deployment</span>
-          </a>
-        </div>
-      </div> */}
-
-      <div className="refresh-container">
-        <button
-          className="refresh-button secondary"
-          onClick={async () => {
-            onRefresh();
-            checkServerHealth();
-          }}
-          disabled={isRefreshing}
-        >
-          <RefreshCw size={16} className={isRefreshing ? "spinning" : ""} />
-          <span>{isRefreshing ? "Refreshing..." : "Check Connection"}</span>
+          <span className="navigation-pane__link-label">Contacts</span>
         </button>
 
-        {/* RAIDA Server Health Grid: 25 dots, green=online red=offline */}
-        <div className="raida-health-section">
-          <div className="raida-health-grid">
-            {Array.from({ length: RAIDA_COUNT }, (_, i) => {
-              const isOnline = raidaHealth ? raidaHealth[i] : null;
+        <button
+          type="button"
+          className={`navigation-pane__link ${
+            activeView === "account" ? "navigation-pane__link--active" : ""
+          }`}
+          onClick={() => setActiveView("account")}
+        >
+          <Wallet size={18} />
+          <span className="navigation-pane__link-label">Wallet</span>
+          {walletBalance && (
+            <span className="navigation-pane__wallet-balance">
+              {formatBalance(walletBalance.totalValue)} CC
+            </span>
+          )}
+        </button>
+      </nav>
+
+      <footer className="navigation-pane__footer">
+        <button
+          className="navigation-pane__refresh-button"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          type="button"
+        >
+          <RefreshCw size={16} className={isRefreshing ? "spinning" : ""} />
+          <span>{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+        </button>
+
+        <section
+          className="navigation-pane__raida"
+          aria-label="RAIDA server health"
+        >
+          <div className="navigation-pane__raida-grid">
+            {Array.from({ length: RAIDA_COUNT }, (_, index) => {
+              const isOnline = raidaHealth ? raidaHealth[index] : null;
               return (
-                <div
-                  key={i}
-                  className={`raida-dot ${isOnline === true ? "raida-online" : isOnline === false ? "raida-offline" : "raida-unknown"}`}
-                  title={`RAIDA ${i}: ${isOnline === true ? "Online" : isOnline === false ? "Offline" : "Unknown"}`}
+                <span
+                  key={index}
+                  className={`navigation-pane__raida-dot ${
+                    isOnline === true
+                      ? "navigation-pane__raida-dot--online"
+                      : isOnline === false
+                        ? "navigation-pane__raida-dot--offline"
+                        : "navigation-pane__raida-dot--unknown"
+                  }`}
+                  title={`RAIDA ${index}: ${
+                    isOnline === true
+                      ? "Online"
+                      : isOnline === false
+                        ? "Offline"
+                        : "Unknown"
+                  }`}
                 />
               );
             })}
           </div>
-          <span className="raida-health-text">
+          <span className="navigation-pane__raida-text">
             {healthSummary
               ? `${healthSummary.available}/${RAIDA_COUNT} servers`
               : "Checking..."}
           </span>
-        </div>
-      </div>
+        </section>
+      </footer>
     </aside>
   );
 };

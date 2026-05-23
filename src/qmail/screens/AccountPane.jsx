@@ -1,61 +1,109 @@
-import React, { useState, useEffect } from "react";
+/* eslint-disable react/prop-types */
+import { useState, useEffect } from "react";
 import {
   User,
   Shield,
   Settings,
-  Activity,
-  Coins,
   RefreshCw,
   Edit,
   Key,
   Smartphone,
   Download,
-  Trash2,
-  LogIn,
-  CreditCard,
+  LogOut,
   AlertTriangle,
-  Check,
   X,
   Server,
-  Database,
-  Heart,
+  // Heart, <--- REMOVED with FIX-05 (Server Status section gone)
   Wifi,
   WifiOff,
-  AlertCircle,
 } from "lucide-react";
 import {
   // getHealthStatus, <--- REMOVED IMPORT
+  // healWallet, <--- REMOVED with FIX-10 interim (gpt-batch1)
   getServers,
-  getParityServer,
-  syncData,
 } from "../../api/qmailApiServices";
+import { isLocalStorageAvailable } from "../skipAutoRestore";
+import { useNotification } from "../../components/common/notifications/NotificationContext";
+import { ThemePicker } from "../../theme/ThemePicker";
 import "./AccountPane.css";
 
-const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
+// FIX-16-0A: badge style for truly-disabled "Coming Soon" rows.
+// The row's opacity/cursor/hover behavior is handled by the
+// .coming-soon CSS class in AccountPane.css (added with the
+// gpt-batch1 follow-up). We no longer use pointer-events: none
+// because it suppresses the title-tooltip hover. Buttons inside the
+// row carry their own disabled state.
+const COMING_SOON_BADGE_STYLE = {
+  display: "inline-block",
+  marginLeft: "var(--space-sm)",
+  padding: "2px 8px",
+  borderRadius: "var(--radius-sm)",
+  fontSize: "var(--font-size-xs)",
+  fontWeight: 500,
+  backgroundColor: "var(--tertiary-bg)",
+  color: "var(--text-tertiary)",
+  border: "1px solid var(--border-subtle)",
+  verticalAlign: "middle",
+};
+
+const ComingSoonAction = ({ icon, title, description }) => (
+  <div
+    className="security-action coming-soon"
+    aria-disabled="true"
+    tabIndex={-1}
+    title="This feature is on the roadmap."
+  >
+    <div className="security-action-icon">{icon}</div>
+    <div className="security-action-content">
+      <div className="security-action-title">
+        {title}
+        <span style={COMING_SOON_BADGE_STYLE}>Coming Soon</span>
+      </div>
+      <div className="security-action-description">{description}</div>
+    </div>
+  </div>
+);
+
+const ComingSoonToggle = ({ title, description }) => (
+  <div className="setting-item coming-soon">
+    <div className="setting-info">
+      <div className="setting-title">
+        {title}
+        <span style={COMING_SOON_BADGE_STYLE}>Coming Soon</span>
+      </div>
+      <div className="setting-description">{description}</div>
+    </div>
+    <div className="setting-control">
+      <button
+        className="toggle-switch"
+        disabled
+        aria-disabled="true"
+        tabIndex={-1}
+        title="This feature is on the roadmap."
+      />
+    </div>
+  </div>
+);
+
+const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   // State management
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const { showSuccess, showError, showInfo } = useNotification();
 
   // API Data States
-  // CHANGED: Initialize with static healthy data to bypass API
-  const [serverHealth, setServerHealth] = useState({
-    status: "healthy",
-    service: "QMail Client Core",
-    version: "1.0.0",
-    timestamp: Date.now()
-  });
-  
+  // FIX-05: serverHealth state removed. The static "healthy" default
+  // misrepresented service state on every Account view. NavigationPane's
+  // dot grid (driven by /raida/echo) is the authoritative health view.
+
   const [raidaServers, setRaidaServers] = useState([]);
-  const [parityServer, setParityServer] = useState(null);
   
   // const [healthLoading, setHealthLoading] = useState(false); <--- REMOVED UNUSED STATE
   
   const [serversLoading, setServersLoading] = useState(false);
-  const [parityLoading, setParityLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [notification, setNotification] = useState(null);
-  const [notificationType, setNotificationType] = useState("success");
+  // repairing state removed with handleRepairIdentity (FIX-10 interim).
 
   const [serverStats, setServerStats] = useState({
     total: 0,
@@ -64,25 +112,21 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
     uptime: 0,
   });
 
-  const [accountSettings, setAccountSettings] = useState({
-    notifications: true,
-    darkMode: true,
-    autoSync: false,
-    biometric: true,
-  });
+  // FIX-16-0A: accountSettings state removed. The four toggles
+  // (Notifications, Dark Mode, Auto-Sync, Biometric) are not wired
+  // to anything yet and now render as truly-disabled Coming-Soon
+  // controls. See <ComingSoonToggle> below.
 
-  // Auto-hide notification after 5 seconds
-  useEffect(() => {
-    if (notification) {
-      const timer = setTimeout(() => setNotification(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [notification]);
-
-  // Show notification helper function
   const showNotification = (message, type = "success") => {
-    setNotification(message);
-    setNotificationType(type);
+    if (type === "error") {
+      showError(message);
+      return;
+    }
+    if (type === "info") {
+      showInfo(message);
+      return;
+    }
+    showSuccess(message);
   };
 
   // Load all data on component mount
@@ -96,10 +140,7 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
 
     try {
       // CHANGED: Removed getHealthStatus from Promise.all
-      const [serversResult, parityResult] = await Promise.all([
-        getServers(true),
-        getParityServer(),
-      ]);
+      const serversResult = await getServers();
 
       // Removed healthResult handling block
 
@@ -107,23 +148,30 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
         const servers = serversResult.data.servers || [];
         setRaidaServers(servers);
 
+        const onlineCount = servers.filter((s) => s.is_available).length;
+        // The backend exposes live availability via /raida/echo, but does not
+        // track historical percent_uptime. Use the current availability ratio
+        // as a proxy so the widget reflects real state rather than 0%.
+        const hasHistorical = servers.some(
+          (s) => typeof s.percent_uptime === "number",
+        );
         const stats = {
           total: servers.length,
-          online: servers.filter((s) => s.is_available).length,
-          offline: servers.filter((s) => !s.is_available).length,
+          online: onlineCount,
+          offline: servers.length - onlineCount,
           uptime:
-            servers.length > 0
-              ? Math.round(
-                  servers.reduce((sum, s) => sum + (s.percent_uptime || 0), 0) /
-                    servers.length,
-                )
-              : 0,
+            servers.length === 0
+              ? 0
+              : hasHistorical
+                ? Math.round(
+                    servers.reduce(
+                      (sum, s) => sum + (s.percent_uptime || 0),
+                      0,
+                    ) / servers.length,
+                  )
+                : Math.round((onlineCount / servers.length) * 100),
         };
         setServerStats(stats);
-      }
-
-      if (parityResult.success) {
-        setParityServer(parityResult.data);
       }
 
       console.log("All account data loaded successfully");
@@ -146,22 +194,33 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
     setServersLoading(true);
 
     try {
-      const result = await getServers(true);
+      const result = await getServers();
       if (result.success) {
         const servers = result.data.servers || [];
         setRaidaServers(servers);
 
+        const onlineCount = servers.filter((s) => s.is_available).length;
+        // The backend exposes live availability via /raida/echo, but does not
+        // track historical percent_uptime. Use the current availability ratio
+        // as a proxy so the widget reflects real state rather than 0%.
+        const hasHistorical = servers.some(
+          (s) => typeof s.percent_uptime === "number",
+        );
         const stats = {
           total: servers.length,
-          online: servers.filter((s) => s.is_available).length,
-          offline: servers.filter((s) => !s.is_available).length,
+          online: onlineCount,
+          offline: servers.length - onlineCount,
           uptime:
-            servers.length > 0
-              ? Math.round(
-                  servers.reduce((sum, s) => sum + (s.percent_uptime || 0), 0) /
-                    servers.length,
-                )
-              : 0,
+            servers.length === 0
+              ? 0
+              : hasHistorical
+                ? Math.round(
+                    servers.reduce(
+                      (sum, s) => sum + (s.percent_uptime || 0),
+                      0,
+                    ) / servers.length,
+                  )
+                : Math.round((onlineCount / servers.length) * 100),
         };
         setServerStats(stats);
 
@@ -179,72 +238,11 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
     }
   };
 
-  const loadParityServer = async () => {
-    setParityLoading(true);
-    try {
-      const result = await getParityServer();
-      if (result.success) {
-        setParityServer(result.data);
-
-        if (result.data.status === "not_configured") {
-          showNotification("Parity server is not configured", "info");
-        } else if (result.data.parityServer) {
-          showNotification(
-            `Parity server: ${result.data.parityServer.address}`,
-            "success",
-          );
-        }
-      } else {
-        showNotification(
-          `Failed to load parity server: ${result.error}`,
-          "error",
-        );
-      }
-    } catch (error) {
-      showNotification(
-        `Failed to load parity server: ${error.message}`,
-        "error",
-      );
-    } finally {
-      setParityLoading(false);
-    }
-  };
-
-  const handleManualSync = async () => {
-    setSyncing(true);
-    setNotification(null);
-
-    try {
-      const result = await syncData();
-
-      if (result.success) {
-        await loadServers();
-
-        const message = result.data.message || "Sync completed successfully!";
-        const usersCount =
-          result.data.usersUpdated ?? result.data.users_synced ?? 0;
-        const serversCount =
-          result.data.serversUpdated ?? result.data.servers_synced ?? 0;
-
-        showNotification(
-          `${message} - Users: ${usersCount}, Servers: ${serversCount}`,
-          "success",
-        );
-      } else {
-        showNotification(
-          `Sync failed: ${result.error || "Unknown error"}`,
-          "error",
-        );
-      }
-    } catch (error) {
-      showNotification(
-        `Sync failed: ${error.message || "Unknown error"}`,
-        "error",
-      );
-    } finally {
-      setSyncing(false);
-    }
-  };
+  // FIX-10 interim (gpt-batch1): handleRepairIdentity removed.
+  // It was wired to a banner that fired on the wrong signal
+  // (walletBalance.folders.fracked.coins) and called the mutating
+  // healWallet() endpoint as if it were a health check. Will return
+  // once CORE-F (non-mutating identity-health endpoint) lands.
 
   const handleRefresh = () => {
     loadAccountData();
@@ -254,18 +252,21 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
     setIsEditing(!isEditing);
   };
 
-  const handleSettingToggle = (setting) => {
-    setAccountSettings((prev) => ({
-      ...prev,
-      [setting]: !prev[setting],
-    }));
+  const storageAvailable = isLocalStorageAvailable();
+
+  const handleConfirmSignOut = () => {
+    setShowSignOutConfirm(false);
+    if (onSignOut) {
+      onSignOut();
+    }
   };
 
-  const handleSecurityAction = (action) => {
-    console.log(`Security action triggered: ${action}`);
-  };
+  // FIX-16-0A: handleSettingToggle and handleSecurityAction removed.
+  // Both were no-op handlers attached to controls that didn't do
+  // anything. Disabled controls now have no onClick at all.
 
-  // CHANGED: Update loading check to ignore serverHealth (since it's now static)
+  // Loading gate: show spinner only when initial RAIDA list hasn't
+  // arrived yet. (FIX-05: serverHealth check removed.)
   if (loading && raidaServers.length === 0) {
     return (
       <div className="account-pane">
@@ -294,34 +295,6 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
 
   return (
     <div className="account-pane">
-      {/* Notification Banner */}
-      {notification && (
-        <div
-          className={`notification-banner notification-${notificationType}`}
-          style={{
-            position: "fixed",
-            top: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 9999,
-            minWidth: "400px",
-            maxWidth: "600px",
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
-          }}
-        >
-          {notificationType === "success" && <Check size={16} />}
-          {notificationType === "error" && <AlertTriangle size={16} />}
-          {notificationType === "info" && <AlertCircle size={16} />}
-          <span>{notification}</span>
-          <button
-            onClick={() => setNotification(null)}
-            className="notification-close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
       {/* Account Header */}
       <div className="account-header">
         <div className="account-header-title">
@@ -344,62 +317,26 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
       </div>
 
       <div className="account-content">
-        {/* Server Health Section */}
+        {/* FIX-05: Server Status section removed.
+            It was hard-coded to { status: "healthy", service: "QMail
+            Client Core", version: "1.0.0" } and never updated from a
+            live source. A permanently-green indicator that contradicts
+            the NavigationPane dot grid (which IS driven by /raida/echo)
+            is worse than no indicator.
+            Per the plan's FIX-05 recommendation (option A), the
+            authoritative health view is the dot grid in NavigationPane.
+            If a future ticket needs an aggregate "service status" in
+            this pane, derive it from /api/raida/echo's arrayUsable +
+            totalAvailable fields — NOT from /api/system/version-check
+            (that endpoint is for update availability, not health). */}
+
         <div className="profile-section">
           <div className="section-header">
             <h3 className="section-title">
-              <Heart size={20} />
-              Server Status
+              <User size={20} />
+              Profile Information
             </h3>
-            {/* REMOVED: Individual Refresh Button for Health since it's now static */}
-          </div>
-
-          <div className="profile-details">
-            <div className="profile-field">
-              <label className="field-label">Service Status</label>
-              <div
-                className={`field-value ${
-                  serverHealth?.status === "healthy" ? "success" : "error"
-                }`}
-              >
-                {/* Always display from static state */}
-                {serverHealth?.status || "Unknown"}
-              </div>
-            </div>
-
-            <div className="profile-field">
-              <label className="field-label">Service Name</label>
-              <div className="field-value">
-                {serverHealth?.service || "QMail Client Core"}
-              </div>
-            </div>
-
-            <div className="profile-field">
-              <label className="field-label">Version</label>
-              <div className="field-value">
-                {serverHealth?.version || "Unknown"}
-              </div>
-            </div>
-
-            <div className="profile-field">
-              <label className="field-label">Last Check</label>
-              <div className="field-value">
-                {serverHealth?.timestamp
-                  ? new Date(serverHealth.timestamp).toLocaleString()
-                  : "Never"}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Profile Section - Only show if userAccount exists */}
-        {userAccount && (
-          <div className="profile-section">
-            <div className="section-header">
-              <h3 className="section-title">
-                <User size={20} />
-                Profile Information
-              </h3>
+            {userAccount && (
               <button
                 className={`edit-profile-btn ${
                   isEditing ? "danger" : "secondary"
@@ -409,35 +346,44 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
                 {isEditing ? <X size={16} /> : <Edit size={16} />}
                 {isEditing ? "Cancel" : "Edit"}
               </button>
-            </div>
+            )}
+          </div>
 
-            <div className="profile-details">
-              <div className="profile-field">
-                <label className="field-label">QMail Address</label>
-                <div className="field-value">
-                  {userAccount.pretty_address ||
-                    `${userAccount.address}@${userAccount.domain}`}
-                </div>
-              </div>
-
-              <div className="profile-field">
-                <label className="field-label">Serial Number</label>
-                <div className="field-value">
-                  #{userAccount.serial_number || "N/A"}
-                </div>
-              </div>
-
-              {userAccount.recovery_email && (
+          <div className="profile-details">
+            {userAccount ? (
+              <>
                 <div className="profile-field">
-                  <label className="field-label">Recovery Email</label>
+                  <label className="field-label">QMail Address</label>
                   <div className="field-value">
-                    {userAccount.recovery_email}
+                    {userAccount.pretty_address ||
+                      `${userAccount.address}@${userAccount.domain}`}
                   </div>
                 </div>
-              )}
-            </div>
+
+                <div className="profile-field">
+                  <label className="field-label">Serial Number</label>
+                  <div className="field-value">
+                    #{userAccount.serial_number || "N/A"}
+                  </div>
+                </div>
+
+                {userAccount.recovery_email && (
+                  <div className="profile-field">
+                    <label className="field-label">Recovery Email</label>
+                    <div className="field-value">
+                      {userAccount.recovery_email}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="profile-field">
+                <label className="field-label">QMail Address</label>
+                <div className="field-value">Loading...</div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
 
         {/* RAIDA Network Status Section */}
         <div className="balance-section">
@@ -447,15 +393,8 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
               RAIDA Network Status
             </h3>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                className="edit-profile-btn secondary"
-                onClick={handleManualSync}
-                disabled={syncing}
-                title="Sync user directory and server records from RAIDA"
-              >
-                <RefreshCw size={16} className={syncing ? "spinning" : ""} />
-                {syncing ? "Syncing..." : "Sync Directory"}
-              </button>
+              {/* Sync Directory button removed: /api/admin/sync was removed
+                  from the backend in QMail v2. No replacement exists yet. */}
               <button
                 className="edit-profile-btn secondary"
                 onClick={loadServers}
@@ -471,51 +410,15 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
             </div>
           </div>
 
-          {walletBalance?.folders.fracked.coins > 0 && (
-            <div
-              className="status-message warning"
-              style={{
-                marginBottom: "var(--space-lg)",
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                padding: "16px",
-                borderRadius: "8px",
-                backgroundColor: "rgba(245, 158, 11, 0.1)",
-                border: "1px solid var(--accent-warning)",
-              }}
-            >
-              <AlertTriangle size={24} className="text-warning" />
-              <div style={{ flex: 1 }}>
-                <h4 style={{ margin: 0, color: "var(--accent-warning)" }}>
-                  Identity Coin Needs Healing
-                </h4>
-                <p
-                  style={{
-                    margin: "4px 0 0 0",
-                    fontSize: "var(--font-size-sm)",
-                    color: "var(--text-secondary)",
-                  }}
-                >
-                  Your mailbox identity is currently fracked. This may prevent
-                  you from sending or receiving mail.
-                </p>
-              </div>
-              <button
-                className="edit-profile-btn"
-                onClick={handleManualSync}
-                disabled={syncing}
-                style={{
-                  backgroundColor: "var(--accent-warning)",
-                  color: "var(--primary-bg)",
-                  border: "none",
-                }}
-              >
-                <RefreshCw size={16} className={syncing ? "spinning" : ""} />
-                {syncing ? "Healing..." : "Repair Now"}
-              </button>
-            </div>
-          )}
+          {/* FIX-10 interim (gpt-batch1): the "Identity Coin Needs Healing"
+              banner used to fire on walletBalance.folders.fracked.coins,
+              which is a wallet-wide signal — NOT an identity-specific
+              health signal. The Repair button it offered called the
+              mutating healWallet() endpoint. Per the plan, full FIX-10
+              is HARD-blocked on CORE-F (a non-mutating identity-health
+              endpoint). Until that lands, the banner is removed
+              entirely. Identity repair will return as an explicit
+              manual action once CORE-F provides a safe health source. */}
 
           <div className="balance-grid">
             <div className="balance-card total">
@@ -556,19 +459,19 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
               </div>
             </div>
 
-            <div className="balance-card verified">
+            <div className="balance-card network-online">
               <div className="balance-label">Online</div>
               <div className="balance-value">{serverStats.online}</div>
               <div className="balance-description">Available servers</div>
             </div>
 
-            <div className="balance-card counterfeit">
+            <div className="balance-card network-offline">
               <div className="balance-label">Offline</div>
               <div className="balance-value">{serverStats.offline}</div>
               <div className="balance-description">Unavailable servers</div>
             </div>
 
-            <div className="balance-card suspect">
+            <div className="balance-card network-unknown">
               <div className="balance-label">Uptime</div>
               <div className="balance-value">
                 {serverStats.total > 0
@@ -587,106 +490,32 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
                 className="text-sm text-secondary"
                 style={{ marginBottom: "var(--space-md)" }}
               >
-                Server Details
+                Server Details ({raidaServers.length})
               </h4>
               <div className="server-grid">
-                {raidaServers.slice(0, 10).map((server) => (
-                  <div key={server.server_id} className="server-item">
-                    <div className="server-status">
-                      {server.is_available ? (
-                        <Wifi size={16} className="text-success" />
-                      ) : (
-                        <WifiOff size={16} className="text-danger" />
-                      )}
-                    </div>
-                    <div className="server-info">
-                      <div className="server-id">{server.server_id}</div>
-                      <div className="server-address">
-                        {server.ip_address}:{server.port}
+                {raidaServers.map((server, index) => {
+                  const serverId = server.server_id ?? server.raida_index ?? index;
+                  return (
+                    <div key={serverId} className="server-item">
+                      <div className="server-status">
+                        {server.is_available ? (
+                          <Wifi size={16} className="text-success" />
+                        ) : (
+                          <WifiOff size={16} className="text-danger" />
+                        )}
+                      </div>
+                      <div className="server-info">
+                        <div className="server-id">{serverId}</div>
+                        <div className="server-address">
+                          {server.ip_address}:{server.port}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
-        </div>
-
-        {/* Parity Server Configuration Section */}
-        <div className="profile-section">
-          <div className="section-header">
-            <h3 className="section-title">
-              <Database size={20} />
-              Parity Server Configuration
-            </h3>
-            <button
-              className="edit-profile-btn secondary"
-              onClick={loadParityServer}
-              disabled={parityLoading}
-            >
-              <RefreshCw
-                size={16}
-                className={parityLoading ? "spinning" : ""}
-              />
-              Refresh
-            </button>
-          </div>
-
-          <div className="profile-details">
-            <div className="profile-field">
-              <label className="field-label">Configuration Status</label>
-              <div
-                className={`field-value ${
-                  parityServer?.status === "configured" ? "success" : "warning"
-                }`}
-              >
-                {parityLoading
-                  ? "Loading..."
-                  : parityServer?.status || "Not Configured"}
-              </div>
-            </div>
-
-            {parityServer?.parityServer && (
-              <>
-                <div className="profile-field">
-                  <label className="field-label">Server ID</label>
-                  <div className="field-value">
-                    {parityServer.parityServer.serverId}
-                  </div>
-                </div>
-
-                <div className="profile-field">
-                  <label className="field-label">Server Address</label>
-                  <div className="field-value">
-                    {parityServer.parityServer.address}:
-                    {parityServer.parityServer.port}
-                  </div>
-                </div>
-
-                <div className="profile-field">
-                  <label className="field-label">Availability</label>
-                  <div
-                    className={`field-value ${
-                      parityServer.parityServer.isAvailable
-                        ? "success"
-                        : "error"
-                    }`}
-                  >
-                    {parityServer.parityServer.isAvailable
-                      ? "Available"
-                      : "Unavailable"}
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div className="profile-field">
-              <label className="field-label">Message</label>
-              <div className="field-value">
-                {parityServer?.message || "No parity server configured"}
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Security Section */}
@@ -698,68 +527,44 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
             </h3>
           </div>
 
+          {/* FIX-16-0A: Coming-Soon rows are truly disabled — no onClick,
+              no pointer cursor, aria-disabled, skipped by Tab nav, reduced
+              opacity. Delete Account is hidden entirely (safety-critical
+              control that doesn't exist). */}
           <div className="security-actions">
-            <div
-              className="security-action"
-              onClick={() => handleSecurityAction("change-password")}
-            >
-              <div className="security-action-icon">
-                <Key size={20} />
-              </div>
-              <div className="security-action-content">
-                <div className="security-action-title">Change Password</div>
-                <div className="security-action-description">
-                  Update your account password for better security
+            <ComingSoonAction
+              icon={<Key size={20} />}
+              title="Change Password"
+              description="Update your account password for better security"
+            />
+            <ComingSoonAction
+              icon={<Smartphone size={20} />}
+              title="Two-Factor Authentication"
+              description="Enable 2FA for enhanced account protection"
+            />
+            <ComingSoonAction
+              icon={<Download size={20} />}
+              title="Backup Wallet"
+              description="Download encrypted backup of your CloudCoin wallet"
+            />
+            {onSignOut && (
+              <button
+                type="button"
+                className="security-action sign-out-action"
+                onClick={() => setShowSignOutConfirm(true)}
+              >
+                <div className="security-action-icon warning">
+                  <LogOut size={20} />
                 </div>
-              </div>
-            </div>
-
-            <div
-              className="security-action"
-              onClick={() => handleSecurityAction("enable-2fa")}
-            >
-              <div className="security-action-icon">
-                <Smartphone size={20} />
-              </div>
-              <div className="security-action-content">
-                <div className="security-action-title">
-                  Two-Factor Authentication
+                <div className="security-action-content">
+                  <div className="security-action-title">Sign Out</div>
+                  <div className="security-action-description">
+                    Return to the start screen on this device
+                  </div>
                 </div>
-                <div className="security-action-description">
-                  Enable 2FA for enhanced account protection
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="security-action"
-              onClick={() => handleSecurityAction("backup-wallet")}
-            >
-              <div className="security-action-icon">
-                <Download size={20} />
-              </div>
-              <div className="security-action-content">
-                <div className="security-action-title">Backup Wallet</div>
-                <div className="security-action-description">
-                  Download encrypted backup of your CloudCoin wallet
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="security-action"
-              onClick={() => handleSecurityAction("delete-account")}
-            >
-              <div className="security-action-icon danger">
-                <Trash2 size={20} />
-              </div>
-              <div className="security-action-content">
-                <div className="security-action-title">Delete Account</div>
-                <div className="security-action-description">
-                  Permanently delete your account and all data
-                </div>
-              </div>
-            </div>
+              </button>
+            )}
+            {/* Delete Account intentionally hidden until implemented */}
           </div>
         </div>
 
@@ -773,76 +578,72 @@ const AccountPane = ({ userAccount, onAccountUpdate, walletBalance }) => {
           </div>
 
           <div className="settings-grid">
-            <div className="setting-item">
-              <div className="setting-info">
-                <div className="setting-title">Email Notifications</div>
-                <div className="setting-description">
-                  Receive email alerts for account activities
-                </div>
-              </div>
-              <div className="setting-control">
-                <button
-                  className={`toggle-switch ${
-                    accountSettings.notifications ? "active" : ""
-                  }`}
-                  onClick={() => handleSettingToggle("notifications")}
-                ></button>
-              </div>
-            </div>
-
-            <div className="setting-item">
-              <div className="setting-info">
-                <div className="setting-title">Dark Mode</div>
-                <div className="setting-description">
-                  Use dark theme for the application interface
-                </div>
-              </div>
-              <div className="setting-control">
-                <button
-                  className={`toggle-switch ${
-                    accountSettings.darkMode ? "active" : ""
-                  }`}
-                  onClick={() => handleSettingToggle("darkMode")}
-                ></button>
-              </div>
-            </div>
-
-            <div className="setting-item">
-              <div className="setting-info">
-                <div className="setting-title">Auto-Sync</div>
-                <div className="setting-description">
-                  Automatically sync CloudCoin balance with RAIDA network
-                </div>
-              </div>
-              <div className="setting-control">
-                <button
-                  className={`toggle-switch ${
-                    accountSettings.autoSync ? "active" : ""
-                  }`}
-                  onClick={() => handleSettingToggle("autoSync")}
-                ></button>
-              </div>
-            </div>
-
-            <div className="setting-item">
-              <div className="setting-info">
-                <div className="setting-title">Biometric Authentication</div>
-                <div className="setting-description">
-                  Use fingerprint or face recognition for quick access
-                </div>
-              </div>
-              <div className="setting-control">
-                <button
-                  className={`toggle-switch ${
-                    accountSettings.biometric ? "active" : ""
-                  }`}
-                  onClick={() => handleSettingToggle("biometric")}
-                ></button>
-              </div>
-            </div>
+            <ThemePicker />
+            <ComingSoonToggle
+              title="Email Notifications"
+              description="Receive email alerts for account activities"
+            />
+            <ComingSoonToggle
+              title="Auto-Sync"
+              description="Automatically sync CloudCoin balance with RAIDA network"
+            />
+            <ComingSoonToggle
+              title="Biometric Authentication"
+              description="Use fingerprint or face recognition for quick access"
+            />
           </div>
         </div>
       </div>
+
+      {showSignOutConfirm && (
+        <div
+          className="account-confirm-overlay"
+          role="presentation"
+          onClick={() => setShowSignOutConfirm(false)}
+        >
+          <div
+            className="account-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sign-out-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="account-confirm-header">
+              <LogOut size={22} />
+              <h3 id="sign-out-title">Sign Out</h3>
+            </div>
+            <p>
+              QMail will return to the start screen and stay signed out after
+              restart. Your local identity files will remain on this device.
+            </p>
+            {!storageAvailable && (
+              <div className="account-confirm-warning">
+                <AlertTriangle size={16} />
+                <span>
+                  This browser cannot save the sign-out preference, so sign-out
+                  may only last for this session.
+                </span>
+              </div>
+            )}
+            <div className="account-confirm-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setShowSignOutConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={handleConfirmSignOut}
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,0 +1,49 @@
+# QMail-GUI Usability & API Completeness Audit Findings
+Date: 2026-05-21
+Auditor: Gemini CLI (Updated with Cross-Model Insights)
+
+## 1. Overview
+The QMail-GUI aligns with the v2 REST API (rest_core) for basic sending and receiving. However, the application currently lacks several "table stakes" features of a modern email client and contains functional gaps that hinder real-world usability.
+
+## 2. Critical Functional Gaps (High Severity)
+
+### A. Missing Core Email Actions
+- **No Forward or Reply-All**: The UI only supports "Reply." Users cannot forward messages or reply to all recipients in a thread, which are fundamental email requirements.
+- **Sent Folder Inactivity**: Successfully sent messages do not appear in the "Sent" folder. There is no automated or manual path in the current GUI to save a sent copy to the local database.
+- **Empty Trash**: There is no "Empty Trash" or "Delete All" action. Users must delete messages permanently one by one, which is impractical for high-volume accounts and leads to unnecessary storage costs.
+
+### B. Draft Management Issues
+- **Incomplete Draft Loading**: When opening a draft, the UI often lacks the full body and recipient lists (Cc/Bcc) because the draft list only provides preview metadata. The app needs to call `/db/messages/get` when editing a draft.
+- **Stale Drafts**: Drafts are not automatically deleted after being successfully sent.
+- **No Autosave**: There is no debounced autosave. If the application closes unexpectedly during composition, all work is lost.
+
+### C. Contact Management Schema Mismatch
+- **Add Contact Bug**: The "Add Contact" modal collects "Name" and "Email," but the backend requires `serial_number`, `first_name`, and `last_name`. The UI currently sends `serial_number: "0"`, which is invalid, rendering the address book functionally broken for new entries.
+
+### D. Identity & First-Run Experience
+- **"John Doe" Placeholder**: The application defaults to a "John Doe" identity. If a user returns to the app (has_id but no fresh provisioning), the UI fails to fetch and display the real identity, showing the placeholder instead.
+- **No Sign Out/Switch Identity**: There is no way to log out or switch to a different wallet/identity within the GUI.
+
+## 3. UI/UX & API Integration Findings
+
+### A. Attachment Handling
+- **Outgoing Attachments**: (Previously Identified) The GUI has no file picker or staging UI for sending attachments, despite backend support.
+- **Incoming Attachments**: Functional, but lacks display for "dangerous" or "warning" flags provided by the backend.
+
+### B. RAIDA & Network Awareness
+- **Static Health Status**: The "Service Status" in AccountPane is hard-coded to "healthy" (v1.0.0), providing no real feedback on the core service state.
+- **Dead Controls**: "Parity Server Configuration," "Security Actions" (Change Password, 2FA, etc.), and "Application Settings" (Dark Mode, etc.) are all non-functional placeholders that currently only log to the console.
+- **Optimistic Send Preflight**: The "Send" button starts as enabled (`canSend=true`) and only disables after a network check fails, which can lead to a "flicker" of false availability.
+
+### C. Download Workflow
+- **Body Refresh after Decryption**: After a successful `/net/messages/download`, the UI should immediately trigger a `/db/messages/get` to populate the full decrypted body and attachments list. Current implementation sometimes leaves the message in a "downloaded but empty" state.
+
+## 4. Recommended Actions (Prioritized)
+1.  **Core Feature Parity**: Implement "Forward," "Reply-All," and "Empty Trash."
+2.  **Fix Contact Schema**: Update the Add Contact modal to include `serial_number` or integrate an SN-from-address lookup.
+3.  **Drafts/Sent Reliability**: Ensure sent mail is saved to folder 1 (Sent) and drafts are fully loaded/deleted post-send.
+4.  **Live Identity**: Replace "John Doe" defaults with calls to `/qmail/local/identity/get` on application mount.
+5.  **Remove Dead UI**: Hide or mark as "Coming Soon" all non-functional security and parity settings to maintain user trust.
+
+## 5. Conclusion
+While the "plumbing" for QMail v2 is largely in place, the "porcelain" (user interface) is incomplete. Addressing the core action gaps (Forward/Reply-All) and the contact/draft persistence issues is required before the app can be considered a viable replacement for traditional email clients.

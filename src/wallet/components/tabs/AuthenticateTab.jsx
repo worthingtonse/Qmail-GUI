@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { pollTaskUntilComplete, importCloudCoinFiles, runPostImportHealthChecks } from '../../../api/apiService';
 import { useNotification } from '../../../components/common/notifications/NotificationContext';
 import './AuthenticateTab.css';

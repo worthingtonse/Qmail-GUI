@@ -1,0 +1,53 @@
+GPT usability batch 4 review
+Reviewed 2026-05-22.
+
+Scope reviewed:
+- docs/opu.usability.batch4.summary.txt
+- src/api/qmailApiServices.js
+- src/screens/ServiceSelectionScreen.jsx
+- src/qmail/screens/WalletSetupScreen.jsx
+
+Verification:
+- PASS: npm run build
+- PASS: git diff --check on the batch 4 files above
+- FAIL, baseline lint only: npx eslint on the three batch 4 files reports 4 existing errors: unused React imports in ServiceSelectionScreen/WalletSetupScreen and unused emailAddress/setEmailAddress in ServiceSelectionScreen.
+
+Findings:
+
+1. HIGH - Make Change reports success without actually making change.
+
+WalletSetupScreen.handleMakeChange calls prepareChange() and then shows "Change prepared. Your wallet is ready for send-fees." when the response is successful (src/qmail/screens/WalletSetupScreen.jsx:88-98). But qmailApiServices.prepareChange() calls GET /api/coins/prepare-change (src/api/qmailApiServices.js:1374-1382), and the backend handler is explicitly only a denomination inventory/report endpoint: "PREPARE CHANGE ENDPOINT - Show denomination breakdown for change prep" (D:/Code/src/C/rest_core/api_src/api_handlers_coins.c:1199-1292).
+
+The actual mutating make-change endpoint is /api/coins/break and it requires a denomination parameter before it calls cmd_make_change (D:/Code/src/C/rest_core/api_src/api_handlers_coins.c:42-88).
+
+Effect: the user can click Make Change, see a success message, and still have no smaller coins prepared. That is worse than the original silent behavior because it gives false confidence before the user tries to send mail.
+
+Recommended fix: either rename/reframe this action as a read-only "Check change" operation and show the returned denomination inventory, or implement a real make-change flow: call prepare-change to find a breakable denomination, then call /api/coins/break?denomination=... and report the result of that mutating call.
+
+2. HIGH - Make Change is aimed at the default wallet, not necessarily the QMail Mail wallet.
+
+WalletSetupScreen calls prepareChange() with no wallet path (src/qmail/screens/WalletSetupScreen.jsx:92). qmailApiServices.prepareChange() only appends wallet_path if one is passed (src/api/qmailApiServices.js:1374-1380). The backend's resolve_wallet_path falls back to DEFAULT_WALLET when no wallet_path or wallet parameter is present (D:/Code/src/C/rest_core/api_src/api_handlers_utils.c:243-255).
+
+The onboarding import path, however, deliberately imports credentials into the registered Mail wallet and the import response exposes mail_wallet_path. Batch 4 discards that import metadata and WalletSetupScreen receives only normalized identity-or-null, so the Make Change action has no way to target the Mail wallet.
+
+Effect: even if the action is later changed to call the mutating /coins/break endpoint, it may break coins in Default while QMail send-fee coins are expected in Mail. The UI would tell the user QMail is ready while the relevant wallet is unchanged.
+
+Recommended fix: preserve the Mail wallet path through onboarding/provisioning data, or fetch the registered Mail wallet path before Make Change, and pass it to the make-change/prepare endpoint.
+
+3. MEDIUM - "No wallet available" is mislabeled as backend unreachable.
+
+importCredentials() returns status: "network" when /wallets/list is reachable but empty or does not yield a usable wallet_path (src/api/qmailApiServices.js:1315-1324). ServiceSelectionScreen.formatImportError maps every "network" status to "Can't reach the QMail backend" (src/screens/ServiceSelectionScreen.jsx:18-20).
+
+Effect: if the backend is running but no wallet is registered/online, the user gets the wrong recovery instruction. That weakens the main purpose of FIX-13-0B: disambiguating first-run import failures.
+
+Recommended fix: use a distinct status such as "no_wallet" or "wallet_unavailable" and show a message about creating/restoring a wallet or restarting the backend wallet registration, rather than saying the backend cannot be reached.
+
+Reviewer question responses:
+
+1. The 404 message mentioning "may already have been imported" is useful. It covers an important real recovery path and does not obscure the "code may be wrong" case.
+
+2. The Make Change caption should remain visible, not tooltip-only. I would change "pay per-send fees" to plainer wording like "pay fees when sending mail."
+
+3. Four-second auto-clear is fine for success. For errors, consider leaving the message until the next action or input change so users have time to read and act.
+
+4. Move the Retry button styling to CSS. The inline style is acceptable for a prototype, but a class will handle disabled state, hover, theme changes, and wrapping more predictably.

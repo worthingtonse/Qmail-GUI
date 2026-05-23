@@ -1,491 +1,356 @@
-/* ==================== ROOT VARIABLES & BASE STYLES ==================== */
-:root {
-  /* Color Palette - Clean & Modern */
-  --primary-bg: #0f172a;          /* Dark slate blue */
-  --secondary-bg: #1e293b;        /* Lighter dark blue */
-  --tertiary-bg: #334155;         /* Medium blue-gray */
-  --surface-bg: #475569;          /* Light blue-gray */
-  
-  /* Accent Colors */
-  --accent-primary: #3b82f6;      /* Blue */
-  --accent-secondary: #06b6d4;    /* Cyan */
-  --accent-success: #10b981;      /* Emerald */
-  --accent-warning: #f59e0b;      /* Amber */
-  --accent-danger: #ef4444;       /* Red */
-  
-  /* Text Colors */
-  --text-primary: #f8fafc;        /* Almost white */
-  --text-secondary: #cbd5e1;      /* Light gray */
-  --text-tertiary: #94a3b8;       /* Medium gray */
-  --text-muted: #64748b;          /* Dark gray */
-  
-  /* Border & Divider Colors */
-  --border-subtle: #334155;       /* Subtle borders */
-  --border-medium: #475569;       /* Medium borders */
-  --border-strong: #64748b;       /* Strong borders */
-  
-  /* Card & Surface Colors */
-  --card-bg: #1e293b;
-  --card-hover: #334155;
-  --card-selected: #1e40af;
-  
-  /* Status Colors */
-  --status-online: #10b981;
-  --status-offline: #64748b;
-  --status-warning: #f59e0b;
-  --status-error: #ef4444;
-  
-  /* Tier Colors for CloudCoin status */
-  --tier-plain: #64748b;
-  --tier-bronze: #cd7f32;
-  --tier-silver: #c0c0c0;
-  --tier-gold: #ffd700;
-  --tier-diamond: #60a5fa;
-  
-  /* Typography */
-  --font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-size-xs: 11px;
-  --font-size-sm: 12px;
-  --font-size-base: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 18px;
-  --font-size-2xl: 20px;
-  
-  /* Spacing Scale */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 12px;
-  --space-lg: 16px;
-  --space-xl: 20px;
-  --space-2xl: 24px;
-  --space-3xl: 32px;
-  
-  /* Border Radius */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  
-  /* Shadows - Clean & Subtle */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
-  
-  /* Transitions */
-  --transition-fast: 0.15s ease;
-  --transition-base: 0.2s ease;
-  --transition-slow: 0.3s ease;
-  
-  /* Layout */
-  --sidebar-width: 240px;
-  --email-list-width: 360px;
-  --header-height: 60px;
-}
+/* ==================== QMAIL DASHBOARD ==================== */
 
-/* ==================== BASE STYLES ==================== */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: var(--font-family);
-  background-color: var(--primary-bg);
-  color: var(--text-primary);
-  font-size: var(--font-size-base);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* ==================== BUTTON STYLES ==================== */
-button {
-  border: none;
-  border-radius: var(--radius-md);
-  font-family: var(--font-family);
-  font-size: var(--font-size-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Primary Button */
-.primary {
-  background-color: var(--accent-primary);
-  color: white;
-}
-
-.primary:hover:not(:disabled) {
-  background-color: #2563eb;
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-/* Secondary Button */
-.secondary {
-  background-color: var(--card-bg);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-medium);
-}
-
-.secondary:hover:not(:disabled) {
-  background-color: var(--card-hover);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-/* Success Button */
-.success {
-  background-color: var(--accent-success);
-  color: white;
-}
-
-.success:hover:not(:disabled) {
-  background-color: #059669;
-}
-
-/* Danger Button */
-.danger {
-  background-color: var(--accent-danger);
-  color: white;
-}
-
-.danger:hover:not(:disabled) {
-  background-color: #dc2626;
-}
-
-/* Ghost Button */
-.ghost {
-  background-color: transparent;
-  color: var(--text-tertiary);
-  border: none;
-  padding: var(--space-sm);
-}
-
-.ghost:hover:not(:disabled) {
-  background-color: var(--card-hover);
-  color: var(--text-primary);
-}
-
-/* ==================== FORM ELEMENTS ==================== */
-input, textarea, select {
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-medium);
-  color: var(--text-primary);
-  border-radius: var(--radius-md);
-  padding: var(--space-md) var(--space-lg);
-  font-family: var(--font-family);
-  font-size: var(--font-size-base);
-  transition: all var(--transition-base);
-  width: 100%;
-}
-
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-input::placeholder, textarea::placeholder {
-  color: var(--text-muted);
-}
-
-/* ==================== UTILITY CLASSES ==================== */
-.text-xs { font-size: var(--font-size-xs); }
-.text-sm { font-size: var(--font-size-sm); }
-.text-lg { font-size: var(--font-size-lg); }
-.text-xl { font-size: var(--font-size-xl); }
-
-.text-primary { color: var(--text-primary); }
-.text-secondary { color: var(--text-secondary); }
-.text-tertiary { color: var(--text-tertiary); }
-.text-muted { color: var(--text-muted); }
-
-.bg-card { background-color: var(--card-bg); }
-.bg-hover { background-color: var(--card-hover); }
-
-.border { border: 1px solid var(--border-medium); }
-.border-subtle { border: 1px solid var(--border-subtle); }
-.border-strong { border: 1px solid var(--border-strong); }
-
-.rounded-sm { border-radius: var(--radius-sm); }
-.rounded-md { border-radius: var(--radius-md); }
-.rounded-lg { border-radius: var(--radius-lg); }
-.rounded-xl { border-radius: var(--radius-xl); }
-
-.shadow-sm { box-shadow: var(--shadow-sm); }
-.shadow-md { box-shadow: var(--shadow-md); }
-.shadow-lg { box-shadow: var(--shadow-lg); }
-
-/* ==================== ANIMATIONS ==================== */
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.spinning { animation: spin 1s linear infinite; }
-.fade-in { animation: fadeIn 0.3s ease; }
-.slide-in { animation: slideIn 0.3s ease; }
-
-/* ==================== LAYOUT COMPONENTS ==================== */
-
-/* Main Dashboard Layout */
 .qmail-dashboard {
-  display: flex;
-  height: 100vh;
-  width: 100vw;
-  background-color: var(--primary-bg);
-  color: var(--text-primary);
-  font-family: var(--font-family);
+  --font-family: var(--font-primary);
+  --font-size-base: var(--font-size-md);
+  --surface-bg: color-mix(in srgb, var(--card-bg) 65%, var(--tertiary-bg) 35%);
+  --accent-danger: var(--accent-error);
+  --status-online: var(--status-success);
+  --status-offline: var(--text-muted);
+  --tier-plain: var(--text-tertiary);
+  --tier-bronze: color-mix(in srgb, var(--accent-warning) 68%, var(--accent-error) 32%);
+  --tier-silver: color-mix(in srgb, var(--text-primary) 78%, var(--text-tertiary) 22%);
+  --tier-gold: var(--accent-warning);
+  --tier-diamond: color-mix(in srgb, var(--accent-secondary) 72%, var(--text-primary) 28%);
+  --sidebar-width: 15rem;
+  --email-list-width: 22.5rem;
+  --header-height: 3.75rem;
+
   position: relative;
+  display: flex;
+  min-height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--primary-bg);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
 }
 
-/* Secure-themed background texture overlay */
 .qmail-dashboard::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+  content: "";
+  position: absolute;
+  inset: 0;
   z-index: 0;
+  pointer-events: none;
   background:
-    /* Fine dot grid — evokes encrypted data / matrix */
-    radial-gradient(circle, rgba(59, 130, 246, 0.22) 1px, transparent 1px),
-    /* Offset dot grid for density */
-    radial-gradient(circle, rgba(6, 182, 212, 0.15) 1px, transparent 1px),
-    /* Diagonal hash lines — circuit board traces */
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 40px,
-      rgba(59, 130, 246, 0.06) 40px,
-      rgba(59, 130, 246, 0.06) 41px
+    radial-gradient(
+      circle at top left,
+      color-mix(in srgb, var(--accent-primary) 18%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      color-mix(in srgb, var(--accent-secondary) 16%, transparent),
+      transparent 40%
     ),
     repeating-linear-gradient(
-      -45deg,
-      transparent,
-      transparent 55px,
-      rgba(6, 182, 212, 0.045) 55px,
-      rgba(6, 182, 212, 0.045) 56px
+      135deg,
+      transparent 0 2.75rem,
+      color-mix(in srgb, var(--border-medium) 70%, transparent) 2.75rem calc(2.75rem + 1px)
     ),
-    /* SVG noise grain for depth */
-    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
-  background-size:
-    24px 24px,
-    24px 24px,
-    100% 100%,
-    100% 100%,
-    256px 256px;
-  background-position:
-    0 0,
-    12px 12px,
-    0 0,
-    0 0,
-    0 0;
+    repeating-linear-gradient(
+      -135deg,
+      transparent 0 3.5rem,
+      color-mix(in srgb, var(--border-subtle) 90%, transparent) 3.5rem calc(3.5rem + 1px)
+    );
+  opacity: 0.72;
 }
 
-/* Ensure all direct children sit above the texture */
 .qmail-dashboard > * {
   position: relative;
   z-index: 1;
 }
 
-/* ==================== COMMON COMPONENT STYLES ==================== */
+@keyframes qmail-dashboard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-/* Loading States */
-.loading-state {
-  display: flex;
-  flex-direction: column;
+.qmail-dashboard .spinning {
+  animation: qmail-dashboard-spin 1s linear infinite;
+}
+
+.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost) {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-3xl);
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background-color calc(250ms * var(--motion-scale)) ease,
+    color calc(250ms * var(--motion-scale)) ease,
+    border-color calc(250ms * var(--motion-scale)) ease,
+    box-shadow calc(250ms * var(--motion-scale)) ease;
+}
+
+.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost):focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
+}
+
+.qmail-dashboard button.primary {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.qmail-dashboard button.primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-md), var(--glow-primary);
+}
+
+.qmail-dashboard button.secondary {
+  background-color: var(--card-bg);
+  color: var(--text-secondary);
+  border-color: var(--border-medium);
+}
+
+.qmail-dashboard button.secondary:hover:not(:disabled) {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.qmail-dashboard button.success {
+  background: linear-gradient(135deg, var(--status-success) 0%, var(--accent-success) 100%);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.qmail-dashboard button.success:hover:not(:disabled) {
+  box-shadow: var(--shadow-md), var(--glow-success);
+}
+
+.qmail-dashboard button.danger {
+  background: linear-gradient(135deg, var(--status-error) 0%, var(--accent-error) 100%);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.qmail-dashboard button.danger:hover:not(:disabled) {
+  box-shadow: var(--shadow-md);
+}
+
+.qmail-dashboard button.ghost {
+  padding-inline: var(--space-sm);
+  background: transparent;
   color: var(--text-tertiary);
-  text-align: center;
 }
 
-.loading-state svg {
-  margin-bottom: var(--space-lg);
-  color: var(--accent-primary);
+.qmail-dashboard button.ghost:hover:not(:disabled) {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
 }
 
-/* Empty States */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-3xl);
-  color: var(--text-tertiary);
-  text-align: center;
+.qmail-dashboard :where(input, textarea, select) {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  transition:
+    background-color calc(250ms * var(--motion-scale)) ease,
+    border-color calc(250ms * var(--motion-scale)) ease,
+    box-shadow calc(250ms * var(--motion-scale)) ease;
 }
 
-.empty-state svg {
-  margin-bottom: var(--space-lg);
+.qmail-dashboard :where(input, textarea, select):focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
+}
+
+.qmail-dashboard :where(input::placeholder, textarea::placeholder) {
   color: var(--text-muted);
 }
 
-.empty-state h3 {
-  margin-bottom: var(--space-sm);
+.qmail-dashboard .loading-state,
+.qmail-dashboard .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.qmail-dashboard .loading-state svg {
+  color: var(--accent-secondary);
+}
+
+.qmail-dashboard .empty-state svg {
+  color: var(--text-muted);
+}
+
+.qmail-dashboard .empty-state h3 {
+  margin: 0;
   color: var(--text-secondary);
   font-size: var(--font-size-lg);
 }
 
-.empty-state p {
-  margin-bottom: var(--space-xl);
-  line-height: 1.6;
-  max-width: 400px;
+.qmail-dashboard .empty-state p {
+  max-width: 28rem;
+  margin: 0;
+  color: var(--text-tertiary);
+  line-height: 1.7;
 }
 
-/* Error States */
-.error-message {
+.qmail-dashboard .error-message {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-xl);
-  background-color: rgba(239, 68, 68, 0.1);
-  border: 1px solid var(--accent-danger);
+  gap: var(--space-md);
+  margin: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--status-error);
   border-radius: var(--radius-lg);
-  color: var(--accent-danger);
-  margin: var(--space-lg);
+  background-color: var(--status-error-bg);
+  color: var(--status-error);
+  box-shadow: var(--shadow-sm);
 }
 
-/* Form Groups */
-.form-group {
+.qmail-dashboard .form-group {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-md);
 }
 
-.form-group label {
-  font-weight: 500;
+.qmail-dashboard .form-group label {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-}
-
-/* Notifications */
-.notification-popup {
-  position: fixed;
-  bottom: var(--space-xl);
-  right: var(--space-xl);
-  background-color: var(--surface-bg);
-  color: white;
-  padding: var(--space-lg) var(--space-xl);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  z-index: 1000;
   font-weight: 500;
-  animation: slideIn 0.3s ease;
-  max-width: 500px;
 }
 
-.notification-popup.success {
-  background-color: var(--accent-success);
-}
-
-.notification-popup.error {
-  background-color: var(--accent-danger);
-}
-
-
-/* Health Warning */
-.health-warning {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  background-color: var(--accent-warning);
-  color: var(--primary-bg);
-  padding: var(--space-sm) var(--space-lg);
+.qmail-dashboard__attachment-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 72%, transparent);
+  backdrop-filter: var(--glass-blur);
+}
+
+.qmail-dashboard__attachment-confirm-dialog {
+  width: min(28.75rem, 100%);
+  padding: var(--space-lg);
+  border: var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+.qmail-dashboard__attachment-confirm-header {
+  display: flex;
+  align-items: center;
   gap: var(--space-sm);
-  font-weight: 500;
-  font-size: var(--font-size-sm);
-  z-index: 100;
+  margin-bottom: var(--space-sm);
 }
 
-/* ==================== SCROLLBAR STYLING ==================== */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.qmail-dashboard__attachment-confirm-header svg {
+  color: var(--accent-warning);
 }
 
-::-webkit-scrollbar-track {
-  background: var(--secondary-bg);
+.qmail-dashboard__attachment-confirm-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--border-medium);
+.qmail-dashboard__attachment-confirm-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.qmail-dashboard__attachment-confirm-filename {
+  margin: var(--space-md) 0 0;
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.qmail-dashboard__attachment-confirm-warning {
+  margin: var(--space-sm) 0 0;
+  color: var(--accent-warning);
+  line-height: 1.6;
+}
+
+.qmail-dashboard__attachment-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.qmail-dashboard ::-webkit-scrollbar {
+  width: var(--space-sm);
+  height: var(--space-sm);
+}
+
+.qmail-dashboard ::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--secondary-bg) 90%, transparent);
+}
+
+.qmail-dashboard ::-webkit-scrollbar-thumb {
   border-radius: var(--radius-sm);
+  background: var(--border-medium);
 }
 
-::-webkit-scrollbar-thumb:hover {
+.qmail-dashboard ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
 
-/* ==================== RESPONSIVE DESIGN ==================== */
 @media (max-width: 1024px) {
   .qmail-dashboard {
-    flex-direction: column;
-  }
-  
-  :root {
     --sidebar-width: 100%;
     --email-list-width: 100%;
+
+    flex-direction: column;
   }
 }
 
 @media (max-width: 768px) {
-  .loading-state,
-  .empty-state {
-    padding: var(--space-xl) var(--space-lg);
+  .qmail-dashboard .loading-state,
+  .qmail-dashboard .empty-state {
+    padding: var(--space-lg) var(--space-md);
   }
-  
-  .empty-state svg {
-    width: 40px;
-    height: 40px;
+
+  .qmail-dashboard__attachment-confirm-dialog {
+    padding: var(--space-md);
   }
-  
-  .notification-popup {
-    bottom: var(--space-lg);
-    right: var(--space-lg);
-    left: var(--space-lg);
+
+  .qmail-dashboard__attachment-confirm-actions {
+    flex-direction: column-reverse;
   }
+
+  .qmail-dashboard__attachment-confirm-actions button {
+    width: 100%;
+  }
+}
+
+[data-theme="high-contrast"] .qmail-dashboard::before {
+  background: none;
 }

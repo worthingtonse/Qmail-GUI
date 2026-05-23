@@ -1,80 +1,152 @@
-import React, { useState, useEffect } from "react";
-import { UserPlus, Search, Trash2, RefreshCw, Users, TrendingUp, Globe } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  UserPlus,
+  Search,
+  Trash2,
+  RefreshCw,
+  Users,
+  TrendingUp,
+  Globe,
+  Check,
+  AlertTriangle,
+} from "lucide-react";
 import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
 import { avatarColorFromString } from "./avatarColor";
-import { getPopularContacts, getContacts, addContact, deleteContact } from "../../api/qmailApiServices";
+import {
+  getPopularContacts,
+  getContacts,
+  addContact,
+  deleteContact,
+  resolveAddressOrSn,
+  convertSnToEmail,
+} from "../../api/qmailApiServices";
+import { useNotification } from "../../components/common/notifications/NotificationContext";
+
+const SERIAL_NUMBER_PATTERN = /^\d+$/;
+
+const normalizeContactValue = (value) =>
+  String(value || "").trim().toLowerCase();
+
+const getContactIdentityValues = (contact) =>
+  [contact.id, contact.email, contact.name]
+    .map(normalizeContactValue)
+    .filter(Boolean);
+
+const contactMatchesSearchTerm = (contact, searchTerm) => {
+  const term = normalizeContactValue(searchTerm);
+  if (!term) return true;
+  return getContactIdentityValues(contact).some((value) => value.includes(term));
+};
 
 const ContactsPane = () => {
   const [contacts, setContacts] = useState([]);
+  const [userContacts, setUserContacts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddContactOpen, setIsAddContactOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
   const [currentMode, setCurrentMode] = useState("contacts"); // "contacts" or "popular"
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [savingDrdContactId, setSavingDrdContactId] = useState(null);
+  const [pendingDeleteContact, setPendingDeleteContact] = useState(null);
+  const [isDeletingContact, setIsDeletingContact] = useState(false);
+  const [deleteContactError, setDeleteContactError] = useState("");
+  const [lookupInput, setLookupInput] = useState("");
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const { addNotification, showSuccess, showError } = useNotification();
+  const isMountedRef = useRef(false);
 
   // Load regular contacts on component mount
- // Load regular contacts on component mount
-useEffect(() => {
-  loadContacts();
-  setIsInitialLoad(false);
-}, []);
+  useEffect(() => {
+    isMountedRef.current = true;
+    loadContacts();
+    return () => {
+      isMountedRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle search with debouncing
 // Handle search with debouncing
 useEffect(() => {
+  if (currentMode === "lookup") {
+    return;
+  }
+
   if (!searchTerm.trim()) {
     if (currentMode === "search") {
       setCurrentMode("contacts");
+      setContacts(userContacts);
     }
     return;
   }
 
   const debounceTimer = setTimeout(() => {
     setCurrentMode("search");
-    loadContacts();
+    loadContacts({ displayMode: "search" });
   }, 300);
 
   return () => clearTimeout(debounceTimer);
   // BUG-23 FIX: Added currentMode to dependency array
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [searchTerm, currentMode]);
 
-const loadContacts = async () => {
-  // Never show loader when list is empty OR when searching
-  const shouldShowLoader = contacts.length > 0 && currentMode !== "search";
-  
-  if (shouldShowLoader) {
-    setLoading(true);
-  }
-  setError(null);
-  
-  try {
-    const result = await getContacts(searchTerm.trim());
-    if (result.success) {
-      const transformedContacts = result.data.contacts.map((contact) => ({
-        id: contact.userId,
-        name: contact.fullName,
-        email: contact.autoAddress,
-        status: "none",
-        description: contact.description,
-        source: "user",
-      }));
-      setContacts(transformedContacts);
-    } else {
-      console.error("Failed to load contacts:", result.error);
-      setError(`Failed to load contacts: ${result.error}`);
-      setContacts([]);
+  const loadContacts = async ({ displayMode = currentMode, updateDisplay = true } = {}) => {
+    // Never show loader when list is empty OR when searching
+    const shouldShowLoader =
+      contacts.length > 0 && displayMode !== "search" && displayMode !== "lookup";
+
+    if (shouldShowLoader) {
+      setLoading(true);
     }
-  } catch (err) {
-    console.error("Error in loadContacts:", err);
-    setError(`Network error: ${err.message}. Is the QMail server running?`);
-    setContacts([]);
-  }
-  
-  setLoading(false);
-};
+    setError(null);
+
+    try {
+      const result = await getContacts();
+      if (!isMountedRef.current) return;
+
+      if (result.success) {
+        const transformedContacts = result.data.contacts.map((contact) => ({
+          id: contact.userId,
+          name: contact.fullName,
+          email: contact.autoAddress,
+          status: "none",
+          description: contact.description,
+          source: "user",
+        }));
+        setUserContacts(transformedContacts);
+
+        if (updateDisplay && displayMode !== "popular" && displayMode !== "lookup") {
+          const term = searchTerm.trim();
+          setContacts(
+            term
+              ? transformedContacts.filter((contact) =>
+                  contactMatchesSearchTerm(contact, term),
+                )
+              : transformedContacts,
+          );
+        }
+      } else {
+        console.error("Failed to load contacts:", result.error);
+        setError(`Failed to load contacts: ${result.error}`);
+        if (updateDisplay && displayMode !== "popular" && displayMode !== "lookup") {
+          setContacts([]);
+        }
+      }
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      console.error("Error in loadContacts:", err);
+      setError(`Network error: ${err.message}. Is the QMail server running?`);
+      if (updateDisplay && displayMode !== "popular" && displayMode !== "lookup") {
+        setContacts([]);
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
+  };
 
  const loadPopularContacts = async () => {
   // Never show loader when list is empty
@@ -83,9 +155,11 @@ const loadContacts = async () => {
   }
   setError(null);
   setCurrentMode("popular");
-  
+
   try {
     const result = await getPopularContacts(50);
+    if (!isMountedRef.current) return;
+
     if (result.success) {
       const transformedContacts = result.data.contacts.map((contact) => ({
         id: contact.userId,
@@ -104,12 +178,15 @@ const loadContacts = async () => {
       setContacts([]);
     }
   } catch (err) {
+    if (!isMountedRef.current) return;
     console.error("Error in loadPopularContacts:", err);
     setError("Failed to load popular contacts");
     setContacts([]);
+  } finally {
+    if (isMountedRef.current) {
+      setLoading(false);
+    }
   }
-  
-  setLoading(false);
 };
 
   // Determine badge status based on popularity or contact count
@@ -120,43 +197,267 @@ const loadContacts = async () => {
     return "none";
   };
 
+  const getContactKey = (contact) =>
+    String(contact.id || contact.email || contact.name || "");
+
+  const getContactInitial = (contact) => {
+    const value = String(contact?.name || contact?.email || contact?.id || "?").trim();
+    return value.charAt(0).toUpperCase() || "?";
+  };
+
+  const getContactAvatarStyle = (contact) => {
+    const { bg, text } = avatarColorFromString(
+      contact?.email || contact?.name || contact?.id || "",
+    );
+
+    return {
+      "--contact-avatar-bg": bg,
+      "--contact-avatar-fg": text,
+    };
+  };
+
+  const isContactSavedLocally = (contact) => {
+    const targetValues = new Set(getContactIdentityValues(contact));
+    if (targetValues.size === 0) return false;
+
+    return userContacts.some((localContact) =>
+      getContactIdentityValues(localContact).some((value) =>
+        targetValues.has(value),
+      ),
+    );
+  };
+
+  const findLocalContactMatches = (value) => {
+    const term = normalizeContactValue(value);
+    if (!term) return [];
+
+    return userContacts.filter((contact) =>
+      getContactIdentityValues(contact).some(
+        (candidate) => candidate === term || candidate.includes(term),
+      ),
+    );
+  };
+
+  const handleLookupContact = async () => {
+    const value = lookupInput.trim();
+    if (!value) {
+      setLookupResult({
+        type: "error",
+        message: "Enter a serial number, QMail address, or contact name.",
+      });
+      return;
+    }
+
+    setLookupLoading(true);
+    setLookupResult(null);
+
+    try {
+      const localMatches = findLocalContactMatches(value);
+      if (localMatches.length > 0) {
+        setLookupResult({
+          type: "local",
+          message: "Matched local contacts. This lookup does not query the DRD.",
+          contacts: localMatches,
+        });
+        return;
+      }
+
+      if (SERIAL_NUMBER_PATTERN.test(value)) {
+        const result = await convertSnToEmail(value);
+        if (result.success) {
+          setLookupResult({
+            type: "remote",
+            message: "Serial number resolved by the local QMail service.",
+            contacts: [
+              {
+                id: value,
+                name:
+                  `${result.firstName || ""} ${result.lastName || ""}`.trim() ||
+                  `Serial ${value}`,
+                email: result.email,
+                source: "lookup",
+              },
+            ],
+          });
+          return;
+        }
+
+        setLookupResult({
+          type: "empty",
+          message:
+            "No local contact matched, and the local service did not return an address for that serial number.",
+        });
+        return;
+      }
+
+      setLookupResult({
+        type: "empty",
+        message:
+          "No local contact matched. Address-to-serial lookup is not available yet, and this helper does not query the DRD.",
+      });
+    } catch (err) {
+      setLookupResult({
+        type: "error",
+        message: `Lookup failed: ${err.message}`,
+      });
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const buildContactPayload = async ({ name, addressOrSn, description }) => {
+    const nameParts = (name || "").trim().split(" ");
+    const firstName = nameParts[0] || "";
+    const lastName = nameParts.slice(1).join(" ") || "";
+    const resolved = await resolveAddressOrSn(addressOrSn);
+
+    if (!resolved.success) {
+      return { success: false, error: resolved.error };
+    }
+
+    return {
+      success: true,
+      data: {
+        serial_number: resolved.data.serial_number,
+        first_name: firstName,
+        last_name: lastName,
+        description: (description || "").trim(),
+      },
+    };
+  };
+
   // BUG-14 FIX: Persist contacts to backend, then refresh from server
   const handleAddContact = async (newContact) => {
     try {
-      // Parse the name into first/last for the backend
-      const nameParts = (newContact.name || "").trim().split(" ");
-      const firstName = nameParts[0] || "";
-      const lastName = nameParts.slice(1).join(" ") || "";
-
-      const result = await addContact({
-        serial_number: newContact.serial_number || "0",
-        first_name: firstName,
-        last_name: lastName,
-        description: newContact.email || "",
+      const payload = await buildContactPayload({
+        name: newContact.name,
+        addressOrSn: newContact.addressOrSn,
+        description: newContact.description,
       });
+
+      if (!payload.success) {
+        return { success: false, error: payload.error };
+      }
+
+      const result = await addContact(payload.data);
 
       if (result.success) {
         await loadContacts(); // Refresh from server
+        setIsAddContactOpen(false);
+        return { success: true };
       } else {
-        setError(`Failed to add contact: ${result.error}`);
+        return { success: false, error: `Failed to add contact: ${result.error}` };
       }
     } catch (err) {
-      setError(`Error adding contact: ${err.message}`);
+      return { success: false, error: `Error adding contact: ${err.message}` };
     }
-    setIsAddContactOpen(false);
   };
 
-  const handleDeleteContact = async (contactId) => {
-    if (window.confirm("Are you sure you want to delete this contact?")) {
-      try {
-        const result = await deleteContact(contactId);
-        if (result.success) {
-          await loadContacts(); // Refresh from server
-        } else {
-          setError(`Failed to delete contact: ${result.error}`);
-        }
-      } catch (err) {
-        setError(`Error deleting contact: ${err.message}`);
+  const handleAddPopularContact = async (contact) => {
+    const contactKey = getContactKey(contact);
+    setSavingDrdContactId(contactKey);
+    setError(null);
+
+    try {
+      const payload = await buildContactPayload({
+        name: contact.name,
+        addressOrSn: contact.id || contact.email,
+        description: contact.description,
+      });
+
+      if (!payload.success) {
+        showError(payload.error || "Could not add DRD contact.");
+        return;
+      }
+
+      const result = await addContact(payload.data);
+      if (!result.success) {
+        showError(`Failed to add contact: ${result.error}`);
+        return;
+      }
+
+      await loadContacts({ updateDisplay: false });
+      showSuccess(`${contact.name} added to your contacts.`);
+    } catch (err) {
+      showError(`Error adding contact: ${err.message}`);
+    } finally {
+      setSavingDrdContactId(null);
+    }
+  };
+
+  const restoreDeletedContact = async (contact, payload) => {
+    try {
+      const result = await addContact(payload);
+      if (!result.success) {
+        showError(`Failed to restore contact: ${result.error}`);
+        return;
+      }
+
+      showSuccess(`${contact.name} restored.`);
+    } catch (err) {
+      showError(`Error restoring contact: ${err.message}`);
+    }
+  };
+
+  const handleDeleteContact = (contact) => {
+    setError(null);
+    setDeleteContactError("");
+    setPendingDeleteContact(contact);
+  };
+
+  const handleCancelDeleteContact = () => {
+    if (isDeletingContact) return;
+    setDeleteContactError("");
+    setPendingDeleteContact(null);
+  };
+
+  const handleConfirmDeleteContact = async () => {
+    if (!pendingDeleteContact) return;
+    const contact = pendingDeleteContact;
+    setIsDeletingContact(true);
+    setError(null);
+    setDeleteContactError("");
+
+    try {
+      const payload = await buildContactPayload({
+        name: contact.name,
+        addressOrSn: contact.id || contact.email,
+        description: contact.description,
+      });
+
+      if (!payload.success) {
+        if (!isMountedRef.current) return;
+        setDeleteContactError(
+          payload.error || "Could not prepare contact for deletion.",
+        );
+        return;
+      }
+
+      const result = await deleteContact(contact.id);
+      if (!isMountedRef.current) return;
+
+      if (!result.success) {
+        // Keep delete errors inline so the confirmation stays open for retry.
+        setDeleteContactError(`Failed to delete contact: ${result.error}`);
+        return;
+      }
+
+      setPendingDeleteContact(null);
+      setDeleteContactError("");
+      await loadContacts();
+      if (!isMountedRef.current) return;
+
+      addNotification(`${contact.name} deleted. Click to undo.`, "success", {
+        duration: 10000,
+        onClick: () => restoreDeletedContact(contact, payload.data),
+      });
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      // Keep delete errors inline so the confirmation stays open for retry.
+      setDeleteContactError(`Error deleting contact: ${err.message}`);
+    } finally {
+      if (isMountedRef.current) {
+        setIsDeletingContact(false);
       }
     }
   };
@@ -166,6 +467,8 @@ const loadContacts = async () => {
   if (contacts.length === 0) {
     if (currentMode === "popular") {
       loadPopularContacts();
+    } else if (currentMode === "lookup") {
+      loadContacts({ updateDisplay: false });
     } else {
       loadContacts();
     }
@@ -174,6 +477,8 @@ const loadContacts = async () => {
   
   if (currentMode === "popular") {
     loadPopularContacts();
+  } else if (currentMode === "lookup") {
+    loadContacts({ updateDisplay: false });
   } else {
     loadContacts();
   }
@@ -186,17 +491,24 @@ const loadContacts = async () => {
 
   const switchToPopularContacts = () => {
     setSearchTerm("");
-    setIsSearching(false);
     setError(null);
+    setLookupResult(null);
     loadPopularContacts();
   };
 
   const switchToRegularContacts = () => {
     setSearchTerm("");
-    setIsSearching(false);
     setError(null);
+    setLookupResult(null);
     setCurrentMode("contacts");
-    loadContacts();
+    loadContacts({ displayMode: "contacts" });
+  };
+
+  const switchToLookup = () => {
+    setSearchTerm("");
+    setError(null);
+    setCurrentMode("lookup");
+    loadContacts({ updateDisplay: false });
   };
 
   return (
@@ -206,66 +518,156 @@ const loadContacts = async () => {
         onClose={() => setIsAddContactOpen(false)}
         onAddContact={handleAddContact}
       />
-      <div className="contacts-pane">
-        <div className="contacts-header">
+      {pendingDeleteContact && (
+        <div
+          className="contact-delete-overlay"
+          role="presentation"
+          onClick={handleCancelDeleteContact}
+        >
+          <section
+            className="contact-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-contact-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="contact-delete-header">
+              <AlertTriangle size={22} />
+              <h3 id="delete-contact-title">Delete Contact?</h3>
+            </header>
+            <p className="contact-delete-copy">
+              This will remove {pendingDeleteContact.name} from your local
+              contacts.
+            </p>
+            {pendingDeleteContact.email && (
+              <p className="contact-delete-address">
+                {pendingDeleteContact.email}
+              </p>
+            )}
+            {deleteContactError && (
+              <div className="contact-delete-error" role="alert">
+                {deleteContactError}
+              </div>
+            )}
+            <footer className="contact-delete-actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={isDeletingContact}
+                onClick={handleCancelDeleteContact}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={isDeletingContact}
+                onClick={handleConfirmDeleteContact}
+              >
+                {isDeletingContact ? (
+                  <>
+                    <RefreshCw size={16} className="spinning" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Delete
+                  </>
+                )}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      <section className="contacts-pane" aria-label="Contacts and DRD search">
+        <header className="contacts-header">
           <h2>Contacts & DRD Search</h2>
-          <div className="contacts-header-actions">
+          <div
+            className="contacts-header-actions"
+            role="toolbar"
+            aria-label="Contacts actions"
+          >
             <button
-              className="refresh-btn secondary"
-              onClick={handleRefresh}
-              disabled={loading}
-              title="Refresh contacts"
+             type="button"
+             className="refresh-btn secondary"
+             onClick={handleRefresh}
+             disabled={loading}
+             title="Refresh contacts"
+             aria-label="Refresh contacts"
             >
-              <RefreshCw size={16} className={loading ? "spinning" : ""} />
+             <RefreshCw size={16} className={loading ? "spinning" : ""} />
             </button>
             <button
-              className={`contacts-btn ${currentMode === "contacts" ? "active" : "secondary"}`}
-              onClick={switchToRegularContacts}
-              disabled={loading}
-              title="View your contacts"
+             type="button"
+             className={`contacts-btn ${currentMode === "contacts" ? "active" : "secondary"}`}
+             onClick={switchToRegularContacts}
+             disabled={loading}
+             title="View your contacts"
+             aria-label="View your contacts"
+             aria-pressed={currentMode === "contacts"}
             >
-             <Users size={16} /> 
+             <Users size={16} />
             </button>
             <button
-              className={`popular-contacts-btn ${currentMode === "popular" ? "active" : "secondary"}`}
-              onClick={switchToPopularContacts}
-              disabled={loading}
-              title="View popular contacts from DRD" 
+             type="button"
+             className={`popular-contacts-btn ${currentMode === "popular" ? "active" : "secondary"}`}
+             onClick={switchToPopularContacts}
+             disabled={loading}
+             title="View popular contacts from DRD"
+             aria-label="View popular contacts from DRD"
+             aria-pressed={currentMode === "popular"}
             >
-              <TrendingUp size={16} />
+             <TrendingUp size={16} />
             </button>
             <button
-              className="add-contact-btn primary"
-              onClick={() => setIsAddContactOpen(true)}
-              title="Add new contact"
+             type="button"
+             className={`contacts-btn ${currentMode === "lookup" ? "active" : "secondary"}`}
+             onClick={switchToLookup}
+             disabled={loading}
+             title="Lookup serial numbers and saved contact addresses"
+             aria-label="Lookup serial numbers and saved contact addresses"
+             aria-pressed={currentMode === "lookup"}
             >
-              <UserPlus size={16} /> Add Contact
+             <Search size={16} />
+            </button>
+            <button
+             type="button"
+             className="add-contact-btn primary"
+             onClick={() => setIsAddContactOpen(true)}
+             title="Add new contact"
+            >
+             <UserPlus size={16} /> Add Contact
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="search-bar-container">
-          <Search size={20} className="search-icon" />
-          <input
-            type="text"
-            placeholder="Search contacts or DRD alias..."
-            className="search-input"
-            value={searchTerm}
-            onChange={handleSearchChange}
-          />
-        </div>
+        {currentMode !== "lookup" && (
+          <div className="search-bar-container" role="search">
+            <Search size={20} className="search-icon" />
+            <input
+             type="text"
+             placeholder="Search contacts or DRD alias..."
+              className="search-input"
+              value={searchTerm}
+              onChange={handleSearchChange}
+            />
+          </div>
+        )}
 
         {error && (
-          <div className="error-message">
+          <div className="error-message" role="alert">
             <p>Error loading contacts: {error}</p>
-            <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+            <div className="contacts-error-actions">
               <button
+                type="button"
                 className="retry-button secondary"
                 onClick={handleRefresh}
               >
                 Retry
               </button>
               <button
+                type="button"
                 className="retry-button secondary"
                 onClick={() => setError(null)}
               >
@@ -275,107 +677,221 @@ const loadContacts = async () => {
           </div>
         )}
 
-        <div className="contact-list">
-          {loading ? (
-            <div className="loading-state">
-              <RefreshCw size={32} className="spinning" />
+        {currentMode === "lookup" ? (
+          <section className="contact-lookup-panel" aria-labelledby="contact-lookup-title">
+            <div className="contact-lookup-card">
+              <h3 id="contact-lookup-title">Contact Lookup</h3>
               <p>
-                {searchTerm.trim() 
-                  ? `Searching for "${searchTerm}"...` 
-                  : currentMode === "popular" 
-                    ? "Loading popular contacts..." 
-                    : "Loading contacts..."
-                }
+                Serial number lookup uses the local QMail service. Address and
+                name lookup searches saved contacts only and does not query the
+                DRD.
               </p>
-            </div>
-          ) : contacts.length === 0 ? (
-            <div className="empty-state">
-              <UserPlus size={48} />
-              <p>
-                {searchTerm.trim() 
-                  ? `No contacts found for "${searchTerm}". Try a different search term or check the DRD network.` 
-                  : currentMode === "popular"
-                    ? "No popular contacts available at the moment."
-                    : "No contacts in your list yet."
-                }
-              </p>
-              {!searchTerm.trim() && currentMode !== "popular" && (
+              <div className="contact-lookup-form">
+                <input
+                  type="text"
+                  value={lookupInput}
+                  onChange={(event) => {
+                    setLookupInput(event.target.value);
+                    setLookupResult(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleLookupContact();
+                    }
+                  }}
+                  placeholder="Serial number, QMail address, or contact name"
+                  disabled={lookupLoading}
+                />
                 <button
-                  className="add-contact-btn primary"
-                  onClick={() => setIsAddContactOpen(true)}
+                  type="button"
+                  className="contacts-btn primary"
+                  onClick={handleLookupContact}
+                  disabled={lookupLoading}
                 >
-                  <UserPlus size={16} /> Add Your First Contact
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="contacts-results">
-              {searchTerm.trim() && (
-                <div className="search-results-info">
-                   Found {contacts.length} contact{contacts.length !== 1 ? 's' : ''} for "{searchTerm}"
-                </div>
-              )}
-              {!searchTerm.trim() && currentMode === "popular" && (
-                <div className="mode-info">
-                   Showing {contacts.length} popular contacts from the DRD network
-                </div>
-              )}
-              {contacts.map((contact) => (
-                <div key={contact.id} className={`contact-item ${contact.source === "drd" ? "contact-drd" : "contact-user"}`}>
-                  <div
-                    className={`contact-avatar status-${contact.status}`}
-                    style={{ backgroundColor: avatarColorFromString(contact.email).bg }}
-                  >
-                    <span>{contact.name.charAt(0).toUpperCase()}</span>
-                  </div>
-                  <div className="contact-details">
-                    <div className="contact-name-row">
-                      <span className="contact-name">{contact.name}</span>
-                      <span className={`contact-source-badge ${contact.source === "drd" ? "badge-drd" : "badge-user"}`}>
-                        {contact.source === "drd" ? (
-                          <><Globe size={10} /> DRD</>
-                        ) : (
-                          <><Users size={10} /> My Contact</>
-                        )}
-                      </span>
-                    </div>
-                    <div className="contact-email">{contact.email}</div>
-                    {contact.description && (
-                      <div className="contact-description">
-                        {contact.description}
-                      </div>
-                    )}
-                    {contact.popularity > 0 && (
-                      <div className="contact-stats">
-                        Popularity: {contact.popularity} | Contacts:{" "}
-                        {contact.contactCount}
-                      </div>
-                    )}
-                  </div>
-                  {contact.source === "user" && (
-                    <button
-                      className="contact-action-btn danger"
-                      onClick={() => handleDeleteContact(contact.id)}
-                      title="Delete contact"
-                    >
-                      <Trash2 size={16} color="white" />
-                    </button>
+                  {lookupLoading ? (
+                    <RefreshCw size={16} className="spinning" />
+                  ) : (
+                    <Search size={16} />
                   )}
+                  Lookup
+                </button>
+              </div>
+              {lookupResult && (
+                <div className={`contact-lookup-result ${lookupResult.type}`}>
+                  <p>{lookupResult.message}</p>
+                  {lookupResult.contacts?.map((contact) => (
+                    <div
+                      key={`${contact.id || contact.email}-${contact.name}`}
+                      className="contact-lookup-match"
+                    >
+                      <span className="contact-lookup-name">
+                        {contact.name || "Unknown Contact"}
+                      </span>
+                      {contact.email && (
+                        <span className="contact-lookup-email">
+                          {contact.email}
+                        </span>
+                      )}
+                      {contact.id && (
+                        <span className="contact-lookup-serial">
+                          SN {contact.id}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
+          </section>
+        ) : (
+          <div className="contact-list">
+            {loading ? (
+              <div className="loading-state">
+                <RefreshCw size={32} className="spinning" />
+                <p>
+                  {searchTerm.trim()
+                    ? `Searching for "${searchTerm}"...`
+                    : currentMode === "popular"
+                      ? "Loading popular contacts..."
+                      : "Loading contacts..."}
+                </p>
+              </div>
+            ) : contacts.length === 0 ? (
+              <div className="empty-state">
+                <UserPlus size={48} />
+                <p>
+                  {searchTerm.trim()
+                    ? `No contacts found for "${searchTerm}". Try a different search term or check the DRD network.`
+                    : currentMode === "popular"
+                      ? "No popular contacts available at the moment."
+                      : "No contacts in your list yet."}
+                </p>
+                {!searchTerm.trim() && currentMode !== "popular" && (
+                  <button
+                    type="button"
+                    className="add-contact-btn primary"
+                    onClick={() => setIsAddContactOpen(true)}
+                  >
+                    <UserPlus size={16} /> Add Your First Contact
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="contacts-results">
+                {searchTerm.trim() && (
+                  <div className="search-results-info">
+                    Found {contacts.length} contact{contacts.length !== 1 ? "s" : ""} for &quot;{searchTerm}&quot;
+                  </div>
+                )}
+                {!searchTerm.trim() && currentMode === "popular" && (
+                  <div className="mode-info">
+                    Showing {contacts.length} popular contacts from the DRD network
+                  </div>
+                )}
+                {contacts.map((contact) => {
+                  const contactKey = getContactKey(contact);
+                  const isSavingDrdContact = savingDrdContactId === contactKey;
+                  const isSavedDrdContact = isContactSavedLocally(contact);
+
+                  return (
+                    <article
+                      key={contactKey}
+                      className={`contact-item ${contact.source === "drd" ? "contact-drd" : "contact-user"}`}
+                    >
+                      <div
+                        className={`contact-avatar status-${contact.status}`}
+                        style={getContactAvatarStyle(contact)}
+                      >
+                        <span>{getContactInitial(contact)}</span>
+                      </div>
+                      <div className="contact-details">
+                        <div className="contact-name-row">
+                          <span className="contact-name">{contact.name}</span>
+                          <span
+                            className={`contact-source-badge ${contact.source === "drd" ? "badge-drd" : "badge-user"}`}
+                          >
+                            {contact.source === "drd" ? (
+                              <>
+                                <Globe size={10} /> DRD
+                              </>
+                            ) : (
+                              <>
+                                <Users size={10} /> My Contact
+                              </>
+                            )}
+                          </span>
+                        </div>
+                        <div className="contact-email">{contact.email}</div>
+                        {contact.description && (
+                          <div className="contact-description">
+                            {contact.description}
+                          </div>
+                        )}
+                        {contact.popularity > 0 && (
+                          <div className="contact-stats">
+                            Popularity: {contact.popularity} | Contacts:{" "}
+                            {contact.contactCount}
+                          </div>
+                        )}
+                      </div>
+                      {contact.source === "user" && (
+                        <button
+                          type="button"
+                          className="contact-action-btn danger"
+                          onClick={() => handleDeleteContact(contact)}
+                          title="Delete contact"
+                          aria-label={`Delete ${contact.name}`}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                      {contact.source === "drd" && (
+                        <button
+                          type="button"
+                          className={`contact-action-btn add ${isSavedDrdContact ? "saved" : ""}`}
+                          onClick={() => handleAddPopularContact(contact)}
+                          disabled={isSavingDrdContact || isSavedDrdContact}
+                          title={
+                            isSavedDrdContact
+                              ? "Added to your contacts"
+                              : "Add to My Contacts"
+                          }
+                          aria-label={
+                            isSavedDrdContact
+                              ? `${contact.name} is already in your contacts`
+                              : `Add ${contact.name} to your contacts`
+                          }
+                        >
+                          {isSavingDrdContact ? (
+                            <RefreshCw size={16} className="spinning" />
+                          ) : isSavedDrdContact ? (
+                            <Check size={16} />
+                          ) : (
+                            <UserPlus size={16} />
+                          )}
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Show info text based on current mode */}
         <div className="drd-mock-info">
           {searchTerm.trim() ? (
             <p>
-               Searching the Distributed Resource Directory (DRD) for "{searchTerm}".
+               Searching the Distributed Resource Directory (DRD) for &quot;{searchTerm}&quot;.
             </p>
           ) : currentMode === "popular" ? (
             <p>
                Showing trending contacts from the DRD network. Use search to find specific contacts.
+            </p>
+          ) : currentMode === "lookup" ? (
+            <p>
+               Lookup results are for saved contacts and the local QMail serial-number service only.
             </p>
           ) : (
             <>
@@ -383,11 +899,11 @@ const loadContacts = async () => {
                  Contact not listed? Search the Distributed Resource Directory
                 (DRD) by their alias above.
               </p>
-              <p>Use the "Popular" button to see trending contacts from the DRD network.</p>
+              <p>Use the &quot;Popular&quot; button to see trending contacts from the DRD network.</p>
             </>
           )}
         </div>
-      </div>
+      </section>
     </>
   );
 };

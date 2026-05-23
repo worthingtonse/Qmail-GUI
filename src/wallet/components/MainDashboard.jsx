@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { HardDrive, ArrowRightLeft, Settings, List, CloudCheck, Upload, Download, Key } from 'lucide-react'; 
+import { useState, useEffect, useRef } from 'react';
+import { HardDrive, ArrowRightLeft, Settings, CloudCheck, Upload, Download, Key } from 'lucide-react';
 import '../components/MainDashboard.css';
 import useGlassSounds from '../../api/useGlassSounds';
 import AuthenticateTab from './tabs/AuthenticateTab';

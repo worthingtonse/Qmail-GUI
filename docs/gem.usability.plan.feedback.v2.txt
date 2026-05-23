@@ -1,0 +1,46 @@
+# Second-Pass Feedback & Improvements for QMail-GUI Fix Plan
+Date: 2026-05-21
+Reviewer: Gemini CLI
+
+Following a deeper dive into the `rest_core` API signatures and the current React state management, I have identified several critical robustification steps that should be added to the implementation plan.
+
+## 1. Robustification of Polling Loops (FIX-01, FIX-04, FIX-33)
+**Current Risk:** The polling loops in `ComposeModal.jsx` and the proposed hydration logic in `QMailDashboard.jsx` lack error boundaries. If the backend goes offline or returns a 5xx during a poll, the `while` loop will throw, potentially crashing the pane or leaving it in a permanent "Loading..." state.
+- **Improvement:** Wrap all `await getTaskStatus` and `await getEmailById` calls inside `try/catch` blocks.
+- **Action:** On catch, decrement a retry counter. If retries are exhausted, exit the loop with a "Service temporarily unavailable" toast.
+
+## 2. Attachment Edge Cases (FIX-02)
+- **Canceled State:** The Electron `showOpenDialog` returns `{ canceled: boolean, filePaths: string[] }`. The plan should explicitly state to check the `canceled` flag to avoid pushing empty arrays or triggering errors.
+- **Duplicate Prevention:** Add a check to prevent adding the same file path multiple times to the staged attachments list.
+
+## 3. Account Session Clearing (FIX-15)
+- **Deep Clean:** "Sign Out" should not only clear the `selectedService` in `App.jsx` but also:
+  - Reset the `userAccount` state to `null` in `QMailDashboard`.
+  - Clear the `mailCounts` and `emails` lists.
+  - Clear any non-persistent identity metadata from `localStorage` to ensure a clean state for the next import/login.
+
+## 4. Logical "Check Mail" Trigger (FIX-20)
+- **User Expectation:** Users expect "Refresh" to fetch new mail.
+- **Improvement:** The "Refresh" action (renamed in FIX-20) should automatically trigger the `beacon/ping` or `beacon/peek` flow before reloading counts. Separating them into two buttons might confuse non-technical users.
+- **Action:** Have one "Refresh" button that performs the full stack: `ping/peek` -> `getMailNotifications` -> `loadMailCounts` -> `loadEmails`.
+
+## 5. Long-Running Sync/Heal Tasks (FIX-10, FIX-37)
+- **Poll vs. Wait:** `healWallet` and `prepareChange` are currently simple `fetch` calls. If the backend evolves these into long-running tasks, they will timeout.
+- **Improvement:** Update `qmailApiServices.js` to check if these endpoints return a `taskId`. If they do, the GUI should use the same `while` polling loop as `sendEmail`.
+
+## 6. Search UX (FIX-25)
+- **Result Capping:** Since `searchEmails` hard-codes a limit (50), the UI should explicitly show "Showing top 50 results" if the result set is full. This manages user expectations when they don't find an older message.
+
+## 7. Draft Management (FIX-04 & FIX-23)
+- **ID Consistency:** When reopening a draft, ensure the `currentDraftId` is consistently handled. If a user "Saves Draft" multiple times, it should always hit the `update` endpoint for that ID rather than spawning new draft entries.
+
+## 8. Summary of Plan Delta
+| Ticket | Suggested Change |
+| :--- | :--- |
+| **FIX-01** | Add `try/catch` + retry cap to the hydration loop. |
+| **FIX-02** | Handle Electron `canceled` flag; add drag-and-drop support (Optional/Low). |
+| **FIX-15** | Add `localStorage.clear()` for session keys. |
+| **FIX-20** | Combine RAIDA echo and Mail check into a single "Refresh" action. |
+| **FIX-33** | Add a `60s` client-side watchdog to all task-based polling. |
+
+These improvements will move the GUI from "functional" to "resilient."

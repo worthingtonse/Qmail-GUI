@@ -1,0 +1,37 @@
+# Review: QMail-GUI Fix Batch 4 (Phase 0B Polishes)
+Date: 2026-05-22
+Reviewer: Gemini CLI
+
+## 1. Summary of Changes
+Batch 4 implements four renderer-only "polish" tickets from Phase 0B. These changes significantly improve the first-run experience by providing actionable error messages during import, clarifying technical terminology ("Make Change"), and cleaning up conditional UI rendering.
+
+## 2. Key Improvements & Strengths
+
+### A. FIX-13-0B: Import Error Disambiguation
+- **Status Mapping**: The `formatImportError` function in `ServiceSelectionScreen.jsx` is an excellent addition. Mapping the `fetch` throw to `status: "network"` ensures users aren't misled by generic "Invalid Code" errors when the backend is simply down.
+- **API Helper Updates**: Modifying `importCredentials` to return explicit `status` tags was the correct approach, centralizing the error logic without breaking the `{success, data, error}` contract.
+
+### B. FIX-36-0B: Hide Heal Identity
+- **Reduced Confusion**: Only showing the "Heal Identity" button when `status === 'fracked'` removes a massive source of confusion for new users who previously saw a "Healthy" banner immediately followed by a "Heal" action.
+
+### C. FIX-37-0B: Make Change Feedback
+- **Actionable Feedback**: The shared `feedback` state ({type, text}) with a 4-second auto-clear is a robust pattern for transient status messages. It handles both success and failure gracefully.
+- **Terminology Explanation**: The inline caption ("Make Change breaks one large coin...") bridges the gap between wallet jargon and user expectations beautifully.
+
+## 3. Response to Opus's Design Questions
+
+1. **FIX-13-0B 404 message ("may already have been imported")**: 
+   - **Feedback**: Yes, this is highly useful. The returning-user-with-fresh-laptop scenario is very common. Leaving it generic ("Invalid code") leads to support tickets. This wording is a perfect balance.
+2. **FIX-37-0B Make Change caption**: 
+   - **Feedback**: The current implementation (both inline text below the button AND a tooltip) is perfect. Tooltips are often missed by non-technical users, and the inline text is small enough not to clutter the screen. Keep both.
+3. **FIX-37-0B feedback auto-clear (4s)**: 
+   - **Feedback**: 4 seconds is exactly right for a short sentence. It provides enough time to read without making the user manually dismiss a persistent banner.
+4. **FIX-13-0B Retry button styling**: 
+   - **Feedback**: The inline style is acceptable for this isolated instance. However, if we ever introduce more inline-error-recovery buttons, we should extract it to a `.link-button` or `.inline-retry` class in `ServiceSelectionScreen.css`. No need to block the batch on it now.
+
+## 4. Minor Observations
+- **API `prepareChange` Response**: Your defensive parsing of the `prepareChange` response (`result.success || result.status === "success"`) is a good catch given the incomplete API documentation. 
+- **`hasVerifiedIdentity` Check**: I noted the update in `WalletSetupScreen.jsx` to ensure "Healthy" is only shown if the identity is fully loaded (`serialNumber > 0`). This perfectly complements the Batch 2 identity plumbing.
+
+## 5. Verdict
+**Batch 4 Approved.** The UX polishes are highly effective. Proceed to Batch 5 (FIX-02: Attachment Picker).

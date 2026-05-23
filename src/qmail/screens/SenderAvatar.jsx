@@ -1,4 +1,4 @@
-import React from "react";
+/* eslint-disable react/prop-types */
 import { avatarColorFromString } from "./avatarColor";
 
 const SenderAvatar = ({ sender, email, status }) => {
@@ -19,12 +19,15 @@ const SenderAvatar = ({ sender, email, status }) => {
   const { bg } = avatarColorFromString(colorKey);
 
   return (
-    <div className="avatar-with-coins">
-      <div className="sender-avatar-circle" style={{ background: bg }}>
+    <div className="email-list-pane__avatar">
+      <div
+        className="email-list-pane__avatar-circle"
+        style={{ "--email-list-pane-avatar-bg": bg }}
+      >
         <span>{getInitials(sender)}</span>
       </div>
       {status && status !== "none" && (
-        <div className={`coin-badge ${status}`}>
+        <div className={`email-list-pane__coin-badge email-list-pane__coin-badge--${status}`}>
           {status === "gold" ? "◈" : status === "silver" ? "◇" : "●"}
         </div>
       )}

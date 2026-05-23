@@ -1,5 +1,5 @@
 // useGlassSounds.js - React Hook for Glass Click Sounds
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import soundService from './soundService';
 
 const useGlassSounds = () => {

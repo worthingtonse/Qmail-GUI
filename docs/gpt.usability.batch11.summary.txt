@@ -1,0 +1,78 @@
+Batch 11 Summary - FIX-19 + FIX-24 + FIX-27 + FIX-30
+====================================================
+
+Scope
+-----
+Implemented Phase 2 Batch 11:
+- FIX-19: Attachment safety.
+- FIX-24: ReadingPane Mark Unread and Archive actions.
+- FIX-27: Disable compose buttons through the post-success window.
+- FIX-30: Remove placeholder identity behavior.
+
+Changes
+-------
+FIX-19:
+- getEmailAttachments() now preserves dangerous and warning metadata from the
+  backend attachment list response.
+- ReadingPane renders a ShieldAlert "Dangerous" chip next to flagged
+  attachments and exposes warning text through the chip title.
+- Attachment downloads now pass the attachment filename into
+  downloadMailAttachment() so saved files keep their real name when the
+  response does not provide a filename header.
+- Dangerous attachment downloads open an in-app confirmation modal before
+  saving. The modal uses the required text:
+  "This file is flagged as potentially dangerous. Save anyway?"
+
+FIX-24:
+- ReadingPane now has a Mark Unread button wired to handleMarkAsRead(id, false).
+- ReadingPane now has an Archive button wired to handleMoveEmail(id, "archive")
+  when the selected message is not already in Archive or Trash.
+
+FIX-27:
+- ComposeModal now uses a sendControlsLocked guard so Send and Save Draft stay
+  disabled while the send success state is visible before the modal closes.
+
+FIX-30:
+- AccountPane always renders the Profile Information section. When the real
+  identity is still hydrating, it shows "Loading..." instead of hiding the
+  section or using placeholder account data.
+- Removed remaining source comments that referenced the old placeholder
+  identity.
+
+Files Changed
+-------------
+- src/api/qmailApiServices.js
+- src/qmail/QMail.jsx
+- src/qmail/screens/AccountPane.jsx
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/QMailDashboard.jsx
+- src/qmail/screens/QMailDashboard.css
+- src/qmail/screens/ReadingPane.jsx
+- src/qmail/screens/ReadingPane.css
+- docs/gpt.usability.batch11.summary.txt
+
+Verification
+------------
+PASS: npm run build
+PASS: npx eslint src/api/qmailApiServices.js src/qmail/QMail.jsx src/qmail/screens/AccountPane.jsx src/qmail/screens/ComposeModal.jsx src/qmail/screens/QMailDashboard.jsx src/qmail/screens/ReadingPane.jsx --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for the Batch 11 files
+
+Manual Verification Notes
+-------------------------
+Pending live app checks:
+- Dangerous attachment renders a ShieldAlert chip and warning title.
+- Dangerous attachment download opens the in-app confirmation modal.
+- Attachment download passes the real filename.
+- Mark Unread toggles the selected message back to unread.
+- Archive moves the selected message to Archive.
+- Send and Save Draft stay disabled during the post-success compose window.
+- AccountPane shows "Loading..." while identity data is still null.
+
+Reviewer Focus
+--------------
+- Dangerous download confirmation lives in QMailDashboard so the download
+  helper remains side-effect focused and ReadingPane stays presentational.
+- The Archive button is hidden in Archive and Trash to avoid duplicate or
+  nonsensical actions.

@@ -1,0 +1,153 @@
+GPT Phase 2 Handoff - QMail GUI
+===============================
+Date: 2026-05-23
+
+Purpose
+-------
+Use this note after context is cleared. The Phase 2 plan is:
+docs\opu.phase2.tickets.txt
+
+Project root:
+D:\Code\src\JavaScript\Qmail-GUI\
+
+Current State
+-------------
+Phase 0 and Phase 1 GUI batches are complete. Phase 1 closeout summary:
+docs\gpt.phase1.closeout.txt
+
+Phase 1 status was updated in:
+docs\opu.phase1.tickets.txt
+
+Phase 1 automated closeout results:
+- npm run build: PASS
+- Phase 1 touched-file ESLint: PASS
+- node --check electron.cjs: PASS
+- node --check preload.cjs: PASS
+
+Important caveat:
+- Full `npm run lint` still fails repo-wide with 73 errors and 4 warnings
+  from pre-existing baseline debt. Logged as BUG-36 in docs\cla.bugs.txt.
+  For Phase 2 batches, run per-file ESLint on touched files and do not grow
+  the baseline.
+
+Known Phase 1 Backend-Blocked Items
+-----------------------------------
+Do not fake these in the GUI:
+- FIX-08 Sent persistence waits on CORE-A.
+- FIX-10 Repair Now waits on CORE-F.
+
+Phase 2 Overview
+----------------
+Phase 2 tickets are FIX-18 through FIX-34. Recommended batches from
+docs\opu.phase2.tickets.txt:
+
+Batch 10:
+- FIX-22 + FIX-31
+- Compose send-gating UX + remove Parity Server section.
+- MUST SHIP TOGETHER. Do not split.
+
+Batch 11:
+- FIX-19 + FIX-24 + FIX-27 + FIX-30
+- Reading/compose surface polish: dangerous attachment warning,
+  Mark Unread/Archive buttons, post-success compose disable window,
+  John Doe placeholder removal.
+
+Batch 12:
+- FIX-20 + FIX-33 + FIX-34
+- Unified Refresh, send failure/poll resiliency, notification unification.
+
+Batch 13:
+- FIX-21 + FIX-25 + FIX-29 + FIX-32
+- Pending-click semantics, search cap honesty, save DRD contact locally,
+  server details slice.
+
+Batch 14:
+- FIX-28
+- Replace ContactsPane window.confirm with in-app modal. Already logged as
+  BUG-32 in docs\cla.bugs.txt.
+
+Backend-blocked Phase 2:
+- FIX-18 waits on CORE-J starred filter. Do not implement local filtering.
+- FIX-23 waits on CORE-H deleteDraft endpoint. Do not fake deletion.
+- FIX-26 waits on CORE-E staged upload_and_tell task messages. Optional.
+
+Start Here: Batch 10
+--------------------
+Batch 10 is the next implementation target unless the user redirects.
+
+Relevant current call sites:
+- src\qmail\screens\ComposeModal.jsx
+  - imports getParityServer at line ~19.
+  - checkNetworkStatus() currently calls Promise.all([getServers(),
+    getParityServer()]).
+  - canSend currently initializes true.
+  - Send button currently disables on `isSending || !canSend` and shows
+    title "Network unavailable - cannot send".
+- src\qmail\screens\AccountPane.jsx
+  - imports getParityServer at line ~27.
+  - parityServer/parityLoading/loadParityServer state and handler exist.
+  - Parity Server Configuration section starts around line ~583.
+- src\api\qmailApiServices.js
+  - getParityServer export exists around line ~1067. FIX-31 says delete it.
+
+Batch 10 behavior target:
+- ComposeModal canSend starts as null ("checking").
+- While checking, Send label should read "Checking network..." and be
+  disabled.
+- Network status check should only use RAIDA availability from getServers().
+  Drop getParityServer entirely.
+- If fewer than 6 RAIDA are available, show warning-with-Retry instead of
+  hard disabling send forever.
+- Provide a "Send anyway" override; backend remains final authority.
+- Account view must no longer show Parity Server Configuration.
+- Remove getParityServer import/calls/export and AccountPane parity state.
+
+Batch 10 verification:
+- npm run build
+- Per-file ESLint for touched files:
+  src\qmail\screens\ComposeModal.jsx
+  src\qmail\screens\AccountPane.jsx
+  src\api\qmailApiServices.js
+- node --check electron.cjs
+- node --check preload.cjs
+- Manual: open Compose on healthy network and confirm Send reaches enabled.
+- Manual: block /raida/echo if possible; confirm warning-with-Retry.
+- Manual: Account view has no Parity Server section.
+
+Other Phase 2 Pitfalls
+----------------------
+FIX-34:
+- QMailDashboard notifications added in Batch 8 can carry
+  targetPendingGuid / targetEmailId for clickable new-mail toasts.
+  Preserve those fields if migrating to NotificationProvider.
+
+FIX-33:
+- ComposeModal has cancelledRef guarding the send polling loop. Keep that
+  behavior when adding timeout/retry resiliency.
+
+FIX-25:
+- searchEmails(query, 50, 0) is called from QMailDashboard.handleSearch.
+  The helper signature currently accepts query and limit; inspect before
+  adding offset or result-cap UI.
+
+FIX-29:
+- Depends on FIX-09 from Batch 9. resolveAddressOrSn is currently SN-only
+  until CORE-C. DRD contacts may have autoAddress but may still need a real
+  serial number path; inspect getPopularContacts output before wiring the
+  save button.
+
+Working Rules
+-------------
+- Use apply_patch for edits.
+- Do not revert unrelated dirty worktree changes.
+- Avoid full `npm run lint` as a required pass until BUG-36 is addressed;
+  use touched-file ESLint and record full lint caveat if run.
+- Write a batch summary after implementation, likely:
+  docs\gpt.usability.batch10.summary.txt
+- If out-of-scope bugs are found, append them to:
+  docs\cla.bugs.txt
+
+Stop Point
+----------
+This handoff was written before starting Phase 2 implementation. Wait for the
+user to clear/continue before editing Batch 10 code.

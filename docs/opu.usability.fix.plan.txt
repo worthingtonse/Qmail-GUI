@@ -1,0 +1,1696 @@
+opu QMail-GUI usability fix plan
+Date: 2026-05-21 (revised v4 after third-pass cleanup feedback)
+Author: claude-opus-4-7 (filename prefix: opu)
+
+Purpose
+=======
+This is a sequenced implementation plan for the findings collected in:
+
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.findings.txt
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gem.usability.findings.txt
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.findings.txt
+
+The findings are diagnoses. This file is the recipe. It groups the
+work into phases by priority and risk, gives each ticket concrete
+file/function targets, names the dependencies, and lists a manual
+verification step so a reviewer can confirm the fix without re-reading
+the original finding.
+
+Revision history
+----------------
+v4 (2026-05-21): Revised in response to third-pass cleanup feedback.
+
+  Changes vs v3:
+  - Scope guardrails updated: v3 still claimed "GUI-only except
+    Sent and Add-Contact." The plan now has multiple HARD backend
+    dependencies (CORE-F, CORE-H, CORE-J), an optional one (CORE-I)
+    for attachments, and several optional/lighter ones. Guardrails
+    rewritten to match reality.
+  - FIX-15: durable sign-out can strand a user whose locker was
+    already consumed. Added FIX-15b: a "Use existing local identity"
+    affordance on ServiceSelectionScreen, visible only when
+    skipAutoRestore is set AND hasId()/getIdentity() finds a local
+    identity. Clears the flag and enters QMAIL.
+  - FIX-03: normalizeIdentityForUi() now returns BOTH the camelCase
+    UI-friendly shape AND the snake_case aliases the existing UI
+    reads (pretty_address, serial_number, address, domain). Avoids
+    partial breakage if any consumer is missed in the ticket.
+  - Ship gates: "npm run build" replaced with the real packaging
+    script names (npm run electron-pack, npm run build-portable,
+    or npm run dist) for the packaged-build smoke test.
+  - FIX-06/07 explicitly preceded by a new FIX-05.5 (composeContext
+    refactor) as a prep ticket with its own regression checklist,
+    so the cross-cutting modal refactor doesn't ride along
+    invisibly with the Forward/Reply All work.
+  - FIX-16-0A: "Coming Soon" controls are now truly disabled —
+    aria-disabled, no pointer cursor, no click handler, no
+    keyboard activation.
+  - FIX-08: Sent empty-state copy reworded to plain user language
+    ("Sent history is not available in this version") and an
+    alternative of hiding the folder entirely is now the preferred
+    option.
+
+v3 (2026-05-21): Revised in response to a second-pass feedback file
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gem.usability.plan.feedback.v2.txt
+
+  Changes vs v2:
+  - FIX-01: explicit try/catch around the hydrate retry loop with
+    a "Service temporarily unavailable" toast on exhaustion.
+  - FIX-02: explicit handling for the canceled-dialog flag in the
+    UI consumer (not just the IPC handler) and de-duplication of
+    re-picked files in the staged attachments list.
+  - FIX-04: clarified that this is a one-shot fetch (not a polling
+    loop) and added a try/catch + "Could not load draft" toast.
+    Added an explicit draft-id-consistency regression check.
+  - FIX-10 / FIX-37: noted that healWallet and prepareChange may
+    grow into long-running tasks; if they return a task_id, reuse
+    the FIX-33 polling pattern.
+  - FIX-15: deep state reset on Sign Out — clear userAccount,
+    emails, mailCounts, and any non-skip-auto-restore localStorage
+    keys.
+  - FIX-20: per product decision, ONE combined "Refresh" button
+    that runs ping → notifications → counts → emails. Internal
+    helpers remain separate so a future debug surface can split
+    them again, but the user-facing model is one button.
+  - FIX-25: when search results hit the 50-row limit, surface
+    "Showing top 50 results" so users know there might be more.
+  - FIX-33: explicit try/catch around individual getTaskStatus
+    calls inside the 60s loop (not just a deadline).
+
+v2 (2026-05-21): Revised in response to feedback files
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gem.usability.plan.feedback.txt
+  D:\Code\src\JavaScript\Qmail-GUI\docs\gpt.usability.plan.feedback.txt
+
+  Major changes vs v1:
+  - FIX-03 now explicitly fixes the App→QMail→QMailDashboard prop
+    path and adds a normalizeIdentityForUi() helper. v1 missed that
+    QMail.jsx drops props on the floor.
+  - FIX-02 now uses the existing window.electronAPI bridge (not a
+    new window.qmail), and the IPC handler returns {path,name,size}
+    objects so the UI can render size chips honestly. Kept in
+    Phase 0 per product decision.
+  - FIX-04 picks one UI model (hydrate before mount) to avoid the
+    "mixed state machine" problem gpt flagged.
+  - FIX-05 no longer uses version-check as a health source.
+  - FIX-10 (Repair Now signal) made hard-dependent on CORE-F; no
+    more "dry-run heal if backend supports it" — that endpoint is
+    mutating by name.
+  - FIX-11 (subject_hint) removed entirely; subject hints touch
+    privacy semantics and are a product question, not a UI ticket.
+    Replaced by FIX-11a: distinguish pending rows from safe
+    existing metadata (sender SN, timestamp, arrival order).
+  - FIX-14 (Empty Trash) is now honestly labelled per page until
+    CORE-G lands.
+  - FIX-15 (Sign Out) now implements durable sign-out via a local
+    "skip-auto-restore" flag in App.checkIdentity, per product
+    decision. Includes the prop path AccountPane needs.
+  - FIX-16 picks grey-out / "Coming Soon" as the shipped variant
+    per product decision; Delete Account still hidden.
+  - FIX-06/07 (Forward/Reply All) use an explicit composeContext
+    object rather than overloading replyTo.
+  - FIX-09 (Add Contact schema) reworks the existing email field
+    into a single "QMail address or serial number" input rather
+    than adding a third field.
+  - FIX-17 (new-mail toast) uses notifications data for pending
+    mail and inbox list only for already-downloaded.
+  - FIX-22 + FIX-31 explicitly coupled: removing getParityServer
+    leaves ComposeModal.checkNetworkStatus broken; they ship
+    together.
+  - Added "ship gates" (build + lint + smoke) to every phase.
+  - Added a Phase-0A / 0B split per gpt's sequencing
+    recommendation: 0A is renderer-only and unblocks the rest;
+    0B introduces the Electron IPC work for attachments.
+
+Scope guardrails
+----------------
+- Most tickets are GUI-side (React/JS), but several have HARD
+  backend prerequisites — see "Backend tickets implied by this
+  plan" at the bottom for the full list. The HARD ones are CORE-F
+  (non-mutating identity-health endpoint), CORE-H (deleteDraft
+  endpoint), and CORE-J (starred filter). The GUI-side work for
+  FIX-10, FIX-23, and FIX-18 cannot complete without those.
+- Tickets that touch Electron / preload / packaging are flagged
+  Phase 0B or noted in-place. They cross more process boundaries
+  than the renderer-only tickets.
+- Don't rewrite layers wholesale. Most tickets are a 10-80 line
+  patch in one or two files. The one exception is FIX-05.5
+  (composeContext refactor) which crosses ComposeModal and several
+  call sites.
+- "Dead controls" policy: visibly disabled with "Coming Soon"
+  badges (per FIX-16-0A and product decision). NOT silently
+  no-op'd, NOT removed wholesale. Delete Account remains hidden
+  entirely (safety-critical, doesn't exist, should not be tempting
+  to click).
+
+Ticket-naming convention
+------------------------
+Each ticket is FIX-NN, severity-tagged [C]/[H]/[M]/[L], and tagged
+with the originating finding(s) in the form opu-H1 / gpt-2 / gem-E.
+
+Phase 0A — Critical, renderer-only: ship this week
+==================================================
+These are the "the GUI looks broken on first contact" issues that
+touch only React/JS — no Electron preload changes, no backend
+dependencies. If only one sub-phase ships, this is the one.
+
+Ship gate for 0A
+  - npm run build passes
+  - npm run lint passes (or matches the existing baseline)
+  - Vite dev server smoke test of the six manual-verify steps at
+    the bottom of this file
+  - Regression check: returning-user startup still works (a user
+    with an existing identity who restarts the app lands somewhere
+    sensible)
+
+FIX-01 [C] (gpt-2 / R1)  Pending-message download must hydrate the body
+  Problem:
+    handleDownloadMail in QMailDashboard.jsx:700-766 reads
+    responseData.body, but POST /api/qmail/net/messages/download
+    returns metadata (email_id, sender_sn, stripes_downloaded,
+    stripes_recovered). The body is empty in the reading pane.
+  Files to change:
+    src\qmail\screens\QMailDashboard.jsx (handleDownloadMail)
+    src\api\qmailApiServices.js (downloadEmailContent — leave as is,
+       the call is right; the consumer is wrong)
+  Approach:
+    1. After the download call returns success, take responseData.email_id.
+    2. await getEmailById(email_id) for the body and subject.
+    3. await getEmailAttachments(email_id) for the attachment list.
+    4. Update selectedEmail from those two responses (not from the
+       download response).
+    5. Remove the row from pendingMails, refresh loadMailCounts and
+       loadEmails(currentFolder) so the inbox row flips from pending
+       to downloaded.
+  Edge cases:
+    - Download succeeds but the DB row is not yet visible (race
+      between net/download and DB index). Add a short retry (3 tries,
+      500ms backoff) on getEmailById before declaring failure.
+    - Each getEmailById attempt MUST be wrapped in try/catch (gem
+      v2 feedback). The backend can 5xx during a retry window. On
+      exception: decrement the retry counter, sleep, and try again.
+      If all retries are exhausted, exit with a "Service temporarily
+      unavailable" toast and leave the row in pendingMails so the
+      user can retry by clicking it again. Do NOT leave selectedEmail
+      stuck in a half-loaded state.
+    - User clicks a different message before the download completes:
+      the existing isDownloadingItem state guard handles this; verify
+      it still works after the refactor.
+  Verify:
+    1. Receive a new mail on the test backend. Click the pending row.
+       Confirm the reading pane shows the real subject, body, and
+       any attachments — not the placeholder "Encrypted Message".
+    2. Resiliency: simulate a backend that 500s on getEmailById.
+       Confirm the user sees the "Service temporarily unavailable"
+       toast (not a permanent spinner) and the row remains clickable.
+
+FIX-03 [C] (gpt-1 / opu-H31 / R6)  First-run identity is never verified
+  Problem:
+    Two compounding bugs:
+    (a) ServiceSelectionScreen.handleImport hands result.data
+        straight to onSelectService('qmail', result.data).
+        WalletSetupScreen reads accountData.email_address,
+        accountData.pretty_address, accountData.needs_healing —
+        fields the import response does NOT contain (it has
+        coins_found, coins_saved, wallet_path, mail_wallet_path).
+    (b) Even if (a) were fixed, the data still wouldn't reach
+        QMailDashboard. App.jsx renders <QMail />, QMail.jsx
+        renders <QMailDashboard /> — neither passes provisioningData
+        through. The "John Doe" placeholder leaks because the prop
+        chain is broken end-to-end.
+  Files to change:
+    src\screens\ServiceSelectionScreen.jsx
+    src\App.jsx
+    src\qmail\QMail.jsx
+    src\qmail\screens\WalletSetupScreen.jsx
+    src\qmail\screens\QMailDashboard.jsx
+    src\api\qmailApiServices.js (add a normalizeIdentityForUi helper)
+  Approach:
+    1. Add normalizeIdentityForUi(raw) in qmailApiServices.js that
+       takes a getIdentity() response — fields like address,
+       serial_number, registered, identity{...} — and returns a flat
+       UI-friendly object containing BOTH camelCase and the
+       snake_case aliases that existing consumers read today:
+         {
+           // camelCase (new convention)
+           address, prettyAddress, serialNumber, domain,
+           isHealthy, needsHealing,
+           // snake_case aliases (preserve compatibility)
+           pretty_address, serial_number,
+           // misc
+           raw, configured,
+         }
+       Why both shapes: current consumers (AccountPane, WalletSetupScreen)
+       read fields like userAccount.pretty_address and
+       userAccount.serial_number. Updating every consumer in this
+       ticket is possible but risky — easy to miss one. Returning
+       both shapes means a missed consumer still works (reads
+       snake_case), and new consumers can use the cleaner camelCase
+       naming. Centralizing the construction prevents every
+       consumer from inventing its own field-name guesses.
+    2. ServiceSelectionScreen.handleImport: on successful import,
+       call getIdentity() then normalizeIdentityForUi(). Hand the
+       normalized object to onSelectService('qmail', identity).
+       If getIdentity returns configured=false, retry once after
+       500ms (backend can lag right after import). If still nothing,
+       advance with a warning toast "Account imported but identity
+       not yet visible." Don't hard-block — data is in the wallet.
+    3. App.jsx: thread provisioningData into the QMAIL branch:
+         case SERVICES.QMAIL:
+           return <QMail initialIdentity={provisioningData} />;
+       Product decision: returning users with a configured identity
+       should go straight to QMAIL, not PROVISIONING. Change
+       checkIdentity to setSelectedService(SERVICES.QMAIL) when
+       getIdentity says configured=true. PROVISIONING /
+       WalletSetupScreen remains the first-run-only screen.
+    4. QMail.jsx: accept initialIdentity and pass it through:
+         <QMailDashboard initialIdentity={initialIdentity} />
+    5. QMailDashboard.jsx: replace the hard-coded John Doe default
+       with userAccount initialized from props.initialIdentity (or
+       null if absent). Add a useEffect that calls getIdentity() on
+       mount when userAccount is null, normalizes, and sets state.
+       Render a "Loading identity…" placeholder until set.
+    6. WalletSetupScreen.jsx: the existing reads of
+       accountData.pretty_address / accountData.email_address etc.
+       continue to work because normalizeIdentityForUi() returns
+       snake_case aliases. New code in this file should prefer the
+       camelCase shape (accountData.address, prettyAddress, etc.).
+       Either way: show "—" placeholders for any missing field;
+       don't crash on null.
+  Compatibility / gem-feedback:
+    The AccountPane loading state must not block the NavigationPane
+    RAIDA dot grid. NavigationPane runs its own echoRaida call on
+    mount; nothing about FIX-03 should change that. Keep the dot
+    grid alive throughout the Loading state.
+  Verify:
+    1. Cold start with no identity. Import a valid locker code.
+       Confirm WalletSetupScreen shows the real address.
+    2. Click Go to Dashboard. Confirm Account > Profile shows real
+       serial number, not John Doe.
+    3. Restart the app. Confirm it boots straight to the dashboard
+       with the right identity (no WalletSetupScreen flash).
+    4. Throughout (1)-(3), confirm the RAIDA dots in the nav pane
+       remain interactive.
+
+FIX-04 [C] (gpt-5)  Drafts reopen with empty body and recipients
+  Problem:
+    /db/drafts/list returns preview metadata only (subject,
+    body_preview, recipient_count, timestamps, star state). The GUI
+    feeds those rows directly into ComposeModal as editDraft, so the
+    user opens a draft and sees no body, no recipients, and no Cc.
+    Worse, hitting Save overwrites the persisted draft with the
+    empty fields they just looked at.
+  Files to change:
+    src\qmail\screens\QMailDashboard.jsx (handleSelectEmail's
+       isDraft branch ~ line 492)
+  Approach (one UI model — hydrate BEFORE mount, one-shot fetch):
+    Note: this is a SINGLE fetch, not a polling loop. The retry
+    discussed below is bounded (at most 1-2 attempts on transient
+    failure) — it's not the long polling pattern from FIX-33.
+    1. In handleSelectEmail, when email.isDraft is true:
+         - Set a dashboard-level "loadingDraftId" state.
+         - Do NOT open ComposeModal yet.
+         - try { const full = await getEmailById(email.id); }
+           catch (e) {
+             // gem v2: handle backend transient failures
+             clear loadingDraftId
+             showNotification("Could not load draft. Try again.")
+             return
+           }
+         - On success: setEditDraft(mergedFromFetch),
+           setIsComposeOpen(true), clear loadingDraftId.
+    2. Show a small spinner overlay on the clicked draft row while
+       loadingDraftId === draft.id, so the user sees feedback. The
+       inbox list stays interactive during the fetch.
+    3. ComposeModal does not change for this ticket; it sees a
+       fully hydrated editDraft when it mounts.
+    4. Draft-id consistency (gem v2): when ComposeModal opens with
+       a hydrated editDraft, it MUST set currentDraftId from
+       editDraft.id. This already happens at line 73 of the current
+       ComposeModal, but verify it still works after FIX-06/07's
+       composeContext refactor — a regressed currentDraftId would
+       cause Save Draft to spawn duplicate rows instead of updating
+       the existing draft.
+  Why this model (not the modal-internal spinner alternative):
+    Keeping the fetch in the dashboard means ComposeModal stays
+    "props-in, behavior-out." Putting an in-modal spinner risks the
+    user starting to type before hydration finishes and clobbering
+    their own changes when the fetched body lands.
+  Dependencies:
+    Draft-cleanup-after-send (delete the source draft once it ships)
+    moved to a separate ticket (see FIX-23) and explicitly blocked
+    on a deleteDraft backend contract (see Backend tickets, CORE-H).
+  Verify:
+    1. Save a draft with body + To + Cc. Close compose. Click the
+       draft in the Drafts folder. Confirm all fields repopulate.
+       Edit and save. Confirm the persisted draft matches what's on
+       screen.
+    2. Draft-id regression: save a draft, reopen, edit the body,
+       click Save Draft. Switch to the Drafts folder. Confirm there
+       is still exactly ONE draft (not two — i.e. the same id was
+       updated, not a new draft created).
+    3. Resiliency: simulate a backend that 500s on getEmailById.
+       Confirm the user sees a "Could not load draft" toast and the
+       inbox list stays interactive (not stuck in a loading state).
+
+FIX-05 [C] (opu-H37 / gem-E / gpt-9)  AccountPane serverHealth is statically "healthy"
+  Problem:
+    AccountPane.jsx:42-47 initializes serverHealth to a static
+    "healthy" object and never updates it. The "Server Status"
+    section is permanently green regardless of reality.
+  Files to change:
+    src\qmail\screens\AccountPane.jsx
+  Approach (recommended: option A, remove the section):
+    (A) Remove the entire Server Status section outright. The
+        NavigationPane dot-grid (echoRaida-driven, 25 RAIDAs) is the
+        honest view and is always visible. Removing the duplicate
+        avoids the trap of two health surfaces drifting apart.
+    (B) Alternative if a per-screen aggregate is wanted: derive it
+        from raida/echo only:
+          status = arrayUsable ? "healthy" :
+                   (totalAvailable >= 6 ? "degraded" : "unhealthy")
+          timestamp = Date.now() of the call
+        Do NOT use /api/system/version-check as a health source —
+        that endpoint is for update availability, not service
+        health. If a version string is desired in the panel, render
+        it as a separate "Client version" row, not as the authority
+        for healthy vs degraded.
+    Either way: delete the inline comment about "Initialize with
+    static healthy data to bypass API" — it's the wrong default.
+  Verify:
+    Bring down 4 RAIDAs in a test environment (or simulate via
+    /raida/echo returning timeouts). Confirm Account no longer
+    displays a green "healthy" indicator at odds with the dot-grid.
+
+FIX-16-0A [C] (opu-H33 + H34 / gem-section-3-recommendation-5)
+  Hide dead Security and Settings controls
+  Pulled forward from Phase 1 because clickable-but-dead controls
+  erode trust on first contact, and the fix is small and renderer-
+  only. Numbered FIX-16-0A to preserve FIX-16's original number
+  while marking it as a 0A ticket.
+
+  Problem:
+    Change Password, 2FA, Backup Wallet, Delete Account, and all
+    four Application Settings toggles do nothing (just console.log
+    or flip local state). They look real, they aren't.
+  Files to change:
+    src\qmail\screens\AccountPane.jsx
+  Approach (per product decision: grey-out "Coming Soon", but
+  TRULY disabled — not clickable no-ops):
+    1. For Change Password, Two-Factor Authentication, Backup Wallet:
+         - Add a "Coming Soon" badge next to the title.
+         - REMOVE the onClick handler entirely (do not assign a no-op
+           handler — the row should not be a clickable thing at all).
+         - Set cursor to "default" (not "pointer").
+         - Add aria-disabled="true" for accessibility.
+         - Set tabIndex={-1} so keyboard nav skips the row.
+         - Use reduced-opacity styling (e.g. opacity: 0.5).
+         - Tooltip on hover: "This feature is on the roadmap."
+       The current rows are <div onClick={...}> with cursor:pointer
+       styling — that needs to come off entirely, not just be no-
+       op'd. Third-pass feedback: don't leave clickable rows that
+       silently do nothing.
+    2. For Application Settings toggles (Email Notifications, Dark
+       Mode, Auto-Sync, Biometric):
+         - REMOVE the onClick from the toggle button.
+         - Add the disabled attribute to the <button>.
+         - Add aria-disabled="true".
+         - Use the same opacity treatment.
+         - "Coming Soon" badge next to the setting title.
+    3. Delete Account: HIDE entirely (do not show "Coming Soon").
+       It's a safety-critical control and shouldn't be tempting to
+       click.
+    4. Sign Out lands as its own non-dead control in FIX-15 (Phase
+       1); 0A just grays out the rest.
+  Verify:
+    1. Open Account > Security & Privacy. Confirm Change Password /
+       2FA / Backup Wallet render with the "Coming Soon" badge.
+    2. Hover them — confirm cursor is the default arrow, not the
+       pointer hand.
+    3. Try clicking each — confirm nothing happens (not even a
+       brief flicker).
+    4. Tab through Account with the keyboard — confirm focus skips
+       the disabled rows.
+    5. Confirm Delete Account is gone.
+    6. Repeat 1-4 for the four Application Settings toggles.
+
+Phase 0B — Critical, cross-boundary: ship right after 0A
+========================================================
+These are still critical but touch Electron / preload / packaging
+or rely on copy-level changes that depend on the 0A onboarding
+work. Ship 0A first, then 0B.
+
+Ship gate for 0B
+  - Everything from the 0A gate
+  - Electron dev runs cleanly: npm run electron-dev
+  - Electron PACKAGED build smoke test. Use a real packaging
+    script from package.json — NOT "npm run build" (that's just
+    the Vite renderer build and produces no binary).
+    Pick one based on the dev's platform:
+      npm run electron-pack      (cross-platform via electron-builder)
+      npm run build-portable     (Windows portable .exe)
+      npm run dist               (full distributable, no publish)
+    Launch the resulting binary from release/ (or whatever
+    electron-builder outputs to) and confirm:
+      - The app starts
+      - The file picker still works in the packaged context, not
+        just dev (preload bridges behave differently when packaged)
+      - Attachments selected via the packaged build send correctly
+  - Verify attachment send end-to-end on a real backend
+
+FIX-02 [C] (opu-H14 / gem-section-B / gpt-4)  Compose attachment picker
+  Problem:
+    ComposeModal hard-codes attachments: [] (line 489). Paperclip is
+    imported but not rendered. Backend already accepts repeatable
+    attachment_file_path params and sendEmail() iterates them.
+  Files to change:
+    electron.cjs                          (IPC handler + fs.stat)
+    preload.cjs                           (expose via electronAPI)
+    src\qmail\screens\ComposeModal.jsx    (picker UI, chip list)
+  Approach (use the EXISTING electronAPI bridge):
+    1. In electron.cjs, register an IPC handler "compose:pickFiles":
+         ipcMain.handle('compose:pickFiles', async () => {
+           const r = await dialog.showOpenDialog({
+             properties: ['openFile', 'multiSelections'] });
+           if (r.canceled) return [];
+           // Stat each file in the main process so the renderer
+           // doesn't need fs access:
+           return Promise.all(r.filePaths.map(async (p) => {
+             const stat = await fs.promises.stat(p);
+             return { path: p, name: path.basename(p),
+                      size: stat.size };
+           }));
+         });
+       Handle the canceled case explicitly (return []), not undefined.
+    2. In preload.cjs, EXTEND the existing electronAPI exposure
+       (do NOT add a second bridge):
+         contextBridge.exposeInMainWorld('electronAPI', {
+           ...existingMethods,
+           pickAttachments: () =>
+             ipcRenderer.invoke('compose:pickFiles'),
+         });
+       If electronAPI doesn't already exist, add it; otherwise merge.
+    3. In ComposeModal.jsx:
+       - Add useState attachments = [] (array of {path, name, size}).
+       - Add an "Attach" button in the footer next to Save Draft,
+         icon = Paperclip. onClick:
+           const picked = await window.electronAPI?.pickAttachments();
+           if (!picked || picked.length === 0) return; // canceled
+           // De-duplicate: don't add paths already in the list
+           const known = new Set(attachments.map(a => a.path));
+           const additions = picked.filter(p => !known.has(p.path));
+           setAttachments([...attachments, ...additions]);
+       - Render staged files as removable chips above the body
+         (filename + size + X to remove). Show total size.
+       - In handleSend, pass attachments.map(a => a.path) into
+         emailData.attachments instead of [].
+    4. Browser fallback: if window.electronAPI is undefined, render
+       the button but disable it with title "File attachments
+       require the desktop build."
+  Edge cases:
+    - Paths with spaces / unicode: the IPC handler returns strings
+      verbatim; URLSearchParams in sendEmail handles the escape.
+      Test with a filename containing a space and a unicode
+      character.
+    - Cancelled dialog: handler returns []; UI must check for the
+      empty array AND defensively handle a null/undefined return
+      (in case showOpenDialog rejects). gem v2: do NOT push an
+      empty array into state. The snippet above handles this.
+    - Re-picking the same file: gem v2 — de-duplicate by path so
+      the staged list doesn't accumulate dupes when a user opens
+      the picker twice and reselects a file already attached.
+    - fs.stat failure (file deleted between dialog and stat): catch
+      per file in the IPC handler, drop just that one, log a warning.
+    - Backend filesystem access: the backend reads
+      attachment_file_path from the host filesystem. In the packaged
+      build, paths returned by Electron's dialog point at the host
+      OS — confirm the backend process can read them (same user
+      context). If not, this needs a staging-upload endpoint
+      (escalate to CORE-I, see Backend tickets).
+  Verify:
+    1. Send a message with one .pdf, one .png, and one
+       filename-with-space.txt. Confirm the recipient sees all three
+       with correct names and content.
+    2. Open the picker, cancel — confirm no error and no chip added.
+    3. Build and run the packaged binary; repeat step 1.
+
+FIX-13-0B [C] (opu-H2)  First-run import error messages collapse
+  Pulled forward from Phase 1 because it pairs naturally with the
+  Phase-0A first-run identity work; without it FIX-03 lands with no
+  honest error path. Numbered FIX-13-0B to preserve the original
+  number.
+
+  Problem:
+    handleImport sets error = result.error || 'Locker is empty or
+    invalid' for every failure. No differentiation between 400, 404,
+    5xx, and network errors.
+  Files to change:
+    src\screens\ServiceSelectionScreen.jsx (handleImport)
+    src\api\qmailApiServices.js (importCredentials — already
+       exposes response.status; promote to structured error)
+  Approach:
+    1. importCredentials() already returns response.status. Promote
+       its error return to { code, message, raw }.
+    2. handleImport switch on code:
+         400 → "That doesn't look like a valid locker code. Check
+               for typos and try again."
+         404 → "We couldn't find anything in that locker. It may
+               already have been imported, or the code may be wrong."
+         5xx → "The QMail backend returned an error. Try again
+               in a moment."
+         network → "Can't reach the QMail backend. Make sure it's
+                   running on port {PORT} and try again."
+    3. Add a Retry button next to the error.
+  Verify:
+    Trigger each failure mode (invalid code, valid-but-empty,
+    backend down). Confirm distinct messages and that Retry works.
+
+FIX-35-0B [L→C] (opu-M3)  Onboarding copy: locker-code help line
+  Pulled forward from Phase 3 because it ships alongside FIX-13-0B
+  as part of the first-run polish. One-line change.
+
+  Update the "Standard format: ABC-1234" help text in
+  ServiceSelectionScreen.jsx to "ABC-1234 standard; longer keys
+  from other tools also accepted." Already true per code; the help
+  text just contradicts it.
+
+FIX-36-0B + FIX-37-0B  WalletSetupScreen feedback (combined)
+  Pulled forward from Phase 3 because they ship with FIX-03.
+  Two small changes in WalletSetupScreen.jsx:
+    - Hide "Heal Identity" when status === "healthy".
+    - Make "Make Change" surface a toast on success/failure and add
+      a one-line explanation of what it does.
+
+Phase 1 — High: ship in the next iteration
+==========================================
+These don't block first contact, but they're the "this isn't a real
+email program" findings.
+
+Ship gate for Phase 1
+  - Everything from 0A/0B gates
+  - For tickets touching ComposeModal: regression-test attachment
+    upload still works (FIX-02 shipped in 0B).
+  - For FIX-22 + FIX-31 (which ship together): verify Compose Send
+    button reaches its enabled state on a healthy network.
+
+FIX-05.5 [H] (third-pass feedback)  Prep: composeContext refactor
+  Why this is its own ticket:
+    v3 buried the ComposeModal refactor inside FIX-06 and FIX-07.
+    That's a risky shape — the modal is touched by FIX-04 (draft
+    hydration), FIX-22 (send gating), FIX-23 (delete-on-send),
+    FIX-27 (post-success disable), FIX-39 (autosave), and others.
+    A refactor that changes its prop contract mid-stream causes
+    cascading regressions in tickets that ride alongside.
+    Make the refactor its own prep ticket, with a regression
+    checklist, BEFORE Forward/Reply All land on top of it.
+
+  Architecture target:
+    Rather than overloading replyTo with progressively more
+    "variants", introduce an explicit composeContext object that
+    ComposeModal consumes uniformly:
+
+      composeContext = {
+        mode: "new" | "reply" | "replyAll" | "forward" | "draft",
+        sourceEmail: <email being replied-to/forwarded/edited>,
+        ownIdentity:  <from FIX-03 normalized identity>,
+        draftId:      <if mode === "draft", the draft's id>,
+      }
+
+    ComposeModal derives subject prefix, body prefill, and recipient
+    prefill from `mode`. The current replyTo and editDraft props
+    become internal mode branches.
+
+  Files to change:
+    src\qmail\screens\ComposeModal.jsx (accept composeContext;
+       remove replyTo and editDraft props)
+    src\qmail\screens\QMailDashboard.jsx (build composeContext at
+       each opener: handleOpenCompose, handleReply, draft click)
+  Approach:
+    1. Add a single composeContext prop. Remove the old replyTo /
+       editDraft props entirely — this is a beta with no external
+       consumers, so a hard cutover is fine. Update every call site
+       in the same patch. (v3 proposed a compatibility shim; v4
+       drops it per product call.)
+    2. ComposeModal's mounting useEffect switches on
+       composeContext.mode:
+         "new":      blank fields, default storage
+         "reply":    derive To from sender, "Re: " subject, quoted body
+         "replyAll": same plus Cc minus own identity (FIX-07 details)
+         "forward":  "Fwd: " subject, body quoted, To blank (FIX-06)
+         "draft":    pre-hydrated fields from the hydrated editDraft
+       The currentDraftId state is set from composeContext.draftId
+       when mode === "draft", preserving the draft-id-consistency
+       behavior FIX-04 verified.
+    3. QMailDashboard:
+         openCompose({ mode: "new", ownIdentity })
+         openReply(email)      → mode: "reply"
+         openReplyAll(email)   → mode: "replyAll"  (FIX-07)
+         openForward(email)    → mode: "forward"   (FIX-06)
+         openDraft(hydrated)   → mode: "draft", draftId: hydrated.id
+  Regression checklist (third-pass requirement):
+    After landing FIX-05.5 and before FIX-06/07/etc. start:
+    [ ] New compose: open, type, send (mode: "new")
+    [ ] New compose: open, save as draft, close, verify draft
+        appears with correct content
+    [ ] Reply: open from inbox, send (mode: "reply")
+    [ ] Draft hydration (from FIX-04): click draft, edit, save,
+        confirm same draft is UPDATED (not duplicated — FIX-04
+        regression check #2)
+    [ ] Attachment send (from FIX-02): attach a file, send
+    [ ] Send-gating (from FIX-22): preflight still gates correctly
+    [ ] Post-success disable (from FIX-27): buttons disabled through
+        the 1500ms window
+    Pre-implementation: if any of these check items already fail
+    on current main (i.e. the ticket they belong to hasn't landed
+    yet), note "n/a — not yet implemented" rather than treating it
+    as a regression.
+  Dependencies:
+    Blocks FIX-06, FIX-07. Should land AFTER FIX-04 so the draft-
+    hydration model is already settled when the refactor happens.
+  Verify:
+    Complete the regression checklist above. Every applicable item
+    must pass before FIX-06 can be merged on top.
+
+FIX-06 [H] (opu-H6)  Add Forward action
+  DEPENDS ON FIX-05.5 (composeContext refactor must be in place).
+  Files to change:
+    src\qmail\screens\ReadingPane.jsx
+    src\qmail\screens\QMailDashboard.jsx
+    (ComposeModal already refactored in FIX-05.5)
+  Approach:
+    1. ReadingPane: add a Forward button next to Reply. Forward
+       icon is already imported.
+    2. QMailDashboard.handleForward(email):
+         openCompose({ mode: 'forward', sourceEmail: email,
+                       ownIdentity: userAccount })
+       ComposeModal derives (already wired in FIX-05.5):
+         subject = "Fwd: " + sourceEmail.subject (no double "Fwd:")
+         body = "\n\n--- Forwarded message ---\n" + quoted body
+         to = ""  (user fills in)
+  Edge cases:
+    - Don't stack "Fwd:" prefixes. If subject already starts with
+      "Fwd:" (case-insensitive), don't prepend again.
+    - Forwarding an undownloaded message: disable the Forward
+      button with a tooltip "Download the message first to forward."
+  Verify:
+    Open a downloaded message. Click Forward. Confirm modal opens
+    with "Fwd: <subject>", body quotes the original, To is empty.
+    Forward a message whose subject already starts with "Fwd:";
+    confirm no doubling.
+
+FIX-07 [H] (opu-H7)  Add Reply All action
+  DEPENDS ON FIX-05.5 (composeContext refactor must be in place).
+  Files to change:
+    src\qmail\screens\ReadingPane.jsx
+    src\qmail\screens\QMailDashboard.jsx
+    (ComposeModal already has mode === 'replyAll' branch from FIX-05.5)
+  Approach:
+    1. Add Reply All button next to Reply in ReadingPane.
+    2. QMailDashboard.handleReplyAll(email):
+         openCompose({ mode: 'replyAll', sourceEmail: email,
+                       ownIdentity: userAccount })
+    3. ComposeModal mode='replyAll' derives:
+         to = [sender]
+         cc = filter(original.cc + original.to,
+                     addr => !isOwnAddress(addr, ownIdentity))
+         subject = "Re: " + sourceEmail.subject (no double "Re:")
+       isOwnAddress() must compare against EVERY form of the
+       caller's address: serial number, address, auto_address, and
+       pretty/display address. The normalized identity object from
+       FIX-03 carries all of these.
+  Edge cases:
+    - Recipient data missing in the local DB. If sourceEmail.cc is
+      empty AND sourceEmail.to has only the user, fall back to
+      plain Reply behavior — don't render an empty Cc field.
+    - If full recipient data is genuinely unavailable, GREY OUT
+      the Reply All button with tooltip "Recipient list not stored
+      with this message." This is honest, and gpt's review flagged
+      this case explicitly.
+    - Don't stack "Re:" prefixes.
+  Dependencies:
+    FIX-03 (normalized identity must include all address forms).
+  Verify:
+    Receive a message with 3 To and 2 Cc. Click Reply All. Confirm
+    To contains the original sender and Cc contains the other 4
+    addresses, with the user's own address filtered out (in
+    whichever form it appears).
+
+FIX-08 [H] (gpt-3)  Sent mail must appear in the Sent folder
+  PRIMARILY BACKEND (CORE-A). The GUI cannot fix this by itself,
+  and creating fake Sent rows client-side would be a lie that
+  diverges from the recipient's actual receipt. Do NOT do that.
+
+  Problem:
+    upload_and_tell writes receipts, not a Sent-folder row in
+    qmail_emails. The Sent folder is exposed but empty after sends.
+  Files to change:
+    PRIMARILY BACKEND: rest_core's upload-and-tell path (CORE-A).
+    Secondary GUI: trivial — confirm loadEmails('sent') runs after
+       send success (handleSendEmail already calls loadMailCounts,
+       and Sent will then populate from the backend).
+  Approach:
+    1. Open backend ticket CORE-A: after a successful upload_and_
+       tell, persist a qmail_emails row with folder=Sent and the
+       sender's own identity, populated with the same body and
+       subject the user submitted.
+       Alternative (lighter): expose
+         /api/qmail/db/messages/list?folder=1
+       backed by receipts. Either way, the result must be a single
+       canonical "I sent this" record, not a client-side
+       reconstruction.
+    2. GUI: until CORE-A ships, pick one of two interim options.
+       Prefer (A) unless product pushes back:
+       (A) Hide the Sent folder from NavigationPane until CORE-A
+           lands. /db/folders/list returns it, but the GUI can
+           filter it out client-side. Users don't see a folder
+           they can't use. Cleanest UX.
+       (B) Keep the Sent folder visible but render plain-language
+           empty-state copy:
+             "Sent history is not available in this version."
+           No more "Sent-folder persistence is coming" — that's
+           implementation language users shouldn't have to parse.
+           Per third-pass feedback: no roadmap copy, no jargon, no
+           backend terminology.
+       Either way: do NOT inject fake rows.
+  Feedback addressed:
+    - gem suggested a "local-only Outbox" placeholder. Declined: a
+      local outbox that doesn't match what the recipient actually
+      received is a worse lie than an empty Sent folder.
+    - Third-pass feedback flagged the v3 empty-state copy as too
+      technical. Reworded; option (A) avoids the question entirely
+      by hiding the folder.
+  Verify (after CORE-A):
+    Send a message. Switch to Sent. Confirm the message appears
+    with the right subject, body, and recipient.
+  Verify (interim, GUI-only):
+    If option (A): confirm Sent does not appear in the nav at all.
+    If option (B): switch to Sent and confirm the user-friendly
+    empty-state copy appears with no fake rows.
+
+FIX-09 [H] (opu-H23 / gpt-7)  Add Contact modal schema mismatch
+  Problem:
+    AddContactModal collects (name, email). ContactsPane.handleAddContact
+    splits name on space, defaults serial_number to "0", and stuffs
+    the email into the description field. Result: contacts saved
+    via this modal have serial_number=0 (rejected by backend) or get
+    persisted with no usable autoAddress, so Compose autocomplete
+    can't surface them.
+  Files to change:
+    src\qmail\screens\AddContactModal.jsx
+    src\qmail\screens\ContactsPane.jsx
+    src\api\qmailApiServices.js (new resolveAddressOrSn helper)
+  Approach (rework the existing "email" field, do NOT add a third):
+    1. Rename the existing "Email Address" input to "QMail address
+       or serial number." This keeps the modal at two fields
+       (Name/Alias and Address-or-SN).
+    2. Add a small async resolveAddressOrSn(input) helper:
+         - If input matches /^\d+$/, treat as serial number.
+         - If input looks like an email and CORE-C is available
+           (reverse SN lookup), call it and return both fields.
+         - Otherwise: error message "Please enter a serial number
+           (or a QMail address once the lookup service is available)."
+    3. ContactsPane.handleAddContact:
+         - Run resolveAddressOrSn first.
+         - On success: call addContact with real serial_number,
+           first_name, last_name, and a clean description
+           (the user's free text, NOT the address).
+         - On failure: surface the error inline in the modal.
+    4. Until CORE-C lands, the practical shippable version is
+       "serial-number-only" with clear inline help text. Adding the
+       email path is a one-line change once CORE-C is available.
+    5. Dependency: this unblocks FIX-29 (save DRD contact to local).
+  Verify:
+    1. Add a contact by SN — confirm it persists and appears in
+       Compose autocomplete.
+    2. Add a contact with a non-SN input — confirm the inline error
+       is clear and no broken row is created.
+
+FIX-10 [H] (opu-H35 / gem-section-3)  Repair Now triggers on wrong signal
+  PRIMARILY BACKEND-DEPENDENT (CORE-F).
+  The current banner reads walletBalance.folders.fracked.coins which
+  is the wrong signal (wallet-wide fracked count, not identity-
+  specific). The right signal requires a non-mutating identity-
+  health endpoint, which doesn't exist yet.
+
+  Problem:
+    AccountPane wraps the Repair panel in
+    {walletBalance?.folders.fracked.coins > 0 && ...} — a wallet-
+    folder count, not an identity-health signal. False positives and
+    false negatives both happen.
+  Files to change:
+    src\qmail\screens\AccountPane.jsx
+    src\qmail\screens\QMailDashboard.jsx (optional: hoist banner)
+    src\api\qmailApiServices.js (new getIdentityHealth helper after
+       CORE-F)
+  Approach:
+    1. HARD PREREQUISITE: CORE-F must land first.
+       /api/qmail/raida/identity/heal is mutating by name AND by
+       implementation — calling it as a "dry run" is not a safe
+       assumption. v1 of this plan suggested that; it was wrong.
+       Either:
+       (a) /api/qmail/local/identity/get must include a health
+           field, OR
+       (b) a new GET /api/qmail/raida/identity/check (non-mutating)
+           must exist.
+    2. After CORE-F: add a getIdentityHealth() helper that returns
+       { healthy: bool, frackedCoins: number, lastChecked: ts }.
+    3. Drive the AccountPane banner off that helper.
+    4. Hide the Repair Now button entirely when identity is healthy.
+    5. Optional: lift the banner into QMailDashboard so a fracked
+       identity is visible on every screen.
+  Interim behavior (until CORE-F):
+    Remove the wrong banner trigger. Show the Repair Now button
+    only when the user explicitly navigates to a manual-repair
+    affordance (e.g. an "Identity tools" subsection in Account).
+    Do NOT trigger a heal-based check on a timer — that's a
+    repeated mutation.
+  Verify (after CORE-F):
+    With a healthy identity, confirm no warning banner. Frack a
+    test identity. Confirm the banner appears and Repair Now
+    succeeds.
+
+  Future-proofing (gem v2):
+    healWallet() today is a single fetch. If the backend evolves it
+    into a long-running task that returns a task_id, the GUI should
+    detect that response shape and switch to the FIX-33 polling
+    pattern (60s deadline, per-call try/catch, "Healing in
+    progress…" status text). Apply the same logic to prepareChange()
+    in FIX-37. Not required today; just don't bake in the assumption
+    that the response is always immediate.
+
+FIX-11 — REMOVED in v2 (subject_hint is a privacy/product question)
+  v1 proposed adding a sender-provided subject_hint field on
+  /api/qmail/db/notifications/list and a matching compose-time UI.
+  Per the gpt feedback and the product call, this is NOT just a UI
+  fix: a pre-download visible subject hint changes the privacy
+  semantics of encrypted mail. That's a backend/product decision,
+  not a GUI ticket. Parked until product weighs in.
+  See FIX-11a below for the safe interim improvement.
+
+FIX-11a [H] (opu-H10)  Distinguish pending-mail rows from safe metadata
+  Problem (narrower than original FIX-11):
+    All pending rows render with the same "🔒 Encrypted Message"
+    subject and the same generic preview, so five pending mails
+    look identical. The user cannot triage without decrypting each.
+  Files to change:
+    src\qmail\screens\QMailDashboard.jsx (formattedPendingMails)
+    src\qmail\screens\EmailListItem.jsx (optional: visual styling)
+  Approach (only use metadata that's already in the notification):
+    1. Use sender_address (already mapped) as the dominant row line.
+    2. Include the timestamp prominently — it's a reliable
+       distinguisher.
+    3. Append a short arrival-order suffix to the subject when
+       multiple pending mails come from the same sender within a
+       short window, e.g. "🔒 Encrypted message #2".
+    4. Italicise the placeholder subject so the user knows it's a
+       placeholder, not the real subject.
+    5. Do NOT show any plaintext content the sender did not
+       explicitly mark as visible. This preserves the privacy
+       contract.
+  Verify:
+    Receive three pending messages from two senders within a minute.
+    Confirm the inbox list shows the senders clearly, distinct
+    timestamps, and the "#2" suffix on the duplicate-from-same-
+    sender row.
+
+FIX-12 [H] (opu-H1)  No path to create a new identity from the GUI
+  Problem:
+    ServiceSelectionScreen offers "I Have a Locker Code" and "Buy
+    Locker Code" (external link). createMailbox() is commented out,
+    and the backend has no replacement route (per opu.gui.findings
+    X1). The product can on-ramp existing users but not new ones.
+  Files to change:
+    PRIMARILY BACKEND: restore or replace a mailbox-creation route.
+    Secondary GUI:
+       src\screens\ServiceSelectionScreen.jsx (new flow step)
+       src\api\qmailApiServices.js (uncomment / rewrite createMailbox)
+  Approach:
+    1. Backend ticket — what's the v2 mailbox-creation contract?
+       Without an answer, this finding is a product question, not
+       an implementation task. Park.
+    2. Until backend lands: improve the post-Buy onramp. After the
+       user clicks "Buy Locker Code" and the new tab opens, show an
+       inline hint in the GUI: "Once you have your code, come back
+       here and tap 'I Have a Locker Code'." This is small and
+       improves the current dead-end UX.
+  Verify (interim):
+    Click Buy Locker Code. Confirm the hint appears on the screen
+    they return to.
+
+FIX-13  Moved forward to Phase 0B as FIX-13-0B. See above.
+
+FIX-14 [H] (opu-H27)  Empty Trash, honestly labelled
+  Problem and constraint:
+    No batch delete endpoint exists today (CORE-G is the
+    nice-to-have). A pure client-side loop can only delete what the
+    GUI has loaded — usually the current page (50 rows). A button
+    labeled "Empty Trash" that actually only empties the visible
+    page would be a lie.
+  Files to change:
+    src\qmail\screens\EmailListPane.jsx (header button)
+    src\qmail\screens\QMailDashboard.jsx (handler)
+    src\api\qmailApiServices.js (new emptyTrashFolder helper)
+  Approach:
+    (Interim, ship now)
+    1. Add a "Delete page" button in EmailListPane header when
+       currentFolder === "trash" and emails.length > 0. Label it
+       honestly: "Delete these N messages permanently" (where N is
+       the visible count).
+    2. handleEmptyPage: confirm modal, then loop
+       deleteEmailPermanent over the currently-loaded trash items.
+       Refresh counts.
+    3. If total trash count > visible count, surface a hint after
+       deletion: "Page deleted. N more messages remain in trash."
+       The user can paginate and repeat.
+    (After CORE-G)
+    4. Add a true "Empty Trash" button that calls the batch
+       endpoint and removes everything in one round trip. Relabel
+       and replace the "Delete page" button.
+  Verify (interim):
+    Put 5 messages in trash (all on one page). Click "Delete these
+    5 messages permanently". Confirm trash is empty and counts
+    update. Put 75 messages in trash. Click the button. Confirm the
+    first 50 are deleted and the "25 more remain" hint appears.
+
+FIX-15 [H] (opu-H32)  Durable Sign Out
+  Problem:
+    Today there is no sign-out path. Per product decision, the
+    intended behavior is DURABLE sign-out: after Sign Out, restarting
+    the app should land on ServiceSelectionScreen, not auto-restore
+    the previous identity.
+  Why durable not session:
+    App.checkIdentity() runs on every boot and routes any configured
+    identity into PROVISIONING or QMAIL automatically. A session-
+    only sign-out would be silently undone on restart — confusing
+    and a security surprise.
+  Files to change:
+    src\App.jsx (skip-auto-restore flag check in checkIdentity)
+    src\qmail\QMail.jsx (pass through a sign-out callback)
+    src\qmail\screens\QMailDashboard.jsx (pass to AccountPane)
+    src\qmail\screens\AccountPane.jsx (Sign Out button)
+  Approach:
+    1. Define a localStorage key "qmail.skipAutoRestore". When
+       present and truthy, App.checkIdentity() short-circuits before
+       calling getIdentity()/hasId() and stays on
+       ServiceSelectionScreen.
+    2. The key is cleared on:
+         - successful importCredentials() (user explicitly opted
+           back in via locker import), OR
+         - a future explicit "use this identity" action.
+       It is NOT cleared by simply restarting the app.
+    3. Thread an onSignOut callback through the prop chain:
+         App  →  QMail  →  QMailDashboard  →  AccountPane
+       onSignOut() performs a deep state reset (gem v2):
+         a. Set localStorage["qmail.skipAutoRestore"]="1".
+         b. Clear any non-skip-auto-restore qmail.* localStorage
+            keys (cached identity metadata, showAdvanced
+            preference, etc.) so the next user lands in a clean
+            state. Do NOT call localStorage.clear() — that would
+            blow away other apps' keys. Iterate localStorage and
+            remove only keys with the "qmail." prefix, EXCEPT the
+            skipAutoRestore flag itself.
+         c. Reset userAccount to null in QMailDashboard.
+         d. Clear emails, mailCounts, pendingMails, drafts, and
+            selectedEmail in QMailDashboard (so a brief flash of
+            stale data is not visible before App routes away).
+         e. Call setSelectedService(SERVICES.NONE) in App.
+       Order matters: do (a)-(d) before (e) so React doesn't paint
+       a half-cleared dashboard during the transition.
+    4. AccountPane: in the Security section, add a new "Sign Out"
+       row (LogOut icon). onClick: confirm modal (use the existing
+       modal infrastructure, not window.confirm), then onSignOut().
+    5. Multi-identity switching is a separate feature and is parked
+       until the backend supports changing the registered Mail
+       wallet.
+  Edge cases:
+    - User signs out, closes app, reopens: confirm ServiceSelection
+      screen renders, identity files on disk untouched.
+    - User signs out, then re-imports the same locker code: confirm
+      the skipAutoRestore flag clears and normal restore behavior
+      resumes from the next launch.
+    - localStorage is unavailable (rare in Electron, but possible):
+      gracefully degrade to session-only sign-out and surface a
+      warning in the confirm modal.
+  Verify:
+    1. Sign Out from Account. Confirm ServiceSelectionScreen shows.
+    2. Restart the app. Confirm it still shows ServiceSelectionScreen.
+    3. Re-import a valid locker code. Confirm normal flow resumes.
+    4. Restart again. Confirm auto-restore now works.
+    5. See FIX-15b for the re-entry path verification.
+
+FIX-15b [H] (third-pass feedback)  Re-entry for signed-out users with local identity
+  Problem this ticket fixes:
+    FIX-15 alone leaves a user stranded if they sign out and then
+    can't re-import — the locker code may have already been
+    consumed by the original import, and an empty locker returns
+    404 from importCredentials. Without a re-entry path, the user's
+    only options are wipe the wallet directory or paste a new
+    locker code they don't have.
+  Files to change:
+    src\screens\ServiceSelectionScreen.jsx
+    src\App.jsx (expose a "use local identity" action)
+  Approach:
+    1. ServiceSelectionScreen mounts. On mount, check:
+         localStorage["qmail.skipAutoRestore"] === "1"
+         AND hasId() returns has_id: true (or getIdentity returns
+         configured: true)
+       If both true, render a third action above the two existing
+       buttons:
+         "Use existing local identity"
+         (subtitle: "An identity is already set up on this device")
+    2. onClick:
+         - Clear localStorage["qmail.skipAutoRestore"]
+         - Call onSelectService('qmail', identity) where identity
+           is the normalized result of getIdentity()
+       Same code path as a fresh successful import; just skips the
+       locker-import step.
+    3. If hasId returns false, do NOT render the button. The user
+       genuinely needs to import a code (or buy one).
+    4. Visual placement: stack ABOVE "I Have a Locker Code" since
+       it's the most likely action for a returning post-sign-out
+       user. Use a distinct icon (LogIn from lucide-react).
+  Edge cases:
+    - hasId / getIdentity races with the initial render: show the
+      button only after the check resolves; don't flash it in
+      mid-load.
+    - User clicks it but the identity has actually been corrupted
+      since sign-out: surface the error via the same flow FIX-13-0B
+      uses (status-code-specific messages, Retry button).
+  Dependencies:
+    Requires FIX-15 to have shipped (skipAutoRestore flag) and
+    FIX-03 (normalizeIdentityForUi).
+  Verify:
+    1. Set up an identity, sign out, restart the app. Confirm the
+       new "Use existing local identity" button appears.
+    2. Click it. Confirm the app enters QMAIL with the real
+       identity (no John Doe).
+    3. Sign out again. Restart. Confirm the button is still there.
+    4. Wipe the wallet directory (simulate corruption). Restart.
+       Confirm the button is NOT shown (because hasId returned
+       false), and only the locker-import flow is offered.
+
+FIX-16  Moved forward to Phase 0A as FIX-16-0A. See above.
+
+FIX-17 [H] (opu-H40)  New-mail toast carries no sender preview
+  Files to change:
+    src\qmail\screens\QMailDashboard.jsx
+  Approach:
+    1. Drive the toast off the data we already have. The pending-
+       notification poller already runs every 10s and tracks new
+       items. When a new notification arrives, build the toast from
+       the notification's sender_address and timestamp — not from
+       the inbox list, which won't yet have the row (the mail is
+       still encrypted/pending).
+    2. Only fall back to getMailList('inbox', 1, 0, 'newest') when
+       mailCounts.inbox grows but no corresponding pending
+       notification is in flight (rare — implies an already-
+       decrypted arrival via a different code path).
+    3. Make the toast clickable: on click, switch to inbox and
+       select the matching pending row.
+    4. Keep the "N new emails" summary form when growth > 1.
+  Why this matters (gpt-13):
+    Pending mail is not in the inbox DB list yet, so v1's "fetch
+    latest 1 inbox row" would miss the actual new item. Using
+    notification data first matches the GUI's actual data flow.
+  Verify:
+    Receive a single new (pending) message. Confirm the toast reads
+    "New mail from <sender>" within the next 10s poll and is
+    clickable. Confirm clicking it focuses the matching pending row.
+
+Phase 2 — Medium: ship in the iteration after that
+==================================================
+Pure UX polish; nothing here breaks a journey, but each one nudges
+the app closer to "feels like a real email program."
+
+FIX-18 [M] (gpt-6)  Reconcile Starred: flag OR folder, not both
+  Approach:
+    The preferred model — "Starred as virtual view backed by
+    is_starred" — REQUIRES backend support. /db/messages/list must
+    accept a starred=true filter (or expose a dedicated starred-list
+    endpoint). The GUI cannot implement this correctly with local
+    filtering, because pagination would silently drop starred
+    messages on later pages.
+  Dependencies:
+    Backend ticket CORE-J: add starred=true filter to
+    /api/qmail/db/messages/list. Full contract spec and the
+    GUI-side patch ready to land are in
+    docs\opu.fix18.core-j.ticket.txt. Diagnostic background:
+    /qmail/star sets the is_starred column; /qmail/move sets the
+    folder column to 4. They are independent. No current SQL or
+    HTTP path expresses "is_starred=1 across all folders," which
+    is what Starred actually needs to mean.
+  Plan:
+    (Until CORE-J — landed in this batch)
+    Remove "Move to Starred" from the ReadingPane move dropdown so
+    users don't get the impression that Star and Move-to-Starred are
+    separate features. The star icon stays as the canonical action.
+    Do NOT add the Starred nav entry yet — the backend still ships
+    `starred` in /folders/list, but the GUI currently maps it to
+    folder=4 which would show whatever's been Moved there (likely
+    nothing useful).
+    (After CORE-J)
+    Wire the Starred nav entry to a /db/messages/list?starred=true
+    call. Row badges in the Starred view show the row's actual
+    folder. See the GUI-side patch in opu.fix18.core-j.ticket.txt.
+
+FIX-19 [M] (gpt-11 / gem-recommendation-2)  Attachment safety
+  Approach:
+    1. getEmailAttachments() in qmailApiServices.js: map the
+       dangerous and warning fields through (they're dropped today).
+    2. ReadingPane.jsx: if dangerous === true, render a
+       visually-distinct warning chip next to the filename using
+       the ShieldAlert icon (lucide-react, already used elsewhere
+       in the project for warnings). Yellow/red treatment. If a
+       warning string exists, show it as a tooltip.
+    3. QMailDashboard.handleDownloadAttachment: pass attachmentName
+       through to downloadMailAttachment as the third argument
+       (helper already accepts it as defaultFilename). The current
+       call drops the name, so dangerous-extension files save as
+       "downloaded_file" with no clue about their real type — the
+       worst possible failure mode.
+    4. Confirm modal before downloading a "dangerous" attachment.
+       Use the existing modal infrastructure, not window.confirm.
+       Modal text: "This file is flagged as potentially dangerous.
+       Save anyway?"
+  Verify:
+    Mock an attachments-list response with dangerous=true and a
+    warning string. Confirm:
+    - ShieldAlert chip renders next to the filename
+    - tooltip shows the warning text on hover
+    - clicking download opens the confirm modal
+    - confirming saves the file with its real name, not
+      "downloaded_file"
+
+FIX-20 [M] (gem-v2 / gpt-10)  Unified Refresh action
+  PRODUCT DECISION (gem v2 + opu): one "Refresh" button does the
+  whole stack. Non-technical users don't care about the difference
+  between "RAIDA echo" and "beacon ping" — they want a button that
+  says "go get my mail." Keep the underlying helpers separate at
+  the API layer so a future debug surface can split them again.
+  This SUPERSEDES the earlier gpt-v1 recommendation to split.
+
+  Approach:
+    1. Rename the current "Check Connection" button to "Refresh."
+       Existing RefreshCw icon stays.
+    2. handleRefresh in QMailDashboard runs in order:
+         a. checkMailNow()       // POST /api/qmail/net/beacon/ping
+                                 // (new helper — see below)
+         b. echoRaida()          // GET  /api/raida/echo (existing,
+                                 //   already called by NavigationPane)
+         c. getMailNotifications() // GET  /api/qmail/db/notifications/list
+         d. loadMailCounts()
+         e. loadEmails(currentFolder)
+       Each step in its own try/catch — one failure should not block
+       the next step (e.g. a failing beacon ping should still let
+       counts refresh).
+    3. Add a checkMailNow() helper in qmailApiServices.js that
+       calls POST /api/qmail/net/beacon/ping. Distinct from the
+       existing pingQMail() (which calls /beacon/peek, read-only).
+       Naming convention:
+         - checkMailNow()  → POST /beacon/ping  (active)
+         - peekBeacon()    → GET  /beacon/peek  (read-only)
+       Rename pingQMail() to peekBeacon() for clarity. The old name
+       conflates the two semantics.
+    4. Visual feedback: spin the RefreshCw icon throughout the full
+       chain so the user sees ONE operation, not five.
+
+FIX-21 [M] (opu-M11)  Pending-mail click semantics
+  Approach:
+    Pick one: auto-download on click (remove the manual button) OR
+    manual button only (don't auto-fire). My recommendation is the
+    manual model — it respects cost-per-decrypt awareness. Smaller
+    diff than the alternative.
+
+FIX-22 [M] (opu-M16 / gpt-12)  Compose send-gating UX
+  IMPORTANT: This ticket MUST ship in the same patch as FIX-31
+  (remove getParityServer). ComposeModal.checkNetworkStatus()
+  currently calls getParityServer(), so removing the helper without
+  fixing the gating logic would leave a broken import.
+  Approach:
+    1. Initialize canSend = null (meaning "checking…"); Send button
+       label = "Checking network…", disabled.
+    2. checkNetworkStatus result sets canSend true / false. Drop the
+       getParityServer() call entirely; only the RAIDA-availability
+       check (>= 6 reachable) remains. See FIX-31.
+    3. On false, add a Retry button that re-runs checkNetworkStatus.
+    4. Soften the gate: warning banner instead of disabled Send;
+       user can override with a "Send anyway" affordance. The
+       backend remains the final authority.
+  Verify:
+    Block /raida/echo at the network layer. Confirm Send shows
+    "Checking network…" then becomes a warning-with-Retry. Restore
+    network and Retry; confirm normal behavior returns.
+
+FIX-23 [M] (opu-M17 / supersedes the partial coverage in FIX-04)
+  Delete the source draft on successful send-from-draft
+  BLOCKED on a backend deleteDraft contract (CORE-H). The full
+  contract spec, diagnostic walk, GUI-side patches (both the
+  delete-on-send path in ComposeModal AND the Drafts-list trash
+  icon path in QMailDashboard), and rejected alternatives are
+  in docs\opu.fix23.core-h.ticket.txt.
+  Diagnostic background:
+    rest_core registers /qmail/db/drafts/{list,create,update} but
+    NO delete route (api_handlers.c:130-132). The underlying SQL
+    primitive qmail_db_email_delete (qmail_db.c:756-784) is
+    already generic by email_id and ready to use; only the route
+    handler is missing. The other delete route,
+    /qmail/db/messages/delete, is hard-gated on is_trashed=1
+    (qmail_db.c:1572-1575) so it can never reach drafts.
+  Current GUI state (both flows broken):
+    (a) Send-from-draft: ComposeModal tracks currentDraftId
+        through autosave/manual save but the success branch at
+        ComposeModal.jsx:986-999 has NO deleteDraft call. Drafts
+        leak indefinitely.
+    (b) Drafts-list trash icon: QMailDashboard.handleDeleteEmail
+        unconditionally calls deleteEmail() →
+        /qmail/db/messages/trash, which sets is_trashed=1 but
+        leaves folder=2. The row drops out of both views but
+        the data is not actually deleted.
+  Plan:
+    (Until CORE-H — this batch ships NOTHING)
+    There is no useful interim GUI cleanup. The current send-
+    from-draft leak is non-destructive (just clutter). The
+    Drafts trash icon "works" from the user's perspective —
+    the row disappears — even though backend state is wrong.
+    Both flows need CORE-H to be correct.
+    (After CORE-H)
+    Land both GUI patches together. ~90 LOC across a new
+    deleteDraft helper + ComposeModal success branch +
+    QMailDashboard.handleDeleteEmail draft branch. Full patch
+    in docs\opu.fix23.core-h.ticket.txt.
+  Verify:
+    Save a draft. Reopen and edit it. Send. Switch to Drafts.
+    Confirm the source draft is gone (not just emptied). Also
+    verify the Drafts list trash icon hard-deletes the row,
+    not just hides it.
+
+FIX-24 [M] (opu-M8 + M9)  Add Mark Unread and Archive buttons to ReadingPane
+  Approach:
+    Two small buttons in the reading-pane action row. Mark Unread
+    calls handleMarkAsRead(id, false). Archive calls
+    handleMoveEmail(id, 'archive'). Both already implemented as
+    handlers — this is pure UI surface.
+
+FIX-25 [M] (opu-M12 / gem-v2-section-6)  Search scope and result-cap honesty
+  Status: scope-text + cap-notice SHIPPED in Phase 2 Batch 13.
+  True pagination + BUG-46 fix WAIT on CORE-K. Full contract +
+  GUI-side patch in docs\opu.fix25-bug46.core-k.ticket.txt.
+  Approach:
+    1. Search scope. Two options:
+       (a) Make search folder-scoped: if currentFolder is set, prefix
+           the search query with folder filter (requires backend
+           support; check /db/messages/search).
+       (b) Change the placeholder to "Search all mail..." so the
+           user knows.
+       Option (b) is cheaper; option (a) is more correct. Ship (b)
+       until backend support arrives.
+    2. Result cap (gem v2). searchEmails() currently hard-codes
+       limit=50. When result.length === 50 (i.e. the cap was hit),
+       render a small notice above the results:
+         "Showing top 50 results. Refine your search to see more."
+       Without this, a user searching for an old message will see
+       50 hits, none of them the target, and conclude the message
+       is gone.
+       KNOWN ISSUE: the exact-50 heuristic false-positives when
+       there are EXACTLY 50 actual matches (BUG-46 in cla.bugs.txt).
+       Resolved by CORE-K's has_more field — see the ticket file.
+    3. After CORE-K lands: replace the heuristic with the backend's
+       authoritative has_more bool, swap the cap-notice copy to
+       "More results available", and wire the existing Previous/
+       Next widget to search pagination. ~50 LOC GUI patch in the
+       ticket file.
+  Verify:
+    1. Search a folder with < 50 matches. Confirm no notice.
+    2. Search a folder with > 50 matches. Confirm the notice
+       appears and explains the cap.
+
+FIX-26 [M] (opu-M18)  Send-progress wording
+  Status: OPTIONAL per the original plan; full contract +
+  GUI-side patch in docs\opu.fix26.core-e.ticket.txt.
+  Diagnostic background:
+    The backend already calls task_update_progress at 11+ sites
+    in qmail_upload_orchestrator.c with reasonable human copy
+    ("Validated 3 file(s) for upload", "Uploading file 1/3
+    (45821 bytes, 25 servers)", "Building Tell notification for
+    1 beacon(s)", etc.). The GUI displays those verbatim in
+    ComposeModal at line 984 / 1066. So the user already sees
+    real stage transitions — they're just verbose printf strings
+    instead of friendly per-stage labels.
+    CORE-E adds one structured `data.stage` enum string written
+    via the existing task_set_data_string helper (already in
+    task_manager.h:117-125, waiting to be used). No new
+    infrastructure; no schema change.
+  Approach:
+    (Until CORE-E — this batch ships NOTHING)
+    The current "raw message in the spinner" behavior works.
+    Interim cleanup adds no value without the stage enum.
+    (After CORE-E)
+    Map the six stage values (validate / prepare / upload /
+    resolve / notify / complete) to friendly labels + subtext
+    + per-stage icons. Add "Failed during <stage>" context to
+    error messages. Full patch shape in the ticket file.
+
+FIX-27 [M] (opu-M19)  Disable Compose buttons through the 1500ms post-success window
+  Approach:
+    Keep Send and Save Draft disabled until the modal actually closes
+    (after the 1500ms celebration window). Single state guard.
+
+FIX-28 [M] (opu-M24)  Replace window.confirm in ContactsPane delete
+  Approach:
+    Use the existing modal infrastructure. Bonus: add an undo toast
+    after the delete completes, calling addContact back with the
+    just-removed data.
+
+FIX-29 [M] (opu-M25)  Allow saving DRD popular contacts to local
+  Approach:
+    Render an "Add to My Contacts" button on DRD entries (currently
+    only the user-source rows get a trash button). onClick calls
+    addContact() with the DRD entry's fullName + autoAddress
+    pre-filled. Depends on FIX-09 schema work.
+
+FIX-30 [M] (opu-M29 + L47)  Remove "John Doe" placeholder identity
+  Approach:
+    Already touched in FIX-03. Initialize userAccount to null and
+    have AccountPane render a "Loading…" placeholder until the real
+    identity loads.
+
+FIX-31 [M] (opu-M36)  Remove the Parity Server Configuration section
+  SHIPS WITH FIX-22 (same patch). Removing getParityServer() leaves
+  ComposeModal.checkNetworkStatus() broken until FIX-22 lands.
+  Approach:
+    1. Delete the entire Parity Server section from AccountPane.jsx
+       (the section that renders Configuration Status, Server ID,
+       Server Address, Availability, Message rows).
+    2. Delete getParityServer() from qmailApiServices.js.
+    3. Remove the getParityServer import from AccountPane and
+       ComposeModal.
+    4. Remove the parity-related state and refresh handlers in
+       AccountPane (parityServer, parityLoading, loadParityServer).
+    5. ComposeModal.checkNetworkStatus(): coordinated with FIX-22,
+       drop the Promise.all entry for getParityServer; only
+       getServers() remains.
+  Verify:
+    Open Account. Confirm no Parity Server section. Open Compose
+    and confirm network preflight still works (FIX-22 verification
+    covers this).
+
+FIX-32 [M] (opu-M38)  AccountPane Server Details: drop the slice(0,10)
+  Approach:
+    Either show all servers or drop the section entirely (dot-grid
+    in NavigationPane is the source of truth). If kept, drive off
+    /raida/echo for the 25-RAIDA view.
+
+FIX-33 [M] (opu-M43 + M44 / gem-v2-section-1)  Send-failure UX + poll resiliency
+  Approach:
+    1. Cap the send-poll loop at 60 seconds (wall-clock deadline,
+       not iteration count). On timeout, mark sendingStatus="failed"
+       with text "Send is taking longer than expected. Check Sent
+       in a few minutes."
+    2. Per-call try/catch (gem v2): wrap each
+       await getTaskStatus(currentTaskId) call individually in
+       try/catch. On exception, do NOT immediately fail the send —
+       the backend may be transiently 5xx-ing while the task is
+       still in flight. Use a small retry counter (e.g. 3
+       consecutive failures) before declaring the poll
+       unrecoverable. The 60s wall-clock deadline still applies.
+    3. On final failure (timeout OR retry-counter exhausted): push
+       the error to the dashboard-level notification system so it
+       persists if the user closes the modal. Don't rely on the
+       in-modal error state alone.
+    4. The existing cancelledRef.current guard must still break the
+       loop on modal close — verify after the try/catch refactor.
+  Verify:
+    1. Normal send completes within ~10s; UI shows success normally.
+    2. Simulate getTaskStatus failing intermittently (every other
+       call). Confirm the send still completes successfully because
+       the retry counter absorbs the transients.
+    3. Simulate getTaskStatus failing persistently. Confirm the
+       user gets a clear failure message after ~3 retries (or 60s,
+       whichever comes first) and that closing the modal still
+       leaves the failure visible in the dashboard notification.
+
+FIX-34 [M] (opu-M45)  Unify the three notification systems
+  Approach:
+    Migrate QMailDashboard's setNotification and AccountPane's
+    showNotification to the NotificationProvider already wrapping
+    App.jsx. One visual style, one timeout policy, one priority queue.
+
+Phase 3 — Low: backlog
+======================
+None of these block real users but they're nice cleanups and most
+take an hour.
+
+FIX-35  Moved forward to Phase 0B as FIX-35-0B.
+
+FIX-36  Moved forward to Phase 0B as FIX-36-0B (combined with FIX-37).
+
+FIX-37  Moved forward to Phase 0B as FIX-37-0B (combined with FIX-36).
+
+FIX-38 [L] (opu-L13)  Move setCurrentPage(0) before the API call in
+  handleSortChange so the pagination widget doesn't briefly show a
+  stale "Page N of M."
+
+FIX-39 [L] (opu-L20)  Compose autosave: debounced save every ~5s
+  while typing.
+
+FIX-40 [L] (opu-L21)  Persist showAdvanced state across modal opens
+  via localStorage.
+
+FIX-41 [L] (opu-L22)  Contact autocomplete on Cc and Bcc fields,
+  not just To.
+
+FIX-42 [L] (opu-L26)  Add SN ↔ email lookup helper in Contacts.
+  Note: if CORE-C (reverse SN lookup) is delayed, gem suggests
+  promoting this to High and shipping it as a temporary workaround
+  for FIX-09. Reasonable.
+
+FIX-43 [L] (opu-M28)  Treat folderIcons as a default-with-override map
+  so new backend folders render with a sensible icon.
+
+FIX-44 [L] (opu-L30)  EmailListPane pagination should consume page-
+  size as a prop instead of hard-coding 50.
+
+FIX-45 [L] (opu-L39)  Rename network-status balance-card classes
+  ("online"/"offline"/"unknown") so they don't reuse wallet-coin
+  semantics.
+
+FIX-46 [L] (opu-L46)  Use italicised "(no message body)" placeholder
+  for empty mail in the list.
+
+FIX-47 [L] (opu-M41 + M42)  Either delete the dead pingQMail import
+  (clean) or wire checkForNewMail back in. Optionally show a "last
+  checked Xs ago" indicator near the RAIDA dots. Note: gem suggests
+  making the 10s/60s poll intervals user-configurable in a future
+  "General Settings" tab; reasonable for a later iteration but not
+  required by this ticket.
+
+Dependency graph (the non-obvious chains)
+=========================================
+Phase 0A unlocks Phase 0B unlocks Phase 1.
+
+  FIX-03 (identity propagation) is load-bearing for:
+    FIX-05.5 (composeContext needs ownIdentity)
+    FIX-07 (Reply All needs ownIdentity for own-address filtering)
+    FIX-10 (Identity-health banner reads from normalized identity)
+    FIX-15 (Sign-Out flow uses the identity prop chain)
+    FIX-15b (re-entry button reads normalized identity)
+    FIX-30 (John Doe removal — same patch as FIX-03 in practice)
+
+  FIX-04 (draft hydration) is load-bearing for:
+    FIX-05.5 (composeContext needs the hydrated draft shape)
+    FIX-23 (deleting a draft requires knowing which draft you sent)
+
+  FIX-05.5 (composeContext refactor) is load-bearing for:
+    FIX-06 (Forward uses mode="forward")
+    FIX-07 (Reply All uses mode="replyAll")
+    Lands AFTER FIX-04 (draft hydration model must be settled).
+
+  FIX-15 (durable sign-out) + FIX-15b (re-entry) SHIP TOGETHER.
+    Without FIX-15b a user can be stranded — see FIX-15b ticket.
+
+  FIX-09 (contacts schema) is load-bearing for:
+    FIX-29 (save DRD entry to local — uses the same add path)
+    FIX-41 (CC/BCC autocomplete — uses the same contact data shape)
+
+  FIX-22 + FIX-31 SHIP IN THE SAME PATCH.
+    Removing getParityServer leaves ComposeModal.checkNetworkStatus
+    broken otherwise. Don't split.
+
+  FIX-02 (attachments) is independent in code but touches
+    ComposeModal. If FIX-02 lands in 0B before FIX-05.5 in Phase 1
+    (the planned order), FIX-05.5's regression checklist MUST
+    include "attachment send still works" — which it does.
+
+  Backend-blocked tickets (can ship UI scaffolding but not full
+  behavior until backend lands):
+    FIX-08 ↔ CORE-A (Sent persistence)
+    FIX-09 ↔ CORE-C (reverse SN lookup, optional)
+    FIX-10 ↔ CORE-F (non-mutating identity-health endpoint) HARD
+    FIX-12 ↔ CORE-B (new-identity creation, optional/parked)
+    FIX-14 ↔ CORE-G (batch empty-trash, optional)
+    FIX-18 ↔ CORE-J (starred filter on /db/messages/list) HARD
+    FIX-23 ↔ CORE-H (deleteDraft endpoint) HARD
+    FIX-26 ↔ CORE-E (upload_and_tell stage messages, optional)
+
+  Parked entirely (product/privacy questions, not implementation):
+    FIX-11 — subject_hint privacy semantics.
+
+Backend tickets implied by this plan
+====================================
+For a rest_core maintainer to triage separately. Hard prerequisites
+are flagged HARD (GUI work cannot proceed without them).
+
+  CORE-A: Sent-folder persistence (or sent-from-receipts adapter)
+          — needed by FIX-08.
+  CORE-B: Restore or document mailbox-creation route — needed by
+          FIX-12. Product question first, ticket second.
+  CORE-C: Reverse SN lookup endpoint (email → SN) — needed by
+          FIX-09 to accept email-format input. Optional: FIX-09
+          can ship in SN-only mode without this.
+  CORE-D: REMOVED — subject_hint is a privacy/product question
+          that needs a separate decision before any code change.
+  CORE-E: OPTIONAL for FIX-26. Add a `data.stage` enum string
+          to upload_and_tell task progress records. Six values:
+          validate / prepare / upload / resolve / notify /
+          complete. Uses the existing task_set_data_string helper
+          (task_manager.h:117-125) which is already defined and
+          ready to use — the doc example explicitly cites "phase"
+          as a key. Backend work is genuinely tiny: extend the
+          static upload_progress helper in
+          qmail_upload_orchestrator.c to accept a stage arg, then
+          pass the matching enum at each of the 9 call sites.
+          ~15 LOC net. Full contract, backend pseudocode,
+          GUI-side patch, and rejected alternatives in
+          docs\opu.fix26.core-e.ticket.txt.
+  CORE-F: HARD. Non-mutating identity-health source — either a
+          health field on /api/qmail/local/identity/get or a new
+          GET /api/qmail/raida/identity/check. Calling the existing
+          /identity/heal as a "dry run" is NOT acceptable; it's
+          mutating by name.
+  CORE-G: Batch /db/messages/empty endpoint — supports FIX-14. GUI
+          can ship the page-at-a-time fallback first.
+  CORE-H: HARD for FIX-23. Draft-delete endpoint — POST
+          /api/qmail/db/drafts/delete?email_id={hex}. New route
+          handler that verifies row.folder == 2 then delegates
+          to the existing qmail_db_email_delete (already generic
+          by email_id). Backend implementation is small — mirrors
+          the shape of api_handle_qmail_delete_permanent but
+          checks folder=2 instead of is_trashed=1. Full contract,
+          backend pseudocode, GUI-side patches, and rejected
+          alternatives in docs\opu.fix23.core-h.ticket.txt.
+          Both GUI consumers (send-from-draft cleanup AND
+          Drafts-list trash icon) wait on this single ticket.
+  CORE-I: Possible. Filesystem-staging endpoint for attachments if
+          the packaged Electron build cannot pass host paths to the
+          backend process directly. Unblocks the cross-process case
+          for FIX-02. Check whether this is needed before opening.
+  CORE-J: HARD for FIX-18. starred=true filter on
+          /api/qmail/db/messages/list. Cross-folder; runs
+          WHERE is_starred = 1 AND is_trashed = 0 (and optionally
+          AND folder = ?). Full contract, diagnostic walk, GUI-side
+          patch, and rejected alternatives in
+          docs\opu.fix18.core-j.ticket.txt. Backend implementation
+          is small — one SQL predicate change in
+          qmail_db_email_list_sorted + one param parse in
+          api_handle_qmail_inbox + a tweak to the folder-range
+          validation when starred=true.
+  CORE-K: LOW for FIX-25 / BUG-46. Add offset param + has_more
+          bool to /api/qmail/db/messages/search. Internally request
+          limit+1 rows; if the extra came back, set has_more=true
+          and drop it. Standard cursor trick — no second COUNT
+          query, no FTS rank cursor, no schema change. Resolves
+          BUG-46 (exact-50 false positive) using the authoritative
+          has_more signal AND unlocks real Previous/Next pagination
+          for search. Backend implementation: ~25 LOC across
+          qmail_db_email_search (LIMIT? OFFSET? + peek-ahead loop)
+          and api_handle_qmail_search (parse offset, emit two new
+          fields). Full contract, backend pseudocode, GUI-side
+          patch (~50 LOC across searchEmails, QMailDashboard
+          search state, EmailListPane cap notice copy), and
+          rejected alternatives (exact totalCount, FTS rank
+          cursors) in docs\opu.fix25-bug46.core-k.ticket.txt.
+  CORE-L: Draft recipients in /db/messages/get. The endpoint
+          returns subject + body but not to/cc/bcc/subsubject for
+          draft folder rows. Until this ships, FIX-04 hydrates body
+          only; recipient editing on existing drafts is preserved
+          by the gpt-batch3 "touchedFields" guard but the recipient
+          fields display blank until the user types into them.
+          Surfacing those fields server-side closes the last gap.
+  CORE-M: HARD for clean FIX-02. Stop serializing attachment paths
+          as a comma/semicolon-joined string in upload_and_tell
+          (api_handlers_qmail_messages_send.c:1556-1574 and
+          qmail_upload_orchestrator.c:357-374). Keep attachments as
+          an array end-to-end. Today the GUI rejects paths
+          containing ',' or ';' at staging time AND caps the total
+          combined-path-length so the backend's fixed buffer can't
+          silently truncate, but those guards exist only because
+          the backend can't safely accept those inputs.
+  CORE-N: Draft attachment persistence. Today the GUI shows a
+          warning when attachments are staged on a draft because
+          they're not saved with the draft (gpt-batch5 #3). Adding
+          attachment metadata columns to the drafts table (and to
+          /db/drafts/list and /db/drafts/update) closes the gap.
+          GUI changes once this lands: re-stage attachments on
+          draft open, include them in the saveDraft/updateDraft
+          payloads.
+
+Manual-verification checklist
+=============================
+After Phase 0A lands, walk these end-to-end:
+
+  1. Cold start with no identity. Import a valid locker code.
+     Confirm WalletSetupScreen shows the real address (FIX-03).
+  2. Land on dashboard. Open Account > Profile. Confirm real
+     serial number, no "John Doe" (FIX-03 / FIX-30).
+  3. Restart the app with an existing identity. Confirm it boots
+     straight into the dashboard without flashing WalletSetupScreen
+     (FIX-03 returning-user regression check).
+  4. Receive an encrypted message. Click it. Confirm reading pane
+     shows the real body, not "Encrypted Message" placeholder
+     (FIX-01).
+  5. Save a draft with body + To + Cc. Reopen from Drafts.
+     Confirm fields repopulate, AND that saving the reopened draft
+     updates the same row (does not create a duplicate). (FIX-04)
+  6. Open Account. Confirm:
+       - No green "Service Status: healthy" panel that contradicts
+         the dot grid (FIX-05).
+       - Change Password / 2FA / Backup Wallet show "Coming Soon"
+         badges, render with default cursor on hover, do nothing
+         when clicked, and are skipped by Tab navigation
+         (FIX-16-0A — truly disabled, not no-op).
+       - Delete Account is not visible.
+
+After Phase 0B lands, add:
+
+  7. Open Compose. Click Attach. Pick a file with a space in its
+     filename. Open the picker again, reselect the same file, and
+     confirm it doesn't appear twice in the staged list (FIX-02
+     de-dupe). Cancel the picker once and confirm nothing changes.
+     Send. Confirm the recipient sees the attachment.
+  8. Build the packaged Electron binary with a real packaging
+     script (npm run electron-pack OR npm run build-portable OR
+     npm run dist — see ship gate for 0B), launch the binary, and
+     repeat step 7 in the packaged context.
+  9. Try to import a bogus locker code, then a backend-down
+     scenario. Confirm distinct error messages and that Retry works
+     (FIX-13-0B).
+
+After FIX-15 + FIX-15b land (Phase 1):
+
+  10. Sign Out from Account. Confirm ServiceSelectionScreen shows.
+      Confirm the dashboard state was fully cleared (no flash of
+      previous emails on the way out) (FIX-15 deep-reset).
+  11. Restart the app. Confirm it STILL shows ServiceSelectionScreen
+      (skipAutoRestore persisted) AND that a "Use existing local
+      identity" button now appears above the locker-code option
+      (FIX-15b).
+  12. Click "Use existing local identity." Confirm the app enters
+      QMAIL with the real identity (no John Doe, no locker re-import
+      needed).
+  13. Sign out again. Wipe the wallet directory. Restart. Confirm
+      the "Use existing local identity" button is GONE (because
+      hasId returned false) (FIX-15b edge case).
+
+Thirteen steps, covering all Phase-0 fixes plus the sign-out
+re-entry path. If any of them fail, the relevant phase isn't done.
+
+End of file.

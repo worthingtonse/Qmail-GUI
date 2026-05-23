@@ -1,0 +1,239 @@
+Batch 12 Review (FIX-20 + FIX-33 + FIX-34)
+==========================================
+Reviewer: Claude Opus 4.7 (Phase 2)
+Implementer: GPT (gpt.usability.batch12.summary.txt)
+Date: 2026-05-22
+
+Reviewed Files
+--------------
+- src/api/qmailApiServices.js
+- src/components/common/notifications/NotificationContext.jsx
+- src/components/common/notifications/NotificationContainer.jsx
+- src/components/common/notifications/NotificationContainer.css
+- src/qmail/screens/AccountPane.jsx
+- src/qmail/screens/AccountPane.css
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/NavigationPane.jsx
+- src/qmail/screens/QMailDashboard.jsx
+- src/qmail/screens/QMailDashboard.css
+- docs/gpt.usability.batch12.summary.txt
+
+Verdict
+-------
+APPROVED — no code fixes required in the Batch 12 surface area.
+
+Three LOW-severity out-of-scope observations recorded as BUG-41,
+BUG-42, BUG-43 in docs\cla.bugs.txt. All are minor noise or
+hygiene items; none are correctness bugs.
+
+Spec Verification Checklist
+---------------------------
+FIX-20 (Unified Refresh)
+  [x] NavigationPane label is "Refresh" (NavigationPane.jsx:175);
+      spinner state from isRefreshing.
+  [x] Single onClick path → onRefresh prop wired to
+      QMailDashboard.handleRefresh (QMailDashboard.jsx:1544).
+  [x] handleRefresh runs the exact spec chain in order
+      (QMailDashboard.jsx:687-752):
+        a. checkMailNow()            line 704
+        b. echoRaida()               line 712
+        c. getMailNotifications()    line 719
+        d. loadMailCounts()          line 728
+        e. loadEmails(currentFolder) line 736
+  [x] Each step isolated in its own try/catch via runRefreshStep
+      (line 692-700). One failure does NOT block the next.
+  [x] hadFailure flag aggregates per-step failures; final toast is
+      warning if any step failed, success if all clean.
+  [x] isRefreshing cleared in a finally block (line 749-751).
+  [x] checkMailNow() helper added (qmailApiServices.js:465-...)
+      → POST /api/qmail/net/beacon/ping.
+  [x] peekBeacon() rename done (qmailApiServices.js:412); pingQMail
+      kept as alias on line 459 (compatibility — see BUG-42 below).
+  [x] RAIDA echo snapshot pushed to NavigationPane via
+      setRaidaEchoSnapshot (line 714) so the dot grid updates from
+      Refresh.
+
+FIX-33 (Send failure + polling resiliency)
+  [x] SEND_POLL_TIMEOUT_MS = 60000 constant (ComposeModal.jsx:25).
+  [x] MAX_SEND_POLL_FAILURES = 3 constant (line 26).
+  [x] Wall-clock deadline: `const deadline = Date.now() +
+      SEND_POLL_TIMEOUT_MS;` (line 783); loop condition includes
+      `Date.now() < deadline` (line 790).
+  [x] Per-call try/catch wrapping `await getTaskStatus` (line
+      797-804). Exception coerced into a `{success: false, error}`
+      shape so the existing branch handles it uniformly.
+  [x] Transient failure counter `consecutivePollFailures` reset on
+      every success (line 807); incremented on every failure (line
+      832). After MAX_SEND_POLL_FAILURES (3) consecutive failures,
+      taskFinished = true and markSendFailed called (line 837-840).
+  [x] User-visible retry-counter feedback: "Still sending...
+      retrying status check (1/3)" etc. (line 834).
+  [x] Timeout message matches the spec text EXACTLY: "Send is
+      taking longer than expected. Check Sent in a few minutes."
+      (line 846).
+  [x] markSendFailed (line 743-753) consolidates state writes AND
+      fires onSendFailure(failureMessage) → bubbled to the
+      dashboard NotificationProvider as an error toast (per spec:
+      "push the error to the dashboard-level notification system
+      so it persists if the user closes the modal").
+  [x] cancelledRef.current contract preserved (line 789, 794, 820,
+      844, 854). Modal close → cleanup sets cancelledRef.current =
+      true → loop exits without firing onSendFailure (correct
+      behavior: cancellation isn't a failure).
+  [x] Batch 11 sendControlsLocked guard still intact for the
+      success window; failure branch correctly re-enables both
+      buttons via setIsSending(false) inside markSendFailed.
+
+FIX-34 (Notification unification)
+  [x] NotificationProvider already wraps App.jsx (App.jsx:251);
+      Batch 12 wires consumers, doesn't re-mount the provider.
+  [x] QMailDashboard imports useNotification at line 39, destructures
+      `{ addNotification, clearAllNotifications }` at line 97.
+  [x] showDashboardNotification() shim (line 179-207) accepts both
+      string and object payloads, preserves clickable-toast
+      metadata (targetPendingGuid, targetEmailId, timestamp).
+  [x] FIX-17 CLICKABLE PAYLOAD PRESERVATION VERIFIED:
+        - targetPendingGuid → focusPendingMail (line 200)
+        - targetEmailId    → focusInboxEmail (line 203)
+        - onClick fires removeNotification(id) after dispatch
+          (NotificationContainer.jsx:47) — matches the old
+          dismiss-on-click semantics.
+        - keyboard activation: Enter / Space (NotificationContainer
+          line 67-74).
+  [x] AccountPane migrated to NotificationProvider (line 26 import,
+      line 93 destructure of showSuccess/showError/showInfo). Local
+      showNotification() shim (line 119) preserved as a compat
+      wrapper so existing call sites at lines 226/231/234 work
+      unchanged.
+  [x] AccountPane local notification-banner JSX + state removed
+      (grep "notification-banner" returns zero matches in src).
+  [x] QMailDashboard local notification-popup JSX + state removed
+      (grep "notification-popup" returns zero matches in src).
+  [x] NotificationContext.addNotification accepts third arg as
+      either a number (legacy duration) OR an options object (new
+      pattern, used by showDashboardNotification). Backward
+      compatible.
+  [x] Options spread happens BEFORE the generated id/message/type
+      fields are assigned (NotificationContext.jsx:29-36), so
+      callers can't override the internal fields by accident.
+  [x] showError defaults to 8000ms (vs 5000ms for the others) —
+      legitimate, errors deserve longer dwell.
+  [x] clearAllNotifications wired into the sign-out reset
+      (QMailDashboard.jsx:1011) — toasts don't survive sign-out.
+  [x] onSendFailure wired from ComposeModal up to
+      showDashboardNotification (QMailDashboard.jsx:1526).
+
+Build / Lint Status
+-------------------
+PASS: npm run build (1754 modules, ~2.2s)
+       dist/index-8f029d73.js 388 KB (~+1 KB vs Batch 11).
+PASS: ./node_modules/.bin/eslint
+       src/api/qmailApiServices.js
+       src/components/common/notifications/NotificationContext.jsx
+       src/components/common/notifications/NotificationContainer.jsx
+       src/qmail/screens/AccountPane.jsx
+       src/qmail/screens/ComposeModal.jsx
+       src/qmail/screens/QMailDashboard.jsx
+       src/qmail/screens/NavigationPane.jsx
+       --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+
+Grep cross-checks (clean):
+  - notification-banner: zero matches in src\
+  - notification-popup:  zero matches in src\
+  - setNotificationType: zero matches in src\
+  - NotificationProvider/Container: mounted only in App.jsx (251,
+    313), exported from notifications/{index,Context,Container}.jsx.
+  - clearAllNotifications: used once (sign-out reset).
+  - cancelledRef contract: 5 references in ComposeModal handleSend,
+    all on the right side of break/return guards.
+
+Reviewer-Focus Answers
+----------------------
+(From gpt.usability.batch12.summary.txt "Reviewer Focus" block.)
+
+1. showDashboardNotification() as a compat layer that preserves
+   FIX-17 clickable-toast payloads: AGREE. The shim contains the
+   payload-shape translation (object | string → addNotification
+   args + onClick closure) so call sites don't need to know about
+   the new options-object API. Good encapsulation.
+
+2. Keeping pingQMail as an alias to peekBeacon: DISAGREE in
+   principle (logged as BUG-42, LOW). Grep shows zero callers in
+   src\, and project conventions discourage backwards-compat
+   shims. Worth verifying that no out-of-tree consumer exists,
+   then deleting in a follow-up. Not blocking Batch 12.
+
+Out-of-Scope Observations
+-------------------------
+Recorded in docs\cla.bugs.txt:
+
+  BUG-41 (LOW, UX polish) — Refresh chain double-notifies on
+    loadEmails failure. loadEmails emits its own "Failed to load
+    emails" error toast (pre-existing) AND handleRefresh emits the
+    aggregate "Refresh completed with some service errors." Other
+    refresh steps don't have this issue. Suggested fix: silent
+    opt-in arg on loadEmails OR skip-aggregate-when-helper-toasts
+    logic in handleRefresh.
+
+  BUG-42 (LOW, code hygiene) — pingQMail alias has zero callers in
+    src\. Per project conventions ("Avoid backwards-compatibility
+    hacks…") it should be removed unless an out-of-tree consumer
+    exists. Implementer kept it intentionally per the summary, so
+    logging here for revisit.
+
+  BUG-43 (LOW, UX double-notification edge case) — Client-side
+    validation throw inside handleSend's try block ("Please provide
+    at least one valid recipient address." at line 761) routes
+    through markSendFailed → onSendFailure → dashboard error toast.
+    Modal is still open and the validation error already shows in
+    the modal's red banner, so the dashboard toast is pure noise.
+    Edge case but real. Suggested fix: move the parseEmailList
+    check into the pre-isSending validation block, OR teach
+    markSendFailed to skip onSendFailure for client-side failures.
+
+Regression Checklist (handoff/Phase 1 coverage)
+-----------------------------------------------
+Static / code-level verification only — live backend not exercised.
+
+  [code-level pass] Refresh runs beacon ping → RAIDA echo →
+    notifications → counts → list. One spinner across the whole
+    chain. (handleRefresh sets isRefreshing once, clears in finally.)
+  [code-level pass] Each refresh step in its own try/catch; one
+    failure doesn't block the next.
+  [code-level pass] NavigationPane RAIDA dots update from manual
+    Refresh. (setRaidaEchoSnapshot fires after echoRaida success.)
+  [code-level pass] Compose send polling tolerates transient
+    getTaskStatus failures (3-strike).
+  [code-level pass] Compose send polling times out after 60s with
+    the spec'd message.
+  [code-level pass] Persistent send failure surfaces in the
+    dashboard notification AFTER modal close (onSendFailure →
+    showDashboardNotification → NotificationProvider).
+  [code-level pass] One notification style across QMailDashboard +
+    AccountPane (single NotificationContainer, single CSS file).
+  [code-level pass] Pending-mail click toast still focuses the
+    matching pending row (showDashboardNotification preserves
+    targetPendingGuid → onClick → focusPendingMail).
+  [code-level pass] Inbox-mail click toast still focuses the
+    matching inbox row (targetEmailId → focusInboxEmail).
+  [unchanged] cancelledRef contract from BUG-04 / Phase 1
+    survives the FIX-33 refactor.
+  [unchanged] Batch 10 surface (canSend null/false/true, parity
+    removal): untouched.
+  [unchanged] Batch 11 surface (sendControlsLocked, dangerous
+    attachments, Mark Unread/Archive, FIX-30 Loading placeholder):
+    untouched.
+
+Live-backend verification of the full refresh chain, transient
+poll-failure tolerance, 60s timeout, clickable-toast flow after
+sign-out → re-entry, and dashboard error visibility after closing
+the compose modal should still happen before the Phase 2 ship gate.
+
+Next Target
+-----------
+Batch 13 (FIX-21 + FIX-25 + FIX-29 + FIX-32) per the handoff. This
+batch is the small-UX-fixes cluster: pending-click decision, search
+result-cap notice, save-DRD-to-contacts (depends on FIX-09, already
+shipped), Server Details slice.

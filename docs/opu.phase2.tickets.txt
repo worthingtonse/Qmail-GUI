@@ -1,0 +1,438 @@
+Phase 2 tickets — QMail-GUI
+============================
+Self-contained extraction from opu.usability.fix.plan.txt.
+The master plan remains the source of truth — this file is a
+convenience extract so you don't have to scroll through 1500+ lines
+of mixed-phase content to find Phase 2 work.
+
+Last sync with master plan: 2026-05-23 (Phase 1 closeout complete).
+
+If anything here conflicts with the master plan, the master plan
+wins.
+
+
+ORIENTATION FOR ANY MODEL READING THIS
+======================================
+
+Project root:  D:\Code\src\JavaScript\Qmail-GUI\
+
+What's already done:
+  Phase 0 (Batches 1-5) and Phase 1 (Batches 6-9) are COMPLETE.
+  GUI work that depends on no further backend is shipped.
+
+  Phase 1 closeout: docs\gpt.phase1.closeout.txt
+  Phase 1 status:   docs\opu.phase1.tickets.txt (progress block at
+    the top lists per-batch summary + review file paths).
+
+  Still parked at end of Phase 1:
+    FIX-08 — Sent persistence, blocked on CORE-A.
+    FIX-10 — Repair Now banner, blocked on CORE-F (HARD).
+
+What's in Phase 2:
+  Seventeen tickets (FIX-18 .. FIX-34). Pure UX polish — "feels like
+  a real email program" cluster. Each one is small in isolation; the
+  trick is grouping them sensibly so reviews stay tight.
+
+  Tickets not in Phase 2 because they moved earlier:
+    FIX-35, FIX-36, FIX-37 — shipped in Phase 0B.
+    FIX-38 .. FIX-47       — backlog (Phase 3, "Low" severity).
+
+  Tickets backend-blocked for Phase 2:
+    FIX-18 ↔ CORE-J (starred filter)         HARD
+    FIX-23 ↔ CORE-H (deleteDraft endpoint)   HARD
+    FIX-26 ↔ CORE-E (upload_and_tell stages) optional
+
+
+RECOMMENDED BATCH ORDER
+=======================
+
+Batch 10:  FIX-22 + FIX-31
+  Compose send-gating UX + remove Parity Server section. MUST SHIP
+  TOGETHER per the master plan — FIX-31 deletes getParityServer(),
+  which ComposeModal.checkNetworkStatus currently calls. Splitting
+  the patch leaves the import broken between the two landings.
+
+Batch 11:  FIX-19 + FIX-24 + FIX-27 + FIX-30
+  Reading/compose surface polish that doesn't touch the network
+  layer: dangerous-attachment warning, Mark Unread/Archive buttons,
+  post-success button-disable window, John Doe removal.
+
+Batch 12:  FIX-20 + FIX-33 + FIX-34
+  Network/notification consolidation: unified Refresh, send-failure
+  + poll resiliency, single notification system. These compose
+  cleanly because they all touch the dashboard's async/error
+  plumbing.
+
+Batch 13:  FIX-21 + FIX-25 + FIX-29 + FIX-32
+  Small UX fixes that don't share a code path. Group for review
+  efficiency, not architectural reason. Pending-click semantics
+  decision, search result-cap honesty, save-DRD-to-contacts (depends
+  on FIX-09 from Phase 1 — already shipped), Server Details slice.
+
+Batch 14:  FIX-28
+  Replace ContactsPane window.confirm. One file, optional undo
+  toast. Can ship alone or fold into Batch 13 if the reviewer is
+  willing.
+  Status: complete. FIX-28 split across Batch 13 (JSX/logic) and
+  Batch 14 (CSS).
+
+Backend-blocked (do NOT ship GUI-only):
+  Batch B-1:  FIX-18  ↔  CORE-J  (starred filter)
+  Batch B-2:  FIX-23  ↔  CORE-H  (deleteDraft)
+  Batch B-3:  FIX-26  ↔  CORE-E  (send-progress stages, optional)
+
+
+WORKING CONVENTIONS
+===================
+Same as Phase 0 / Phase 1. Highlights:
+
+- Default to no comments. Only add a comment when WHY is non-obvious
+  (a constraint, an invariant, a fix for a specific bug, or behavior
+  that would surprise a reader). Don't explain WHAT — well-named
+  identifiers handle that.
+
+- Every ticket ships with:
+    * npm run build passes
+    * Per-file ESLint at parity-or-better with the pre-change
+      baseline
+    * A batch summary at docs\opu.usability.batchN.summary.txt
+      (or gpt.usability.batchN.summary.txt if GPT is implementer)
+      following the shape of the Phase 0 / Phase 1 summaries
+    * Reviewer-focus questions called out for each non-obvious
+      decision
+
+- Wait for BOTH reviewers (gem + gpt) before considering a batch
+  done. gpt is the more substantive reviewer; gem's approval alone
+  is not sufficient. gpt has caught real bugs in every Phase 0/1
+  batch.
+
+- Don't add new ESLint baseline errors. The codebase still has a
+  repo-wide lint failure (73 errors / 4 warnings — see
+  docs\cla.bugs.txt BUG-36). Phase 2 work must keep the touched-file
+  gate clean and should not GROW the baseline.
+
+- normalizeIdentityForUi returns BOTH camelCase and snake_case for
+  every field. This is the permanent convention. Don't refactor
+  consumers to camelCase-only.
+
+- "Coming Soon" dead controls are visibly disabled, NOT silently
+  no-op'd.
+
+- Do NOT fake server state in the GUI (no fake Sent rows, no fake
+  mark-as-read persistence, no synthesized identity health). Wait
+  for the backend.
+
+- FIX-22 + FIX-31 is a HARD CUTOVER coupling per the master plan —
+  do not split.
+
+
+DEPENDENCY GRAPH FOR PHASE 2
+============================
+
+  FIX-22 ↔ FIX-31  SHIP TOGETHER (parity-server removal coupling).
+  FIX-29           Depends on FIX-09 (already shipped in Phase 1).
+  FIX-30           Touched in FIX-03; finish the placeholder removal.
+  FIX-33           Refactors the send-poll loop introduced in FIX-04.
+                   Verify cancelledRef behavior survives the rewrite.
+  FIX-34           Touches every setNotification call site; coordinate
+                   with the toast objects added in FIX-17 (Batch 8) —
+                   targetPendingGuid / targetEmailId must survive the
+                   migration.
+
+  Backend-blocked:
+    FIX-18  ↔  CORE-J  (starred filter)        HARD
+    FIX-23  ↔  CORE-H  (deleteDraft)           HARD
+    FIX-26  ↔  CORE-E  (stage messages)        optional
+
+
+PHASE 2 SHIP GATE
+=================
+- Everything from the Phase 0/1 gates (build, lint baseline not
+  regressed, returning-user startup regression check).
+- For Batch 10 (FIX-22 + FIX-31): verify Compose Send button reaches
+  its enabled state on a healthy network AND surfaces a warning-
+  with-Retry when /raida/echo is blocked. Account view must show no
+  Parity Server section.
+- For Batch 12 (FIX-33): a flaky network simulation in Compose must
+  recover via the retry counter; persistent failure must surface in
+  the dashboard-level notification after the 1500ms post-success
+  window.
+
+
+===============================================================
+TICKET BODIES
+===============================================================
+Verbatim from opu.usability.fix.plan.txt. The [M] tag marks
+severity (Medium). Approach / Files / Edge cases / Verify
+sub-blocks are the actual implementation guidance — read them
+carefully.
+
+
+FIX-18 [M] (gpt-6)  Reconcile Starred: flag OR folder, not both
+  Approach:
+    The preferred model — "Starred as virtual view backed by
+    is_starred" — REQUIRES backend support. /db/messages/list must
+    accept a starred=true filter (or expose a dedicated starred-list
+    endpoint). The GUI cannot implement this correctly with local
+    filtering, because pagination would silently drop starred
+    messages on later pages.
+  Dependencies:
+    Backend ticket CORE-J: add starred=true filter to
+    /api/qmail/db/messages/list.
+  Plan:
+    (Until CORE-J)
+    Remove "Move to Starred" from the ReadingPane move dropdown so
+    users don't get the impression that Star and Move-to-Starred are
+    separate features. Keep the folder=4 nav link working for now —
+    it shows whatever the backend has stored under folder=4.
+    (After CORE-J)
+    Drop folder=4 from the nav. Drive the Starred view from a
+    /db/messages/list?starred=true call.
+
+FIX-19 [M] (gpt-11 / gem-recommendation-2)  Attachment safety
+  Approach:
+    1. getEmailAttachments() in qmailApiServices.js: map the
+       dangerous and warning fields through (they're dropped today).
+    2. ReadingPane.jsx: if dangerous === true, render a
+       visually-distinct warning chip next to the filename using
+       the ShieldAlert icon (lucide-react). Yellow/red treatment.
+       If a warning string exists, show it as a tooltip.
+    3. QMailDashboard.handleDownloadAttachment: pass attachmentName
+       through to downloadMailAttachment as the third argument.
+       The current call drops the name, so dangerous-extension
+       files save as "downloaded_file" with no clue about their
+       real type — the worst possible failure mode.
+    4. Confirm modal before downloading a "dangerous" attachment.
+       Use the existing modal infrastructure, not window.confirm.
+       Modal text: "This file is flagged as potentially dangerous.
+       Save anyway?"
+  Verify:
+    Mock an attachments-list response with dangerous=true and a
+    warning string. Confirm the chip, tooltip, confirm modal, and
+    real-name save.
+
+FIX-20 [M] (gem-v2 / gpt-10)  Unified Refresh action
+  Product decision: one "Refresh" button does the whole stack.
+  Non-technical users don't care about RAIDA echo vs beacon ping —
+  they want a button that says "go get my mail." Keep the
+  underlying helpers separate at the API layer so a future debug
+  surface can split them again. SUPERSEDES the earlier gpt-v1
+  recommendation to split.
+  Approach:
+    1. Rename "Check Connection" to "Refresh." RefreshCw icon stays.
+    2. handleRefresh in QMailDashboard runs in order:
+         a. checkMailNow()            // POST /api/qmail/net/beacon/ping
+         b. echoRaida()               // GET  /api/raida/echo
+         c. getMailNotifications()    // GET  /api/qmail/db/notifications/list
+         d. loadMailCounts()
+         e. loadEmails(currentFolder)
+       Each step in its own try/catch — one failure should not
+       block the next.
+    3. Add a checkMailNow() helper in qmailApiServices.js for
+       POST /api/qmail/net/beacon/ping. Rename pingQMail() to
+       peekBeacon() for clarity (it calls /beacon/peek, read-only).
+    4. Spin the RefreshCw icon throughout the full chain so the
+       user sees ONE operation, not five.
+
+FIX-21 [M] (opu-M11)  Pending-mail click semantics
+  Approach:
+    Pick one: auto-download on click (remove the manual button) OR
+    manual button only (don't auto-fire). Recommendation is the
+    manual model — it respects cost-per-decrypt awareness.
+
+FIX-22 [M] (opu-M16 / gpt-12)  Compose send-gating UX
+  MUST SHIP IN THE SAME PATCH AS FIX-31 (remove getParityServer).
+  ComposeModal.checkNetworkStatus() currently calls
+  getParityServer(); removing it without fixing the gating logic
+  would leave a broken import.
+  Approach:
+    1. Initialize canSend = null ("checking…"); Send button label
+       "Checking network…", disabled.
+    2. checkNetworkStatus result sets canSend true / false. Drop
+       the getParityServer() call entirely; only the RAIDA-
+       availability check (>= 6 reachable) remains. See FIX-31.
+    3. On false, add a Retry button that re-runs checkNetworkStatus.
+    4. Soften the gate: warning banner instead of disabled Send;
+       user can override with "Send anyway." The backend remains
+       the final authority.
+  Verify:
+    Block /raida/echo. Confirm Send shows "Checking network…" then
+    warning-with-Retry. Restore network and Retry; confirm normal
+    behavior returns.
+
+FIX-23 [M]  Delete the source draft on successful send-from-draft
+  BLOCKED on CORE-H (deleteDraft endpoint). DO NOT simulate
+  deletion by writing an empty draft via updateDraft.
+  Approach (once CORE-H lands):
+    1. Add deleteDraft() helper in qmailApiServices.js.
+    2. In ComposeModal.handleSend success branch: when
+       currentDraftId is set, call deleteDraft(currentDraftId)
+       before closing the modal. Refresh drafts afterward.
+
+FIX-24 [M] (opu-M8 + M9)  Mark Unread + Archive buttons in ReadingPane
+  Approach:
+    Two small buttons in the reading-pane action row. Mark Unread
+    calls handleMarkAsRead(id, false). Archive calls
+    handleMoveEmail(id, 'archive'). Both handlers already exist —
+    pure UI surface.
+
+FIX-25 [M] (opu-M12 / gem-v2-section-6)  Search scope + result-cap honesty
+  Approach:
+    1. Search scope. Ship the cheap option first:
+       Change the placeholder to "Search all mail..." so the user
+       knows. (Folder-scoped search is the more correct option but
+       requires backend support — defer.)
+    2. Result cap. searchEmails() currently hard-codes limit=50.
+       When result.length === 50, render a small notice above the
+       results: "Showing top 50 results. Refine your search to see
+       more." Without this, a user searching for an old message
+       will see 50 hits, none of them the target, and conclude the
+       message is gone.
+
+FIX-26 [M] (opu-M18)  Send-progress wording
+  Depends on CORE-E (stage messages in upload_and_tell). Optional.
+  Approach:
+    1. Backend: augment the task message field to expose stages
+       ("Encrypting locally…", "Uploading to RAIDA…", "Notifying
+       recipient…").
+    2. GUI: surface those messages verbatim in the spinner.
+    3. Add "Usually takes 5-15 seconds" subtext to dampen panic.
+
+FIX-27 [M] (opu-M19)  Disable Compose buttons through the 1500ms post-success window
+  Approach:
+    Keep Send and Save Draft disabled until the modal actually
+    closes (after the 1500ms celebration window). Single state
+    guard.
+
+FIX-28 [M] (opu-M24)  Replace window.confirm in ContactsPane delete
+  Approach:
+    Use the existing modal infrastructure. Bonus: add an undo toast
+    after the delete completes, calling addContact back with the
+    just-removed data.
+  Note:
+    Already logged as BUG-32 in docs\cla.bugs.txt during Batch 9.
+
+FIX-29 [M] (opu-M25)  Allow saving DRD popular contacts to local
+  Approach:
+    Render an "Add to My Contacts" button on DRD entries (currently
+    only user-source rows get a trash button). onClick calls
+    addContact() with the DRD entry's fullName + autoAddress
+    pre-filled. Depends on FIX-09 — already shipped in Batch 9.
+
+FIX-30 [M] (opu-M29 + L47)  Remove "John Doe" placeholder identity
+  Approach:
+    Already touched in FIX-03. Initialize userAccount to null and
+    have AccountPane render a "Loading…" placeholder until the
+    real identity loads.
+
+FIX-31 [M] (opu-M36)  Remove the Parity Server Configuration section
+  SHIPS WITH FIX-22 (same patch).
+  Approach:
+    1. Delete the Parity Server section from AccountPane.jsx
+       (Configuration Status, Server ID, Server Address,
+       Availability, Message rows).
+    2. Delete getParityServer() from qmailApiServices.js.
+    3. Remove the getParityServer import from AccountPane and
+       ComposeModal.
+    4. Remove parity state and handlers in AccountPane
+       (parityServer, parityLoading, loadParityServer).
+    5. ComposeModal.checkNetworkStatus(): coordinated with FIX-22,
+       drop the Promise.all entry for getParityServer.
+
+FIX-32 [M] (opu-M38)  AccountPane Server Details: drop the slice(0,10)
+  Approach:
+    Either show all servers or drop the section entirely (the
+    dot-grid in NavigationPane is the source of truth). If kept,
+    drive off /raida/echo for the 25-RAIDA view.
+
+FIX-33 [M] (opu-M43 + M44 / gem-v2-section-1)  Send-failure UX + poll resiliency
+  Approach:
+    1. Cap the send-poll loop at 60 seconds (wall-clock deadline,
+       not iteration count). On timeout, mark sendingStatus="failed"
+       with text "Send is taking longer than expected. Check Sent
+       in a few minutes."
+    2. Per-call try/catch: wrap each await getTaskStatus call
+       individually. On exception, do NOT immediately fail the
+       send — the backend may transiently 5xx while the task is
+       still in flight. Use a small retry counter (e.g. 3
+       consecutive failures) before declaring the poll
+       unrecoverable. The 60s deadline still applies.
+    3. On final failure (timeout OR retry-counter exhausted): push
+       the error to the dashboard-level notification system so it
+       persists if the user closes the modal.
+    4. The existing cancelledRef.current guard must still break the
+       loop on modal close — verify after the refactor.
+
+FIX-34 [M] (opu-M45)  Unify the three notification systems
+  Approach:
+    Migrate QMailDashboard's setNotification and AccountPane's
+    showNotification to the NotificationProvider already wrapping
+    App.jsx. One visual style, one timeout policy, one priority
+    queue.
+  Caution:
+    The setNotification objects added in FIX-17 (Batch 8) carry
+    targetPendingGuid / targetEmailId for clickable toasts.
+    Preserve those payloads in the unified system.
+
+
+===============================================================
+BACKEND TICKETS REFERENCED BY PHASE 2
+===============================================================
+Copied from the master plan. HARD = GUI work cannot proceed.
+
+  CORE-E: Augment upload_and_tell task message field with stage
+          hints — supports FIX-26. Optional.
+  CORE-H: HARD. Draft-delete endpoint — POST
+          /api/qmail/db/drafts/delete?email_id=... (or whatever
+          shape rest_core prefers). Required for FIX-23.
+  CORE-J: HARD for FIX-18. starred=true filter on
+          /api/qmail/db/messages/list (or a dedicated starred-list
+          endpoint).
+  CORE-K: Search pagination on /api/qmail/db/messages/search. Until
+          this lands, FIX-25 shows a "Showing top 50 results"
+          notice. Low priority — most users will not hit the cap.
+
+
+===============================================================
+PHASE 2 MANUAL VERIFICATION CHECKLIST
+===============================================================
+After all Phase 2 batches land, walk this script end-to-end.
+
+Compose / send (FIX-22 + FIX-31 + FIX-27 + FIX-33):
+  [ ] Open Compose on a healthy network — Send reaches enabled.
+  [ ] Block /raida/echo — Send shows warning-with-Retry.
+  [ ] Retry restores Send when the network returns.
+  [ ] "Send anyway" override still calls the backend.
+  [ ] Account view shows no Parity Server section.
+  [ ] Send + close: buttons stay disabled through the full 1500ms.
+  [ ] Flaky-network send recovers via retry counter.
+  [ ] Persistent send failure surfaces in the dashboard
+      notification AFTER modal close.
+
+Reading-pane polish (FIX-19 + FIX-24 + FIX-30):
+  [ ] Dangerous attachment renders ShieldAlert chip + tooltip;
+      download triggers confirm modal; saved file keeps real name.
+  [ ] Mark Unread button toggles the dot back.
+  [ ] Archive button moves to archive folder.
+  [ ] No "John Doe" placeholder anywhere; AccountPane shows
+      "Loading…" until identity resolves.
+
+Network / notifications (FIX-20 + FIX-34):
+  [ ] Refresh runs beacon ping → RAIDA echo → notifications →
+      counts → list. One spinner across the whole chain.
+  [ ] One notification style across QMailDashboard + AccountPane.
+  [ ] Pending-mail click toast (from FIX-17) still focuses the
+      matching pending row after the unification.
+
+Small UX (FIX-21 + FIX-25 + FIX-29 + FIX-32 + FIX-28):
+  [ ] Pending-mail click behavior matches the FIX-21 decision
+      (manual button OR auto-download — not both).
+  [ ] Search returning 50 hits shows the "Refine your search"
+      notice.
+  [ ] DRD popular contact: "Add to My Contacts" button persists
+      to local; appears in Compose autocomplete after.
+  [ ] AccountPane Server Details either shows all 25 or is gone.
+  [ ] ContactsPane delete uses in-app modal, not window.confirm.
+
+
+End of file.

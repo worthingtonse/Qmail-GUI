@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Eye, EyeOff, Dices } from 'lucide-react';
 import DicewarePasswordCreator from './DicewarePasswordCreator';
 import './PasswordScreen.css';
+
+/* eslint-disable react/prop-types -- this screen receives a simple callback prop and the project does not use prop-types. */
 
 const PasswordScreen = ({ onSuccess }) => {
   const [password, setPassword] = useState('');
@@ -14,20 +16,20 @@ const PasswordScreen = ({ onSuccess }) => {
 
   useEffect(() => {
     const existingPassword = localStorage.getItem('cloudcoin_password_hash');
-    setHasExistingPassword(!!existingPassword);
+    setHasExistingPassword(Boolean(existingPassword));
     if (!existingPassword) {
       setIsCreatingPassword(true);
     }
   }, []);
 
-  const hashPassword = async (password) => {
+  const hashPassword = async (nextPassword) => {
     const encoder = new TextEncoder();
     // BUG-17 FIX: Removed .toLowerCase() — unknown why it was there, and it
     // makes passwords case-insensitive which reduces security significantly
-    const data = encoder.encode(password.trim());
+    const data = encoder.encode(nextPassword.trim());
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
   };
 
   const handleCreatePassword = async () => {
@@ -46,7 +48,7 @@ const PasswordScreen = ({ onSuccess }) => {
       localStorage.setItem('cloudcoin_password_hash', hashedPassword);
       setError('');
       onSuccess();
-    } catch (err) {
+    } catch {
       setError('Error creating password. Please try again.');
     }
   };
@@ -63,13 +65,13 @@ const PasswordScreen = ({ onSuccess }) => {
         setError('Incorrect password');
         setPassword('');
       }
-    } catch (err) {
+    } catch {
       setError('Error verifying password. Please try again.');
     }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = (event) => {
+    event.preventDefault();
     if (isCreatingPassword) {
       handleCreatePassword();
     } else {
@@ -87,94 +89,122 @@ const PasswordScreen = ({ onSuccess }) => {
         localStorage.setItem('cloudcoin_password_hash', hashedPassword);
         setError('');
         onSuccess();
-      } catch (err) {
+      } catch {
         setError('Error creating password. Please try again.');
       }
     }, 100);
   };
 
-  if (useDiceware && isCreatingPassword) {
+  const isCreating = isCreatingPassword;
+  const title = isCreating ? 'Create Your Password' : 'Enter Your Password';
+  const subtitle = isCreating
+    ? 'Set up a secure password to protect your CloudCoins'
+    : 'Enter your password to access your CloudCoins';
+
+  if (useDiceware && isCreating) {
     return (
-      <div className="password-screen">
-        <div className="password-container" style={{maxWidth: '900px'}}>
-          <button
-            onClick={() => setUseDiceware(false)}
-            className="reset-button"
-            style={{ marginBottom: '20px', textDecoration: 'none' }}
+      <main className="password-screen">
+        <section
+          className="password-screen__card password-screen__card--wide"
+          aria-labelledby="password-screen-diceware-title"
+        >
+          <header className="password-screen__header password-screen__header--compact">
+            <button
+              type="button"
+              onClick={() => setUseDiceware(false)}
+              className="password-screen__reset-button password-screen__back-button"
+            >
+              ← Back to Simple Password
+            </button>
+            <h1
+              id="password-screen-diceware-title"
+              className="password-screen__title"
+            >
+              Create Your Password
+            </h1>
+            <p className="password-screen__subtitle">
+              Generate a secure Diceware passphrase for your CloudCoins.
+            </p>
+          </header>
+          <section
+            className="password-screen__diceware-panel"
+            aria-label="Diceware password generator"
           >
-            ← Back to Simple Password
-          </button>
-          <DicewarePasswordCreator onPasswordCreated={handleDicewarePassword} />
-        </div>
-      </div>
+            <DicewarePasswordCreator onPasswordCreated={handleDicewarePassword} />
+          </section>
+        </section>
+      </main>
     );
   }
 
   return (
-    <div className="password-screen">
-      <div className="password-container">
-        <div className="header">
-          <h2>
-            {isCreatingPassword ? 'Create Your Password' : 'Enter Your Password'}
-          </h2>
-          <p>
-            {isCreatingPassword
-              ? 'Set up a secure password to protect your CloudCoins'
-              : 'Enter your password to access your CloudCoins'
-            }
-          </p>
-        </div>
+    <main className="password-screen">
+      <section className="password-screen__card" aria-labelledby="password-screen-title">
+        <header className="password-screen__header">
+          <h1 id="password-screen-title" className="password-screen__title">
+            {title}
+          </h1>
+          <p className="password-screen__subtitle">{subtitle}</p>
+        </header>
 
-        {isCreatingPassword && (
-          <div className="diceware-prompt">
+        {isCreating && (
+          <section
+            className="password-screen__diceware-prompt"
+            aria-label="Password creation options"
+          >
             <button
+              type="button"
               onClick={() => setUseDiceware(true)}
-              className="diceware-button"
+              className="password-screen__diceware-button"
             >
-              <Dices size={20} style={{ marginRight: '8px', display: 'inline-block' }} />
+              <Dices size={20} className="password-screen__diceware-icon" />
               Create Secure Diceware Passphrase (Recommended)
             </button>
-            <span className="diceware-divider">
-              — OR —
-            </span>
-          </div>
+            <p className="password-screen__diceware-divider">— OR —</p>
+          </section>
         )}
 
-        <form onSubmit={handleSubmit} className="password-form">
-          <div className="input-group">
-            <label htmlFor="password">
+        <form onSubmit={handleSubmit} className="password-screen__form">
+          <div className="password-screen__field">
+            <label className="password-screen__label" htmlFor="password">
               Password:
             </label>
-            <div className="password-input-container">
+            <div className="password-screen__input-wrap">
               <input
+                className="password-screen__input password-screen__input--with-toggle"
                 type={showPassword ? 'text' : 'password'}
                 id="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={isCreatingPassword ? 'Create password (min 8 characters)' : 'Enter your password'}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={
+                  isCreating
+                    ? 'Create password (min 8 characters)'
+                    : 'Enter your password'
+                }
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="toggle-password"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="password-screen__toggle-button"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
-          {isCreatingPassword && (
-            <div className="input-group">
-              <label htmlFor="confirmPassword">
+          {isCreating && (
+            <div className="password-screen__field">
+              <label className="password-screen__label" htmlFor="confirmPassword">
                 Confirm Password:
               </label>
               <input
+                className="password-screen__input"
                 type={showPassword ? 'text' : 'password'}
                 id="confirmPassword"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(event) => setConfirmPassword(event.target.value)}
                 placeholder="Confirm your password"
                 required
               />
@@ -182,47 +212,58 @@ const PasswordScreen = ({ onSuccess }) => {
           )}
 
           {error && (
-            <div className="error-message">
+            <div className="password-screen__error" role="alert">
               {error}
             </div>
           )}
-          <div className="actions">
-            <button type="submit" className="submit-button">
-              {isCreatingPassword ? 'Create Password' : 'Login'}
+
+          <footer className="password-screen__actions">
+            <button type="submit" className="password-screen__submit-button">
+              {isCreating ? 'Create Password' : 'Login'}
             </button>
-          </div>
+          </footer>
         </form>
 
-        {hasExistingPassword && !isCreatingPassword && (
-          <div className="reset-options">
-            <button 
+        {hasExistingPassword && !isCreating && (
+          <footer className="password-screen__reset-options">
+            <button
+              type="button"
               onClick={() => {
                 setIsCreatingPassword(true);
                 setPassword('');
                 setConfirmPassword('');
                 setError('');
               }}
-              className="reset-button"
+              className="password-screen__reset-button"
             >
               Forgot/Reset Password
             </button>
-          </div>
+          </footer>
         )}
 
-        {isCreatingPassword && (
-          <div className="password-requirements">
-            <h4>Password Requirements:</h4>
+        {isCreating && (
+          <section
+            className="password-screen__requirements"
+            aria-label="Password requirements"
+          >
+            <h2 className="password-screen__requirements-title">
+              Password Requirements:
+            </h2>
             <ul>
-              <li>At least 8 characters long</li>
-              <li>Mix of letters, numbers, and special characters recommended</li>
-              <li className="warning">
+              <li className="password-screen__requirement">
+                At least 8 characters long
+              </li>
+              <li className="password-screen__requirement">
+                Mix of letters, numbers, and special characters recommended
+              </li>
+              <li className="password-screen__requirement password-screen__requirement--warning">
                 Store your password securely - it cannot be recovered
               </li>
             </ul>
-          </div>
+          </section>
         )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 };
 

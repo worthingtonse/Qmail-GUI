@@ -1,0 +1,62 @@
+Batch 10 Summary - FIX-22 + FIX-31
+==================================
+
+Scope
+-----
+Implemented Phase 2 Batch 10:
+- FIX-22: Compose send-gating UX.
+- FIX-31: Remove Parity Server Configuration.
+
+Changes
+-------
+FIX-22:
+- ComposeModal now initializes canSend to null and resets it to null while
+  the RAIDA availability check is running.
+- The Send button is disabled during the check and reads
+  "Checking network...".
+- Network readiness now depends only on getServers() and requires at least
+  6 reachable RAIDA servers.
+- When the check reports fewer than 6 reachable servers, Compose shows a
+  warning with Retry and leaves a "Send anyway" override available. The
+  backend remains the final authority on whether sending succeeds.
+- Network-check failures are treated as the same warning path instead of a
+  blocking red form error.
+
+FIX-31:
+- Removed getParityServer() from qmailApiServices.js.
+- Removed getParityServer imports and calls from ComposeModal and
+  AccountPane.
+- Removed AccountPane parity state, loading state, refresh handler, and the
+  Parity Server Configuration section.
+
+Files Changed
+-------------
+- src/qmail/screens/ComposeModal.jsx
+- src/qmail/screens/ComposeModal.css
+- src/qmail/screens/AccountPane.jsx
+- src/api/qmailApiServices.js
+- docs/gpt.usability.batch10.summary.txt
+
+Verification
+------------
+PASS: npm run build
+PASS: npx eslint src/qmail/screens/ComposeModal.jsx src/qmail/screens/AccountPane.jsx src/api/qmailApiServices.js --report-unused-disable-directives --max-warnings 0
+PASS: node --check electron.cjs
+PASS: node --check preload.cjs
+PASS: git diff --check for the Batch 10 files
+
+Manual Verification Notes
+-------------------------
+Live backend checks were not manually exercised in this pass:
+- Compose opens on a healthy network and Send reaches enabled.
+- Blocking /raida/echo surfaces warning-with-Retry.
+- Retry restores the normal Send state when RAIDA availability recovers.
+- Send anyway still calls the backend.
+- Account view shows no Parity Server section.
+
+Reviewer Focus
+--------------
+- The low-RAIDA path keeps sending available only through an explicit
+  "Send anyway" label, instead of silently enabling the normal Send state.
+- The warning path avoids using the red form-level error slot so validation
+  and send failures remain visually distinct from network uncertainty.

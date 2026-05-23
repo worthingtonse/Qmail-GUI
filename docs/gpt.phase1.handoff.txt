@@ -1,0 +1,228 @@
+GPT QMail-GUI Phase 1 handoff
+Date: 2026-05-22
+
+Purpose
+-------
+This handoff is for the next GPT session after context is cleared. The next
+session should start Phase 1 implementation/review work without rediscovering
+the Phase 0 history.
+
+Primary Phase 1 plan
+--------------------
+Read this first:
+
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.phase1.tickets.txt
+
+That file is the dedicated Phase 1 ticket extract. It says the master plan is
+still authoritative if there is a conflict:
+
+  D:\Code\src\JavaScript\Qmail-GUI\docs\opu.usability.fix.plan.txt
+
+Project root:
+
+  D:\Code\src\JavaScript\Qmail-GUI\
+
+Current state
+-------------
+Phase 0 is complete through Batch 5. Do not redo Phase 0 work.
+
+Useful Phase 0 summaries:
+
+  docs\opu.usability.batch1.summary.txt
+  docs\opu.usability.batch2.summary.txt
+  docs\opu.usability.batch3.summary.txt
+  docs\opu.usability.batch4.summary.txt
+  docs\opu.usability.batch5.summary.txt
+
+Useful GPT review files:
+
+  docs\gpt.usability.batch1.review.txt
+  docs\gpt.usability.batch2.review.txt
+  docs\gpt.usability.batch4.review.txt
+  docs\gpt.usability.batch5.review.txt
+  docs\gpt.bugs.txt
+
+Batch 5 follow-up note
+----------------------
+GPT found attachment bugs after the Electron picker landed:
+
+  1. Paths with comma or semicolon delimiters could be broken by backend parsing.
+  2. The backend aggregate attachment buffer can silently drop paths on overflow.
+  3. Save Draft does not persist staged attachments.
+
+Opus says the GUI follow-up has been applied in ComposeModal:
+
+  - Reject attachment paths containing "," or ";" before staging.
+  - Cap attachment count at 50 and combined path length at 12000 bytes.
+  - Show a warning that attachments are sent but not saved with drafts.
+  - Track the real backend fixes as CORE-M and CORE-N in the master plan.
+
+When starting Phase 1, preserve those attachment guards and the draft warning.
+Attachment send remains an important regression check for any ComposeModal work.
+
+Recommended Phase 1 batch order
+-------------------------------
+From docs\opu.phase1.tickets.txt:
+
+Batch 6:
+  FIX-05.5 + FIX-06 + FIX-07
+  composeContext refactor, Forward, Reply All.
+
+Batch 7:
+  FIX-15 + FIX-15b
+  Durable Sign Out and re-entry. These must ship together.
+
+Batch 8:
+  FIX-14 + FIX-11a + FIX-17
+  Honest Trash deletion label, pending row distinction, sender preview in new
+  mail toast.
+
+Batch 9:
+  FIX-09 + FIX-12
+  Contact schema fix and first-time onboarding hint.
+
+Backend-blocked:
+  FIX-08 Sent persistence depends on CORE-A.
+  FIX-10 Repair Now/identity health depends on CORE-F.
+  Do not fake either one in the GUI.
+
+Start here: Batch 6
+-------------------
+The first useful implementation session should start with Batch 6.
+
+FIX-05.5 is the prep refactor:
+
+  - Replace ComposeModal's replyTo/editDraft props with one composeContext prop.
+  - Hard cutover only. No compatibility shim.
+  - Shape:
+
+      composeContext = {
+        mode: "new" | "reply" | "replyAll" | "forward" | "draft",
+        sourceEmail: <email>,
+        ownIdentity: <normalized identity>,
+        draftId: <draft id for draft mode>
+      }
+
+  - QMailDashboard should construct the context for every opener:
+      new compose, reply, reply all, forward, and hydrated draft open.
+  - ComposeModal derives recipients, subject prefix, quoted body, and draft id
+    from composeContext.mode.
+  - Preserve currentDraftId behavior from Batch 3/4 so editing an existing draft
+    updates the same draft instead of creating a duplicate.
+
+FIX-06 adds Forward:
+
+  - Add the button in ReadingPane near Reply.
+  - Subject should be "Fwd: <subject>" without double prefixing.
+  - Body should include a forwarded-message quote.
+  - To should be blank.
+  - Disable Forward for undownloaded/pending messages with an honest tooltip.
+
+FIX-07 adds Reply All:
+
+  - Add the button in ReadingPane near Reply.
+  - To should include the sender.
+  - Cc should include original To/Cc minus the current user's own identities.
+  - Own-address filtering must compare serial number, address, auto_address, and
+    display/pretty address forms from the normalized identity.
+  - If recipient data is not stored, disable Reply All with a tooltip rather
+    than guessing.
+
+Key files for Batch 6
+---------------------
+Implementation likely touches:
+
+  src\qmail\screens\ComposeModal.jsx
+  src\qmail\screens\QMailDashboard.jsx
+  src\qmail\screens\ReadingPane.jsx
+  src\qmail\screens\EmailListPane.jsx or EmailListItem.jsx only if a selection
+  or pending/downloaded distinction is needed.
+
+Read before editing:
+
+  src\api\qmailApiServices.js
+  src\qmail\screens\ComposeModal.jsx
+  src\qmail\screens\QMailDashboard.jsx
+  src\qmail\screens\ReadingPane.jsx
+
+Important conventions
+---------------------
+- normalizeIdentityForUi returns both camelCase and snake_case fields. Keep that
+  convention. Do not simplify consumers to only one style.
+- Do not synthesize fake server state. No fake Sent rows, fake mark-read
+  persistence, or fake identity health.
+- Coming Soon/dead controls should be visibly disabled or hidden, not silent
+  no-ops.
+- Use the existing UI style. Keep the app tool-like and dense, not marketing-like.
+- Do not introduce new lint categories. Existing lint is noisy, so compare
+  touched-file lint against baseline when possible.
+- The worktree has many user/Opus changes and untracked docs. Do not reset,
+  checkout, or revert unrelated files.
+
+Regression checklist for Batch 6
+--------------------------------
+After composeContext lands, check all applicable items from the ticket:
+
+  - New compose opens, types, and sends.
+  - New compose can save as draft.
+  - Reply opens with correct recipient and "Re:" subject.
+  - Draft hydration opens a draft, edits it, and saves back to the same draft.
+  - Attachment upload still stages files and sends paths.
+  - Attachment delimiter/count/length guards still work.
+  - The draft attachment warning still appears when files are staged.
+  - Forward opens with blank To, correct "Fwd:" subject, and quoted body.
+  - Reply All excludes the current user's own address forms.
+
+If a checklist item depends on a future ticket that has not landed, mark it
+"n/a - not yet implemented" in the batch summary instead of treating it as a
+new regression.
+
+Verification commands
+---------------------
+Use the repo root:
+
+  cd D:\Code\src\JavaScript\Qmail-GUI
+  npm run build
+
+Syntax checks that were useful in Phase 0:
+
+  node --check electron.cjs
+  node --check preload.cjs
+
+Git commands need the safe.directory override in this environment:
+
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' status --short
+  git -c safe.directory='D:/Code/src/JavaScript/Qmail-GUI' diff --check
+
+ESLint is baseline-noisy. Use per-file lint only to confirm parity or no new
+categories, not as a project-wide pass/fail signal.
+
+Expected output pattern for future batches
+------------------------------------------
+When Opus implements a Phase 1 batch, review it in code-review style and write:
+
+  docs\gpt.usability.batchN.review.txt
+
+If out-of-scope bugs are found, append them to:
+
+  docs\gpt.bugs.txt
+
+If GPT implements a batch directly, write a concise batch summary with:
+
+  - Tickets covered.
+  - Files changed.
+  - Behavior implemented.
+  - Edge cases handled.
+  - Verification run.
+  - Reviewer questions for any non-obvious decision.
+
+Open hazards to keep in mind
+----------------------------
+- docs\gpt.bugs.txt currently tracks several broader bugs. Some may have been
+  fixed by Opus after the review; verify current code before acting on them.
+- Attachment backend issues CORE-M/CORE-N remain real even with GUI guards.
+- Sent persistence and Repair Now are backend-blocked. Do not ship GUI-only
+  behavior that pretends those server facts exist.
+- Reply All quality depends on recipient data actually being present in the
+  hydrated message. If the backend does not return full To/Cc/Bcc for a message,
+  the honest behavior is to disable Reply All or fall back to plain Reply.

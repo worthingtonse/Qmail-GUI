@@ -1,0 +1,238 @@
+QMail GUI smoke-testing handoff
+Date: 2026-05-23
+
+Purpose
+This document is for the next session that will run live smoke testing with two QMail clients, normally called client1 and client2, using files on E:\.
+
+Current status at handoff
+- Live backend smoke testing has not started in this session.
+- Static gates passed earlier in this session after the latest GUI cleanup: npm run lint, npm run build, node --check electron.cjs, node --check preload.cjs, and git diff --check.
+- A probe to http://localhost:8080/api/qmail/local/status timed out earlier, so there was no always-on local backend available at handoff.
+- The repo worktree is intentionally dirty from Phase 3, theme, lint, and ticket-doc work. Do not reset or revert unrelated files.
+
+Direct answers
+1. How should testing be set up?
+   Use two isolated portable app directories on E:\. The preferred layout is:
+
+     E:\QMail-Smoke\2026-05-23\
+       client1\
+         QMail.exe
+         Client_Data\              created by core.exe after launch
+       client2\
+         QMail.exe
+         Client_Data\              created by core.exe after launch
+       attachments\
+         small.txt
+         filename with spaces.txt
+         sample.png
+         sample.pdf
+         sample.bin
+       results\
+         smoke-results.md
+
+   Each client must have its own app directory and its own wallet or identity. Do not point both clients at the same Client_Data directory. Do not use the same QMail identity for both sides of the test.
+
+2. Should the testing be manual?
+   The final ship-gate smoke pass should be manual or at least human-observed. This app needs two live clients, real identities, native attachment selection, backend state, sent and received payload checks, and attachment content verification. Those are the exact areas where a GUI-only static review is weakest.
+
+3. Does Gem need to do it because it can manipulate a browser?
+   Gem or another browser-control agent can help, but it should not replace the final manual smoke pass unless it can control the actual packaged Electron windows, native file picker, both client instances, and E:\ attachment files. If Gem can only manipulate a browser, use it for repeatable UI checks in dev mode, not as final proof that packaged two-client email works.
+
+Recommended topology
+- Preferred: two packaged portable QMail clients, one copied into E:\QMail-Smoke\<date>\client1 and one copied into E:\QMail-Smoke\<date>\client2.
+- Acceptable for UI-only rehearsal: npm run electron-dev, but this is not the preferred live two-client smoke path because dev mode uses the repo backend directory as data root.
+- Avoid: two dev instances sharing the same backend\Client_Data. That can invalidate client1/client2 isolation and make failures hard to interpret.
+
+Why portable mode is preferred
+- electron.cjs reserves a free backend port for each app instance and passes it to the renderer as ?backendPort=<port>.
+- qmailApiServices.js resolves the API port from ?backendPort first, then VITE_API_PORT, then 8080.
+- In packaged portable mode, electron.cjs uses the portable executable directory as the backend data root. That means client1 and client2 can run at the same time without backend port collisions and without sharing Client_Data, as long as they live in separate folders.
+
+Preflight before launching clients
+1. Record the repo state:
+     git status --short
+
+2. Run static gates from D:\Code\src\JavaScript\Qmail-GUI:
+     npm run lint
+     npm run build
+
+3. Build the portable package if a current portable exe is not already available:
+     npm run build-portable
+
+4. Create a fresh E:\ smoke folder for this run.
+
+5. Copy the portable QMail executable or portable app output into both client folders. Keep the two client folders separate for the whole test.
+
+6. Prepare identities:
+   - client1 has its own wallet or locker and QMail address/SN.
+   - client2 has its own wallet or locker and QMail address/SN.
+   - Record both addresses/SNs in the results file.
+   - Add each client to the other client's contacts before autocomplete and compose tests.
+
+Attachment corpus
+Put test attachments under E:\QMail-Smoke\<date>\attachments.
+
+Recommended golden-path files:
+- small.txt: short plain text.
+- filename with spaces.txt: verifies display and upload with spaces.
+- sample.png: verifies image attachment type.
+- sample.pdf: verifies common document attachment type.
+- sample.bin: verifies generic binary behavior.
+
+Optional edge files:
+- zero-byte.txt, only if the backend is expected to accept empty files.
+- larger-attachment.bin, only if the backend upload limit is known.
+- dangerous-test.exe, only for the dangerous attachment warning path.
+
+Avoid using commas or semicolons in golden-path attachment filenames or folder names. The GUI currently rejects attachment paths with "," or ";" because the backend attachment contract is delimiter-sensitive until CORE-M is fixed. That rejection is expected and should not fail the golden path.
+
+Golden smoke flow
+Record pass/fail plus notes in E:\QMail-Smoke\<date>\results\smoke-results.md.
+
+1. Launch both clients.
+   - Confirm client1 and client2 both open.
+   - Confirm each instance starts its own backend.
+   - Confirm neither client reuses the other client's identity or Client_Data.
+
+2. client1 sends plain email to client2.
+   - Compose with To, Subject, and body.
+   - Send.
+   - Refresh client2.
+   - Open the message on client2.
+   - Verify sender, subject, body, timestamp, and read state.
+
+3. client2 replies to client1.
+   - Use Reply from the received message.
+   - Send.
+   - Refresh client1.
+   - Verify the reply appears and opens correctly.
+
+4. client1 sends attachments to client2.
+   - Attach small.txt and one binary/document file.
+   - Send.
+   - Refresh/open on client2.
+   - Verify attachment chips show correct filenames.
+   - Download or open/save the attachment if supported.
+   - Compare downloaded file name and contents against E:\QMail-Smoke\<date>\attachments.
+
+5. client2 sends an attachment back to client1.
+   - Repeat in the opposite direction to catch one-sided identity, contact, or cache issues.
+
+6. Draft/autosave flow.
+   - Start a draft in client1.
+   - Add To, Cc/Bcc if applicable, subject, body, and optional attachment.
+   - Close/reopen compose.
+   - Verify autosaved fields restore where the current backend contract supports them.
+   - Send or discard according to the known CORE-H limitations below.
+
+7. Contacts and autocomplete.
+   - Add client2 to client1 contacts and client1 to client2 contacts.
+   - Verify To, Cc, and Bcc autocomplete by name, email, and SN where available.
+   - Verify delete contact uses the in-app confirmation modal.
+
+8. Mailbox actions.
+   - Mark unread/read and verify list indicator changes.
+   - Archive a message and verify it leaves Inbox.
+   - Move/delete/trash a message if the backend route is available.
+   - Refresh and verify counts/list remain consistent.
+
+9. Search.
+   - Search for the unique subject used in the smoke run.
+   - Verify returned rows open normally.
+   - If search returns exactly 50 hits, the "Refine your search" notice is expected.
+
+10. Account and navigation sanity.
+   - Verify AccountPane identity/balance cards render without broken classes.
+   - Verify default folder icons render.
+   - Verify Starred is not offered as a usable folder until CORE-J is complete.
+
+Known expected backend gaps
+Do not mark these as GUI regressions unless the backend ticket is known to be complete and integrated:
+- CORE-A: Sent folder persistence may still be incomplete.
+- CORE-E / FIX-26: Backend does not yet expose detailed send-progress stages, so GUI can only show coarse progress.
+- CORE-H / FIX-23: Draft source cleanup and deleteDraft behavior may still be incomplete; this can leak or leave draft-like records until backend work lands.
+- CORE-J / FIX-18: Starred filter is backend-blocked. GUI should not ship a fake starred folder.
+- CORE-K / BUG-46: Search pagination beyond the current backend cap is not available. Exact-50 search results can be ambiguous.
+- CORE-L: Draft recipient detail may be incomplete if backend draft payloads do not include enough recipient metadata.
+- CORE-M: Attachment paths containing "," or ";" are rejected by the GUI pending a backend-safe attachment contract.
+- CORE-N: Draft attachment persistence may be incomplete if the backend does not persist draft attachments.
+
+Expanded Phase 2/3 verification items
+Use the golden flow above first, then cover these if time allows:
+- Healthy network send enables Send.
+- Blocking or failing /raida/echo shows warning/retry behavior.
+- Send-anyway override behaves as designed.
+- No Parity Server wording appears.
+- Send buttons are disabled during immediate post-click debounce.
+- Flaky-network retry is visible and understandable.
+- Persistent send failure is visible even after closing/reopening compose.
+- Dangerous attachment chip and tooltip appear where expected.
+- Dangerous attachment confirmation is required where expected.
+- Attachment filename is real, not a placeholder.
+- Mark Unread toggles the unread dot.
+- Archive moves the message out of Inbox.
+- Sender fallbacks do not show "John Doe".
+- Refresh chain covers beacon ping, echo, notifications, counts, and list.
+- Only one spinner appears during a refresh.
+- Unified notifications are used.
+- Pending-mail toast focuses or opens the matching row.
+- Pending-mail manual decrypt behavior matches the product decision.
+- DRD/popular contact "Add to My Contacts" persists locally and appears in autocomplete.
+- AccountPane Server Details either shows all 25 servers or is absent.
+
+Automation guidance
+- Gem/browser automation is useful for repetitive UI clicks, visual sanity checks, and regression capture in browser/dev mode.
+- Gem should not be the only final proof unless it can operate the packaged Electron app, native file picker, both client windows, and files on E:\.
+- If automation is used, keep a human-observed final run for the core two-client send/receive/attachment path.
+- If the next session adds automation hooks, keep them outside the app behavior unless explicitly approved. Do not add GUI-only shims that hide backend failures.
+
+Suggested smoke-results.md template
+
+QMail smoke results
+Date:
+Tester:
+Build source:
+Portable exe path:
+client1 folder:
+client2 folder:
+client1 address/SN:
+client2 address/SN:
+
+Static gates:
+- npm run lint:
+- npm run build:
+
+Core flow:
+- client1 launch:
+- client2 launch:
+- client1 -> client2 plain email:
+- client2 -> client1 reply:
+- client1 -> client2 attachments:
+- client2 -> client1 attachments:
+- Draft/autosave:
+- Contacts/autocomplete:
+- Read/unread/archive/delete:
+- Search:
+- Account/navigation:
+
+Failures:
+- ID:
+  Steps:
+  Expected:
+  Actual:
+  Screenshot/log:
+  Backend-blocked? yes/no/unknown
+
+Notes:
+
+Where to write follow-ups
+- Backend tasks or backend ambiguity: docs\opu.note-to-backend.txt
+- Out-of-scope GUI bugs discovered during smoke: docs\gpt.bugs.txt
+- Smoke result log: E:\QMail-Smoke\<date>\results\smoke-results.md
+
+Stop and ask the user if
+- The current portable exe or packaged output cannot be found.
+- client1/client2 identities, locker passwords, or addresses are not available.
+- E:\ is not available.
+- The backend fails to launch in both portable clients.
+- A test requires using production identities or sensitive files not already approved for testing.

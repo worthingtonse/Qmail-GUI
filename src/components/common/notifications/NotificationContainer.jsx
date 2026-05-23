@@ -1,4 +1,3 @@
-import React from 'react';
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-react';
 import { useNotification } from './NotificationContext';
 import './NotificationContainer.css';
@@ -9,30 +8,44 @@ const NotificationContainer = () => {
   const getIcon = (type) => {
     switch (type) {
       case 'success':
-        return <CheckCircle size={20} className="notification-icon" />;
+        return <CheckCircle size={20} className="notification-container__icon" />;
       case 'error':
-        return <AlertCircle size={20} className="notification-icon" />;
+        return <AlertCircle size={20} className="notification-container__icon" />;
       case 'warning':
-        return <AlertTriangle size={20} className="notification-icon" />;
+        return <AlertTriangle size={20} className="notification-container__icon" />;
       case 'info':
       default:
-        return <Info size={20} className="notification-icon" />;
+        return <Info size={20} className="notification-container__icon" />;
     }
   };
 
-  const getNotificationClass = (type) => {
-    const baseClass = 'notification-item';
-    switch (type) {
-      case 'success':
-        return `${baseClass} ${baseClass}--success`;
-      case 'error':
-        return `${baseClass} ${baseClass}--error`;
-      case 'warning':
-        return `${baseClass} ${baseClass}--warning`;
-      case 'info':
-      default:
-        return `${baseClass} ${baseClass}--info`;
+  const getNotificationClass = (notification) => {
+    const baseClass = 'notification-container__item';
+    const typeClass = (() => {
+      switch (notification.type) {
+        case 'success':
+          return `${baseClass}--success`;
+        case 'error':
+          return `${baseClass}--error`;
+        case 'warning':
+          return `${baseClass}--warning`;
+        case 'info':
+        default:
+          return `${baseClass}--info`;
+      }
+    })();
+
+    const classes = [baseClass, typeClass];
+    if (typeof notification.onClick === 'function') {
+      classes.push(`${baseClass}--clickable`);
     }
+    return classes.join(' ');
+  };
+
+  const activateNotification = (notification) => {
+    if (typeof notification.onClick !== 'function') return;
+    notification.onClick(notification);
+    removeNotification(notification.id);
   };
 
   if (notifications.length === 0) {
@@ -40,30 +53,55 @@ const NotificationContainer = () => {
   }
 
   return (
-    <div className="notification-container">
+    <aside
+      className="notification-container"
+      aria-live="polite"
+      aria-atomic="false"
+      aria-label="Notifications"
+    >
       {notifications.map((notification) => (
-        <div
+        <article
           key={notification.id}
-          className={getNotificationClass(notification.type)}
+          className={getNotificationClass(notification)}
+          role={typeof notification.onClick === 'function' ? 'button' : 'status'}
+          tabIndex={typeof notification.onClick === 'function' ? 0 : undefined}
+          onClick={
+            typeof notification.onClick === 'function'
+              ? () => activateNotification(notification)
+              : undefined
+          }
+          onKeyDown={(event) => {
+            if (
+              typeof notification.onClick === 'function' &&
+              (event.key === 'Enter' || event.key === ' ')
+            ) {
+              event.preventDefault();
+              activateNotification(notification);
+            }
+          }}
         >
-          <div className="notification-content">
-            <div className="notification-header">
+          <div className="notification-container__content">
+            <header className="notification-container__header">
               {getIcon(notification.type)}
               <button
-                className="notification-close"
-                onClick={() => removeNotification(notification.id)}
+                className="notification-container__close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  removeNotification(notification.id);
+                }}
                 aria-label="Close notification"
+                type="button"
               >
                 <X size={18} />
               </button>
-            </div>
-            <div className="notification-message">
+            </header>
+            <p className="notification-container__message">
               {notification.message}
-            </div>
+            </p>
           </div>
-        </div>
+        </article>
       ))}
-    </div>
+    </aside>
   );
 };
 

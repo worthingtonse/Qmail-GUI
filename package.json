@@ -10,53 +10,19 @@
     "dev2": "cross-env VITE_PORT=5174 VITE_API_PORT=8081 vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron-pack": "npm run build && electron-builder",
-    "build-portable": "npm run build && electron-builder --win portable",
-    "build-all": "npm run build && electron-builder --win --mac --linux",
-    "dist": "npm run build && electron-builder --publish=never"
-  },
-  "build": {
-    "appId": "com.qmail.app",
-    "productName": "QMail",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron.cjs",
-      "preload.cjs",
-      "node_modules/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "public/eff_large_wordlist.txt",
-        "to": "eff_large_wordlist.txt"
-      },
-      {
-        "from": "backend/core.exe",
-        "to": "backend/core.exe"
-      }
-    ],
-    "portable": {
-      "artifactName": "QMail.exe"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "public/icon.ico"
-    }
+    "electron-pack": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "build-portable": "npm run build && electron-builder --config electron-builder.config.cjs --win portable",
+    "build-portable-intl": "npm run build && cross-env QMAIL_BUILD=intl electron-builder --config electron-builder.config.cjs --win portable",
+    "build-portable-all": "npm run build-portable && npm run build-portable-intl",
+    "build-all": "npm run build && electron-builder --config electron-builder.config.cjs --win --mac --linux",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs --publish=never"
   },
   "dependencies": {
-    "electron-is-dev": "^2.0.0",
     "lucide-react": "^0.552.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -75,6 +41,7 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "vite": "^4.5.3",
+    "vitest": "^4.1.7",
     "wait-on": "^7.2.0"
   }
 }

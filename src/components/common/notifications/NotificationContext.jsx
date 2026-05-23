@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid'; // You'll need to install uuid: npm install uuid
+/* eslint-disable react-refresh/only-export-components, react/prop-types */
+import { createContext, useContext, useState, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 
 const NotificationContext = createContext();
 
@@ -14,13 +15,23 @@ export const useNotification = () => {
 export const NotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
 
-  const addNotification = useCallback((message, type = 'info', duration = 5000) => {
+  const removeNotification = useCallback((id) => {
+    setNotifications(prev => prev.filter(notification => notification.id !== id));
+  }, []);
+
+  const addNotification = useCallback((message, type = 'info', optionsOrDuration = 5000) => {
     const id = uuidv4();
+    const options =
+      typeof optionsOrDuration === 'number'
+        ? { duration: optionsOrDuration }
+        : optionsOrDuration || {};
+    const duration = options.duration ?? 5000;
     const notification = {
+      ...options,
       id,
       message,
       type, // 'success', 'error', 'info', 'warning'
-      timestamp: Date.now(),
+      timestamp: options.timestamp ?? Date.now(),
       duration
     };
 
@@ -34,31 +45,27 @@ export const NotificationProvider = ({ children }) => {
     }
 
     return id;
-  }, []);
-
-  const removeNotification = useCallback((id) => {
-    setNotifications(prev => prev.filter(notification => notification.id !== id));
-  }, []);
+  }, [removeNotification]);
 
   const clearAllNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
 
   // Convenience methods
-  const showSuccess = useCallback((message, duration) => {
-    return addNotification(message, 'success', duration);
+  const showSuccess = useCallback((message, optionsOrDuration) => {
+    return addNotification(message, 'success', optionsOrDuration);
   }, [addNotification]);
 
-  const showError = useCallback((message, duration = 8000) => {
-    return addNotification(message, 'error', duration);
+  const showError = useCallback((message, optionsOrDuration = 8000) => {
+    return addNotification(message, 'error', optionsOrDuration);
   }, [addNotification]);
 
-  const showInfo = useCallback((message, duration) => {
-    return addNotification(message, 'info', duration);
+  const showInfo = useCallback((message, optionsOrDuration) => {
+    return addNotification(message, 'info', optionsOrDuration);
   }, [addNotification]);
 
-  const showWarning = useCallback((message, duration) => {
-    return addNotification(message, 'warning', duration);
+  const showWarning = useCallback((message, optionsOrDuration) => {
+    return addNotification(message, 'warning', optionsOrDuration);
   }, [addNotification]);
 
   const value = {

@@ -1,0 +1,21 @@
+# Out-of-Scope Bugs & Technical Debt: QMail-GUI
+Date: 2026-05-21
+Auditor: Gemini CLI
+
+These issues were identified during the usability audit but fall outside the primary scope of the v2 API alignment and usability fix plan.
+
+## 1. Security & Configuration
+- **Hardcoded Backend Port in Electron:** In `electron.cjs`, the backend `core.exe` is spawned with a hardcoded `-port 8080`. However, the renderer process uses `VITE_API_PORT` (defaulting to 8080). If a developer or user changes the environment variable, the frontend will attempt to connect to the wrong port, causing a "Service Unreachable" error.
+- **IPC Handler Stubs (Potential Vulnerabilities):**
+    - `run-command`: This handler is currently a stub returning success. If implemented as a shell execution tool, it would introduce a Remote Code Execution (RCE) risk.
+    - `check-usb-drive`: Unconditionally returns `true`. This may bypass intended hardware-based security checks or licensing logic.
+- **Weak Path Traversal Check:** The `read-file` IPC handler in `electron.cjs` uses a simple prefix check. While better than nothing, it relies on `process.resourcesPath` in production, which may expose more of the application's internal structure than intended.
+
+## 2. State & Data Integrity
+- **Persistence of "John Doe" Identity:** The "John Doe" placeholder identity is baked into the initial state of `QMailDashboard.jsx` and `AccountPane.jsx`. Even if the real identity fails to load, the user sees this fake data, which can lead to confusion (e.g., users thinking their account was overwritten or hacked).
+- **Incomplete Error Recovery in `loadInitialData`:** If critical dashboard data (like `mailCounts` or `folders`) fails to load, the application shows a generic "Error loading dashboard data" toast but proceeds to set `loading(false)`. This results in a "broken" dashboard (empty folders, zero counts) without a clear path for the user to trigger a full re-initialization.
+- **Redundant CSS Imports:** `AccountPane.css` imports `QMailDashboard.css` via `@import`. In a Vite environment, this can lead to duplication of base styles and CSS variables in the final bundle, slightly increasing the application's memory footprint and potentially causing specificity issues.
+
+## 3. Maintenance & Dead Code
+- **Stale API Imports:** `pingQMail` and `getHealthStatus` are imported in several components but either commented out or replaced by static logic. These should be purged to keep the `qmailApiServices.js` integration clean.
+- **Lack of Pagination Metadata:** Many list views hardcode `EMAILS_PER_PAGE = 50`. If the backend changes its default limit, the UI pagination (e.g., `Math.ceil(totalCount / 50)`) will drift and display incorrect page numbers.

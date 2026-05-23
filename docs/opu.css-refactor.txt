@@ -1,0 +1,596 @@
+Opus — CSS refactor chunking plan v2.1
+Date: 2026-05-23 (revision 2.1 — synthesising peer-plan updates +
+                  user's fuzzy-match + script-folder follow-ups)
+Author: Claude Opus 4.7 (1M context)
+Supersedes: opu.css-refactor.txt revision 1 (attribute-first sweep
+            proposal). Revision 2 added GPT's archetype families and
+            primitive layer. Revision 2.1 adopts user's 5% fuzzy-match
+            tolerance and moves the script to a dedicated folder.
+
+Sister docs:
+  docs/gpt.css-refactor.txt     — GPT's plan (archetype families,
+                                   primitive layer, inventory CSV)
+  docs/gem.css-refactor.txt     — Gemini's plan (utility classes,
+                                   attribute-first tables)
+
+
+===============================================================================
+0. WHY THIS REVISION
+===============================================================================
+
+The original opu plan proposed an attribute-first value sweep across the
+7 dirty E-tracks. After reading the peer plans and the user's follow-up
+ideas, this revision:
+
+  * Adopts GPT's ARCHETYPE FAMILIES grouping (wallet operations /
+    qmail panes / modals / onboarding) as the unit of work, because
+    half the duplication is *between* files in the same family rather
+    than across the entire codebase.
+
+  * Adopts GPT's SHARED PRIMITIVE LAYER (.btn, .card, .status-message,
+    etc.) as the natural target for "deduplicate identical class
+    bundles" (your Step G). Limits the primitive layer to clearly
+    semantic candidates only.
+
+  * Rejects Gemini's UTILITY CLASS layer (.p-md / .fs-sm) — would
+    break the theme runtime unless the utilities themselves resolve
+    through var(--token), which leaves us with all the markup cost
+    and none of the architectural simplicity.
+
+  * Borrows your FILE:LINE UNIQUE-ID idea as the structure of the
+    inventory script's output. Sortable by any column lets us spot
+    cross-class duplicates that no single file's eye can catch.
+
+  * Builds the INVENTORY SCRIPT in this repo (scripts/css-audit.mjs)
+    rather than hand-tabulating. Open-source consideration deferred.
+
+  * Reorders phases so INLINE style={{...}} BLOCKS get scooped FIRST,
+    before the file-side sweeps. Inline can't receive a class rename
+    until it becomes a class.
+
+  * Keeps the existing token-driven architecture (component CSS reads
+    var(--token); theme switches by data-attribute on <html>). No new
+    architectural concepts.
+
+
+===============================================================================
+1. WHAT IS ACTUALLY LEFT — RE-MEASURED 2026-05-23
+===============================================================================
+
+Total Phase-4 CSS surface
+-------------------------
+  22 files, 13,610 lines, 847 unique class selectors, 2,365 occurrences.
+
+Raw-literal debt — current state (after E22 and GPT's E8–E21 in review)
+-----------------------------------------------------------------------
+  342 raw colour literals (145 hex + 197 rgba)
+  201 raw font-size px/rem/em occurrences
+
+Compared to the plan's §1.3 baseline (547 / 282), the in-review E-tracks
+have cleared ~37% of colour debt and ~29% of font-size debt.
+
+The remaining debt is concentrated in 7 files — the E1–E7 set (still
+OPEN, never started):
+
+  File                                         Raw colours
+  -------------------------------------------- -----------
+  E1  wallet/components/MainDashboard.css           101
+  E7  screens/ServiceSelectionScreen.css             70
+  E6  App.css                                        54
+  E3  wallet/components/tabs/AuthenticateTab.css     41
+  E4  wallet/components/tabs/LockerTab.css           33
+  E2  wallet/components/tabs/ExportTab.css           32
+  E5  qmail/screens/AccountPane.css                  11
+
+The other 15 files: 0 raw colour literals. GPT's IN-REVIEW work
+already covered them.
+
+Inline style={{...}} blocks — re-counted
+----------------------------------------
+  22 inline blocks across 10 JSX files (plan §13.2 said 58; that was
+  pre-cleanup). Distribution:
+
+    Dynamic   (e.g. `width: ${progress}%`)      ~6 blocks — must stay
+                                                  inline OR move to a
+                                                  CSS custom-property
+                                                  per plan §13.6.
+    Decorative one-offs                          ~5 blocks — collapse
+                                                  into per-component
+                                                  CSS classes.
+    Repeated identical bundle                    ~7+ blocks — all are
+                                                  `style={{ display:
+                                                  'block', fontWeight:
+                                                  'normal', color:
+                                                  '#666' }}` for <small>
+                                                  hint text inside
+                                                  AuthenticateTab.jsx.
+                                                  ONE class replaces all
+                                                  7. (This is your
+                                                  Step-G insight in
+                                                  miniature.)
+
+The repeated bundle even contains a raw colour leak (#666) that the
+CSS-only value sweeps would otherwise miss. Inline-first ordering
+catches it.
+
+
+===============================================================================
+2. PEER PLAN COMPARISON
+===============================================================================
+
+                          Gem                 GPT                 Opu v1
+                          --------------      --------------      --------------
+Output shape              utility classes     primitive layer     tokens-in-comp
+                          (.p-md, .fs-sm)     (.btn, .card)       only
+Inventory                 per-file tables     CSV + 4 docs        in-prose numbers
+Grouping                  E1-E7 sequential    archetype family    attribute-x-7-files
+Treats "10 paddings" as   ship as classes     measurement only    correct for spacing
+                                              then tokens         wrong for colour
+Theme runtime risk        breaks unless       safe                safe
+                          utilities use var
+Effort to start           low                 moderate            low
+
+What three-of-three plans agree on:
+  1. Inventory first.
+  2. Normalise to tokens before any rename.
+  3. The "10 buckets per attribute" idea is right for measurement /
+     consolidation, not as a flat utility output.
+  4. The remaining work surface is the 7 OPEN E-tracks; the IN-REVIEW
+     files are done.
+
+What this revision picks per disagreement:
+  - Output shape:    tokens-in-component, NO utility classes.
+                     (Aligns with GPT + Opu v1. Differs from Gem.)
+  - Grouping:        archetype family.   (GPT.)
+  - Primitive layer: yes, narrow scope.  (GPT.)
+  - Inventory:       in-repo script.     (Synthesis of GPT's CSV +
+                                          user's file:line ID idea.)
+  - Ordering:        inline → file value
+                     sweeps → primitive
+                     extract → BEM rename.  (User + GPT.)
+
+
+===============================================================================
+3. THE INVENTORY + CLUSTERING TOOL  (scripts/css-analysis/)
+===============================================================================
+
+Why a script (not hand-tabulation):
+  - 847 classes × ~7 property categories = ~6k cells to track. Manual
+    work is error-prone and goes stale the moment one file changes.
+  - Re-runnable after every commit so we can SEE the debt shrinking.
+  - Future-proofs against new component CSS — any agent can run
+    `npm run css:audit` and get the current snapshot.
+
+Folder layout (per user's "new folder that would hold the script"
+directive; same shape as GPT's plan):
+
+  scripts/css-analysis/
+    inventory.mjs       — walk CSS + JSX, emit raw selector registry
+    canonicalize.mjs    — normalise values (rgb→hex, 0px→0, sort
+                          props, map token-equivalents to token name)
+    cluster.mjs         — run exact-duplicate + fuzzy-match + family
+                          collision algorithms (see §3.2)
+    report.mjs          — render the four output docs from above
+    config.json         — file globs, token lookup table, similarity
+                          thresholds, etc.
+    README.txt          — how to run, what the outputs mean
+
+  Run from package.json:
+    "css:audit": "node scripts/css-analysis/inventory.mjs && \
+                  node scripts/css-analysis/canonicalize.mjs && \
+                  node scripts/css-analysis/cluster.mjs && \
+                  node scripts/css-analysis/report.mjs"
+
+  All four scripts share a `data/` cache (gitignored) of intermediate
+  JSON so re-running is incremental.
+
+3.1  Inventory shape
+--------------------
+  For each `.classname { ...declarations }` rule, emit one row:
+
+    {
+      id:        "src/wallet/.../MainDashboard.css:247:.dashboard-header",
+      file:      "src/wallet/components/MainDashboard.css",
+      line:      247,
+      selector:  ".dashboard-header",
+      block:     "dashboard"     (guessed; first dash-segment of class)
+      tokens_used:    ["--space-md", "--text-primary"],
+      raw_values: {
+        padding:    "20px 30px",         // present only if not a token
+        background: "#1a1f2e",
+        color:      null,                 // tokenised, so empty here
+      },
+      decl_hash_raw:        "sha1(...)",
+      decl_hash_normalized: "sha1(...)",
+      property_set:         "background|color|padding",
+      jsx_refs:   12                      // className="...dashboard-header..."
+    }
+
+  The two hashes drive clustering: rows with identical
+  decl_hash_normalized are exact bundle duplicates; rows with
+  identical property_set but different hashes are fuzzy candidates.
+
+3.2  Clustering algorithms
+--------------------------
+  Three passes over the inventory:
+
+  Algorithm 1 — Exact duplicate detection
+    Group by decl_hash_normalized. Any cluster of size ≥3 is a
+    candidate primitive (see Phase 3 in §4).
+
+  Algorithm 2 — Fuzzy / near-duplicate clustering
+    Group by property_set, then score each pair within the group:
+
+      same_property_set        : required
+      ≥80% of normalised values match exactly        : required
+      remaining numeric values within 5% of each other : required
+        (5% chosen to match user directive 2026-05-23. Both Gem and
+         GPT independently arrived at near-identical tolerances.)
+
+    The 5% tolerance is FIRST-PASS only. If clusters come back too
+    fragmented (e.g. 12px / 13px / 14px live in three different
+    clusters), the script's config bumps the tolerance to 10% and
+    re-runs. Each subsequent widening is logged so we can see how
+    much loss-of-precision the consolidation cost.
+
+    Worth noting: the 5% rule applies to RAW-vs-RAW comparisons.
+    Once a value is mapped to a token, the token name IS the
+    equality test — `var(--space-md)` only matches `var(--space-md)`,
+    never `var(--space-sm)` even if they're <5% apart in resolved
+    pixels.
+
+  Algorithm 3 — Family / collision graph
+    Group selectors with similar names across files (.status-message,
+    .result-item, .progress-section). A cluster here drives a Phase 3
+    decision: one shared primitive vs. multiple component-local BEM
+    elements, depending on whether the semantics match.
+
+3.3  Output documents (re-generated on each run)
+------------------------------------------------
+  docs/css-audit/inventory.csv
+    Wide CSV: one row per rule. Sortable in any spreadsheet by any
+    column. This is the user's "alphabetise by class + sort by
+    attribute to spot identical clusters" tool.
+
+  docs/css-audit/clusters.md
+    Auto-generated markdown with subsections:
+      §1 Spacing clusters (rows with identical padding values)
+      §2 Typography clusters (identical font-size + weight)
+      §3 Colour clusters (identical color + background)
+      §4 Border / shadow clusters
+      §5 Cross-file collisions (same class name, different rules)
+      §6 Fuzzy clusters (Algorithm 2 hits, with similarity score)
+      §7 Long-tail report (singleton rules — least worth consolidating)
+
+  docs/css-audit/literal-map.md
+    The literal→token mapping that drives Phase 2 sweeps. Hex/rgba
+    column → existing token or proposed new one with rationale.
+
+  docs/css-audit/jsx-refs.md
+    Per-class JSX-usage report. Drives the safe-rename check: a
+    class with 0 JSX refs is dead; a class with 50 refs is high-blast.
+
+3.4  Effort and scope
+---------------------
+  ~half-day to write the four scripts + config. Output is committed
+  alongside the script so reviewers can read it without running
+  Node. Re-runs are cheap (~10s on this codebase).
+
+  Compared to hand-tabulating the same data: break-even for ONE
+  pass. Pays off massively on every re-run — we'll run it after
+  every Phase 2 sweep to verify the debt is dropping.
+
+3.5  Open-source positioning (deferred decision)
+-------------------------------------------------
+  The script as designed is an ANALYZER (read-only — emits reports
+  and proposals). It does NOT auto-rewrite CSS or JSX. That's
+  intentional per GPT's framing:
+
+    "If we later build an OSS repo, it should probably be an
+     ANALYZER, not an auto-rewriter."
+
+  Reason: a tool that rewrites CSS automatically is much harder to
+  trust than one that produces a refactor PLAN a human applies. The
+  human-in-the-loop step is also where the BEM naming decisions
+  happen, which no tool can reliably automate.
+
+  Open-sourcing decision is deferred until Phase 5 closes. If the
+  workflow proves out here, packaging scripts/css-analysis/ as
+  @opu/css-consolidator (or similar) is a reasonable follow-up.
+  Premature now: the tool's heuristics are tuned to this codebase's
+  token system and naming conventions, and ad-hoc tweaks during
+  development would create a wobbly OSS surface.
+
+  Existing OSS tools we DON'T need to rebuild:
+    - PostCSS / CSSTree         : parser/AST (the script depends on it)
+    - CSS Stats / Project Wallace: inventory metrics
+    - stylelint                  : enforce "no new raw literals" rule
+                                   after Phase 5 closes
+    - postcss-combine-duplicated-selectors: exact-dup collapse only
+
+  What none of those do well: infer BEM names, decide whether two
+  similar classes mean the same thing, or preserve the theme-token
+  architecture across a rename. That's our value-add.
+
+
+===============================================================================
+4. PHASE PLAN
+===============================================================================
+
+The phases below replace and supersede the "Chunks 1–16" list in opu
+v1. All work targets the 7 OPEN E-tracks (E1–E7); the 15 IN-REVIEW
+files are out of scope.
+
+PHASE 0 — INVENTORY + CLUSTERING TOOL  (Opus, ~half-day)
+--------------------------------------------------------
+  P0.1  Create scripts/css-analysis/ folder per §3. Write the four
+        scripts (inventory / canonicalize / cluster / report) and
+        config.json. Use postcss for parsing.
+  P0.2  Run the toolchain. Commit the scripts + the four output
+        files in docs/css-audit/. (Outputs are auto-regeneratable
+        but committing them lets reviewers see what we're working
+        from without running Node.)
+  P0.3  Wire `npm run css:audit` in package.json so re-running is
+        one command for any future agent.
+  P0.4  Spot-check the inventory against the rg counts we already
+        have (342 raw colours, 201 raw font-sizes, 22 inline blocks).
+        Adjust config.json if anything's miscounted.
+
+  Deliverable:  scripts/css-analysis/* + docs/css-audit/* (inventory
+  CSV, clusters.md, literal-map.md, jsx-refs.md). Any model can claim
+  subsequent phases from these reports.
+
+
+PHASE 1 — INLINE  style={{...}}  CLEANUP  (any model, ~1h)
+----------------------------------------------------------
+  Process the 22 inline blocks before the file-side work:
+
+  P1.1  Dynamic blocks (`style={{ width: ${pct}% }}` etc.) — convert
+        to CSS custom-property pattern per plan §13.6:
+            style={{ '--upload-progress': pct + '%' }}
+        with `.upload-bar__fill { width: var(--upload-progress); }`
+        in the component CSS. ~6 blocks.
+
+  P1.2  Static decorative blocks — extract into per-component CSS
+        classes named per the existing BEM-ish style. ~5 blocks.
+
+  P1.3  Repeated identical bundle (7× `style={{ display: 'block',
+        fontWeight: 'normal', color: '#666' }}` for <small> hints):
+        introduce `.auth-tab__hint` (or similar) in
+        AuthenticateTab.css. Replace `color: '#666'` with
+        `var(--text-tertiary)`. ONE class, seven inline sites cleaned.
+
+  Acceptance:  `rg 'style=\{\{' --include='*.jsx' src/` returns only
+               the CSS-custom-property pattern from §13.6.
+
+  This phase ships before any value-side work to avoid a special
+  case in every later sweep.
+
+
+PHASE 2 — VALUE-SIDE SWEEPS, attribute-by-attribute
+---------------------------------------------------
+  These are CSS-only — no JSX touch. Each phase can run in parallel.
+
+  P2.1  Colour sweep (any model, ~3h)
+        Map every raw hex + rgba in E1–E7 to a token. The inventory
+        report §3 lists them clustered.
+        New tokens added: ZERO if possible; up to 3 if absolutely
+        needed (cap target preserved). Each new token's rationale
+        documented inline in tokens.css.
+        Acceptance:  `rg '#[0-9a-fA-F]|rgba\(' E1-E7` returns 0.
+
+  P2.2  Font-size sweep (any model, ~1.5h)
+        Map ~200 raw font-size values to the existing
+        --font-size-* ramp. Long-tail values (1.1rem, 1.125rem) map
+        to the closest existing tier; if a real gap exists, may add
+        one new size token.
+        Acceptance:  `rg 'font-size:\s*[0-9.]+(px|rem|em)' E1-E7`
+                     returns 0.
+
+  P2.3  Spacing sweep (any model, ~1h)
+        Map remaining raw paddings + margins to --space-* tokens.
+        ~35 swaps total.
+        Acceptance:  `rg 'padding:\s*[0-9]' E1-E7` only matches
+                     within var()/calc()/clamp() expressions.
+
+  P2.4  Transitions sweep (any model, ~30min)
+        Rewrite `transition: <prop> <ms>ms ...` to
+        `transition: <prop> calc(<ms>ms * var(--motion-scale)) ...`
+        across E1–E7. Lets the App.css :549–560 !important block
+        be removed (see P5.3).
+
+
+PHASE 3 — PRIMITIVE EXTRACTION  (Opus, ~half-day)
+------------------------------------------------
+  Use Phase 0 inventory + Phase 2 cleanup to find truly-repeated
+  bundles. Strict candidate rules (lifted from GPT's plan):
+
+  CANDIDATE IF:  the bundle appears in ≥3 files AND is semantic
+                 (button, card, status block, dialog shell, etc.).
+  NOT CANDIDATE: bundle appears only in 2 files; bundle is
+                 numeric only (padding+margin combo with no
+                 semantic identity).
+
+  Likely primitives (to be confirmed by Phase 0 report):
+    .btn / .btn--primary / .btn--ghost
+    .card
+    .status-message  (success/error/warning)
+    .empty-state
+    .loading-state
+    .form-field (input + label + hint shell)
+    .modal__overlay / .modal__dialog / .modal__header / etc.
+
+  Each primitive lives in src/styles/primitives.css (new). Component
+  CSS composes via className (e.g. <button className="btn btn--primary
+  account-pane__save">).
+
+  This phase replaces what would otherwise be ~30% of the per-file
+  Phase 4 cleanup with shared definitions — one of the highest-
+  leverage pieces of the refactor.
+
+
+PHASE 4 — ARCHETYPE-FAMILY CLEANUP  (per family, ~half-day each)
+----------------------------------------------------------------
+  GPT's grouping: process the 7 dirty E-tracks in family clumps
+  rather than one at a time, because within-family sharing is high.
+
+  Family A — Wallet operations  (E1, E2, E3, E4)
+    Shared patterns: upload areas, selected file lists, results
+    grids, progress bars, status messages. Many of these will
+    have been pulled into Phase 3 primitives.
+    Per file inside the family: apply remaining tokens, BEM-
+    rename per Track F, update JSX className refs, visual smoke.
+
+  Family B — Onboarding / auth  (E7)
+    ServiceSelectionScreen.css is the only E1–E7 file in this
+    archetype; the others (E15, E17, E20, E21) are already
+    IN REVIEW.
+
+  Family C — Account / Settings  (E5)
+    AccountPane.css. Smallest of the dirty files (11 raw colour
+    swaps; all the work is BEM rename + JSX). The AccountPane.jsx
+    entanglement Opu warned about earlier still applies — the
+    rename PR must scope around FIX-* dirt.
+
+  Family D — Global / chrome  (E6)
+    App.css. After Phase 2 + Phase 3, what's left here is the
+    update-modal extract (plan §3.4) and a final pass to remove
+    the !important reduced-motion block.
+
+
+PHASE 5 — CLEANUP  (Opus, ~1h)
+------------------------------
+  P5.1  Remove the App.css :549–560 reduced-motion !important
+        block (Phase 2.4 made it redundant).
+  P5.2  Audit the token cap (target ~80; current count + new ones
+        from Phase 2 should still be well under).
+  P5.3  Remove the themeService.js compatibility shims now that
+        the C-team has integrated commit 0f26e8e (D2 + D4 + D6).
+        Update the 30-test Vitest suite to drop the legacy-shape
+        tests.
+  P5.4  Run scripts/css-audit.mjs one last time. Inventory should
+        report:
+              raw colour literals:  0
+              raw font-size:         0
+              inline style blocks:   only --custom-property pattern
+              token count:           ≤ 80
+        Commit the final inventory as the closing snapshot.
+
+
+===============================================================================
+5. CLAIM-ABLE UNITS FOR OPUS / GEM / GPT
+===============================================================================
+
+  Phase   Unit                          Owner-able by  Effort
+  ------  ----------------------------  -------------  --------
+  P0      Inventory script + outputs    Opus           ~half-day
+  P1      Inline cleanup                any            ~1h
+  P2.1    Colour sweep                  any            ~3h
+  P2.2    Font-size sweep               any            ~1.5h
+  P2.3    Spacing sweep                 any            ~1h
+  P2.4    Transitions sweep             any            ~30min
+  P3      Primitive extraction          Opus           ~half-day
+  P4-A    Wallet ops family (4 files)   any (or split) ~2h
+  P4-B    Onboarding (E7)               any            ~1h
+  P4-C    Account (E5)                  Opus*          ~1h
+  P4-D    Global / App.css (E6)         any            ~1h
+  P5      Cleanup                       Opus           ~1h
+
+  * P4-C touches AccountPane.jsx which is currently entangled with
+    FIX-16-0A work — Opus has full context on that entanglement
+    from earlier sessions.
+
+Total: ~2.5 days serial, ~1.5 days if 2–3 agents run P2 + P4 sweeps
+in parallel.
+
+
+===============================================================================
+6. WHAT THIS PLAN INTENTIONALLY DOES NOT DO
+===============================================================================
+
+NOT replacing the per-file E-track plan from opu.theme.plan.txt §12.4.
+The phases above re-organise the work; the acceptance criteria per
+file are unchanged (zero raw colour/font-size, BEM rename + JSX
+update, visual smoke).
+
+NOT introducing utility classes. Theme runtime relies on the var()
+cascade reading from data-theme on <html>. A .p-md utility that's
+just `padding: 16px` doesn't follow --font-scale or --motion-scale.
+If we DID want utilities, every utility would need to be
+.p-md { padding: var(--space-md); } — which is just an extra
+indirection for no architectural win.
+
+NOT opening a separate repo for the inventory script. The script is
+~200 lines of Node and is specific to this codebase's naming
+conventions. If after Phase 5 closes the script proves useful for
+other projects, packaging it as @opu/css-consolidator is a
+reasonable follow-up — but premature now.
+
+NOT taking Gem's path. The utility-class output would (a) break the
+theme runtime unless rewritten to use var(), and (b) move layout
+knowledge from component CSS into JSX className composition, which
+makes future component edits harder, not easier. The clustering
+INSIGHT in Gem's plan is correct; the implementation form isn't.
+
+NOT processing the 15 IN-REVIEW files. They're done as far as the
+acceptance regex is concerned. If any of them get smoke-test FAIL
+results, those are individual fixes, not a refactor.
+
+
+===============================================================================
+7. WHAT TO DO TODAY
+===============================================================================
+
+If you want me to start now:
+
+  Best move:  PHASE 0 (write scripts/css-audit.mjs and commit the
+              first inventory snapshot).
+              Reason: unblocks Phase 2 in a measurable way, gives
+              you visibility into every consolidation decision before
+              it ships, and re-runs cheaply later.
+
+  Alternative: PHASE 1 (inline style cleanup).
+              22 small swaps. Lands one user-visible improvement
+              (the #666 colour leak goes away) and removes a special
+              case from every later sweep. Smaller commit, faster
+              feedback loop.
+
+  Don't do:   E1 (MainDashboard.css) one-file-at-a-time. After the
+              Phase 0 + 1 + 2 work, what's left of E1 is just BEM
+              rename + JSX updates. Save E1 for last.
+
+Standing recommendation: P0 first. Once the inventory script lands,
+any model can claim any P2 sweep with a clear scope.
+
+
+===============================================================================
+8. CHANGELOG
+===============================================================================
+
+v2.1 (2026-05-23, later)
+  Synthesising the second round of peer updates and user directives:
+    * 5% fuzzy-match tolerance added to clustering algorithm 2
+      (Algorithm 2 in §3.2). Matches GPT v2's tolerance independently.
+      Widening to 10% / 20% supported in the script's config when
+      first-pass clusters are too fragmented.
+    * Script moved from scripts/css-audit.mjs to a folder structure:
+      scripts/css-analysis/{inventory,canonicalize,cluster,report}.mjs
+      per user's "new folder that would hold the script" directive
+      and GPT's identical proposal.
+    * OSS positioning clarified: ANALYZER (read-only) not rewriter,
+      per GPT's framing. Decision deferred to after Phase 5.
+    * Gem's v2 has converged hard with this plan and GPT's. All
+      three plans now agree on inventory-first, tokens-in-component
+      (not utility classes), and signature-based clustering.
+
+v2 (2026-05-23)
+  Full rewrite. Adopts GPT's archetype families + primitive layer;
+  rejects Gem's utility classes; inline blocks moved to Phase 1;
+  inventory becomes a committed script + outputs. Decisions confirmed
+  with user.
+
+v1 (2026-05-23)
+  Initial proposal: attribute-first sweeps + per-file BEM rename.
+  Numbers measured. Recommendation: Chunk 1 = literal→token map doc.
+  Superseded by v2 because the inventory is better captured as a
+  script with regenerable outputs than as a static markdown table.
