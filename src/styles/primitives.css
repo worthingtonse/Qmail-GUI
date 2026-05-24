@@ -271,3 +271,155 @@ select:focus-visible,
     transform: translateY(0);
   }
 }
+
+
+/* ============================================================
+ * 3.2 — Button family
+ * ============================================================
+ * Canonical button shape and four semantic variants. Lifted from
+ * App.css's `button` + `button.primary/secondary/success/danger/
+ * ghost` rules which were the de-facto base layer for the whole
+ * app before this extraction.
+ *
+ * THIS COMMIT IS ADDITIVE ONLY. Phase 3.2a lands the .btn family
+ * here without touching App.css or any JSX. The follow-up
+ * commits (3.2b through 3.2i) reconcile App.css's existing rules
+ * and rename per-component buttons.
+ *
+ * Composition pattern (per plan §2.3):
+ *
+ *     <button class="btn btn--primary main-dashboard__save-btn">
+ *
+ * The primitive owns shape; the component class owns layout +
+ * placement (width, margin, position, alignment). Per GPT's
+ * Phase 3.4 review: overrides should stay layout/local, NOT
+ * half-redefinitions of the primitive base.
+ *
+ * Approved primitive-owned literals (per plan §10 Q3 / GPT review
+ * item 5 — these are intentional gradient end-stops protected by
+ * drift doc D1, not accidental debt):
+ *   #8b5cf6   — accent-primary gradient end-stop
+ *   #10b981   — accent-success gradient end-stop
+ *   #ef4444   — accent-error gradient end-stop
+ *   #556c7c, #4a5f6e — disabled-button gradient (drift doc D10)
+ *
+ * Existing class-name aliases that App.css currently groups with
+ * the variants (e.g. .submit-button, .browse-button, .logout-button)
+ * are NOT named here. Phase 3.2b will JSX-rename them to
+ * `class="btn btn--<variant> <existing-class>"` so their per-
+ * component layout overrides keep working.
+ */
+.btn {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  font-family: var(--font-primary);
+  padding: 12px 24px;
+  transition: all var(--transition-base);
+  position: relative;
+  overflow: hidden;
+  letter-spacing: 0.01em;
+}
+
+/* Ripple decoration on the base. Defined on the primitive so every
+   .btn gets it; subtle white-circle expansion on hover. */
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translate(-50%, -50%);
+  transition: width var(--transition-smooth), height var(--transition-smooth);
+}
+
+.btn:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-md);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Primary — gradient + glow. The end-stop #8b5cf6 stays as a
+   literal per drift doc D1 to preserve the two-tone gradient. */
+.btn--primary {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
+  color: white;
+  box-shadow: var(--shadow-md), var(--glow-primary);
+}
+
+.btn--primary:hover {
+  box-shadow: var(--shadow-lg), var(--glow-primary);
+}
+
+/* Secondary — glass surface for less-prominent actions. */
+.btn--secondary {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+  backdrop-filter: var(--glass-blur);
+}
+
+.btn--secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--border-strong);
+}
+
+/* Success — gradient + glow. */
+.btn--success {
+  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
+  color: white;
+  box-shadow: var(--shadow-md), var(--glow-success);
+}
+
+.btn--success:hover {
+  box-shadow: var(--shadow-lg), var(--glow-success);
+}
+
+/* Danger / error — gradient without glow (errors should feel
+   distinct from successes). */
+.btn--danger {
+  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
+  color: white;
+  box-shadow: var(--shadow-md);
+}
+
+.btn--danger:hover {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Ghost — minimal transparent button for tertiary actions. Smaller
+   padding because there's no surface to fill. */
+.btn--ghost {
+  background: transparent;
+  color: var(--accent-primary);
+  border: none;
+  padding: var(--space-sm) var(--space-md);
+  text-decoration: none;
+}
+
+.btn--ghost:hover {
+  background: rgba(167, 139, 250, 0.1);
+  box-shadow: none;
+  transform: none;
+}
