@@ -54,3 +54,31 @@ select:focus-visible,
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
+
+
+/* ============================================================
+ * 3.5 — Status message
+ * ============================================================
+ * Centered helper text used under form sections to describe the
+ * outcome of an operation (e.g. "Authenticating coins..." or
+ * "Export complete").
+ *
+ * Canonical shape lifted from AuthenticateTab.css and LockerTab.css
+ * which were byte-identical. ExportTab.css's previous definition
+ * was a 4-declaration subset (no line-height, no animation); after
+ * extraction it inherits the canonical 6-decl shape. Visual diff
+ * is a slightly tighter line-height (1.6) plus a fade-in on mount.
+ *
+ * The fadeIn keyframe deliberately stays per-file-defined for now
+ * — two distinct animations share the name across the codebase
+ * (pure fade vs. rise+fade), and consolidating them needs separate
+ * per-consumer review. Tracked as a follow-up to plan v1.1 §Q4.
+ */
+.status-message {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 0;
+  line-height: 1.6;
+  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
+}

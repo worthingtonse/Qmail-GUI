@@ -547,15 +547,6 @@
   letter-spacing: 0.05em;
 }
 
-.status-message {
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
-  text-align: center;
-  margin: 0;
-  line-height: 1.6;
-  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
-}
-
 @keyframes fadeIn {
   from {
     opacity: 0;
