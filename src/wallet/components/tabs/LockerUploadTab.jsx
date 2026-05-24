@@ -185,7 +185,7 @@ const LockerUploadTab = () => {
         <div className="memo-section">
           <label htmlFor="locker-key-input">
             Locker Key:
-            <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+            <small className="field-hint">
               Generate a new key or enter your own 8-character key (ABC-1234 format)
             </small>
           </label>
@@ -219,7 +219,7 @@ const LockerUploadTab = () => {
         <div className="memo-section">
           <label htmlFor="amount-input">
             Amount to Upload:
-            <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+            <small className="field-hint">
               Amount in CloudCoins (e.g., 100.25 or 1000)
             </small>
           </label>
@@ -290,7 +290,7 @@ const LockerUploadTab = () => {
         <div className="memo-section">
           <label htmlFor="wallet-path-input">
             Source Wallet Path:
-            <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+            <small className="field-hint">
               Where to take coins from (optional - defaults to CloudCoin/Wallets/Default)
             </small>
           </label>

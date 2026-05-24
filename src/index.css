@@ -104,6 +104,17 @@ code {
   font-size: var(--font-size-sm);
 }
 
+/* Block-level helper text under inputs and controls.
+   Replaces 7× repeated inline `style={{ display:'block',
+   fontWeight:'normal', color:'#666' }}` bundles in the wallet
+   tabs (Phase 0.5 of docs/opu.css-refactor.txt). Lives here in
+   index.css for now; Phase 3's primitive layer may relocate it. */
+.field-hint {
+  display: block;
+  font-weight: normal;
+  color: var(--text-tertiary);
+}
+
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 8px;

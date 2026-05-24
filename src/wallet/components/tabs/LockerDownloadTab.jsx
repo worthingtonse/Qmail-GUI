@@ -104,7 +104,7 @@ const LockerDownloadTab = () => {
         <div className="memo-section">
           <label htmlFor="locker-key-input">
             Locker Key:
-            <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+            <small className="field-hint">
               8-character key in format ABC-1234 (e.g., AFG-7YTB)
             </small>
           </label>
@@ -128,7 +128,7 @@ const LockerDownloadTab = () => {
         <div className="memo-section">
           <label htmlFor="wallet-path-input">
             Destination Wallet Path:
-            <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+            <small className="field-hint">
               Where to store downloaded coins (optional - defaults to CloudCoin/Wallets/Default)
             </small>
           </label>

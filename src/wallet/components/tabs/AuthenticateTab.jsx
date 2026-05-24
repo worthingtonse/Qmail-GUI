@@ -339,7 +339,7 @@ const AuthenticateTab = () => {
           <div className="memo-section">
             <label htmlFor="file-directory-input">
               Files Directory:
-              <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+              <small className="field-hint">
                 Where your CloudCoin files are located (e.g., Downloads, Documents, or C:\Your\Custom\Path)
               </small>
             </label>
@@ -376,7 +376,7 @@ const AuthenticateTab = () => {
           <div className="memo-section">
             <label htmlFor="wallet-path-input">
               Wallet Path:
-              <small style={{ display: 'block', fontWeight: 'normal', color: '#666' }}>
+              <small className="field-hint">
                 Where to store authenticated coins (e.g., CloudCoin/Wallets/Default or C:\Your\Wallet\Path)
               </small>
             </label>

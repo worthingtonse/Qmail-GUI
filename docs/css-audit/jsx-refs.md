@@ -116,9 +116,11 @@ _This is a **lower-bound** usage signal, not an exact count. The regex only catc
 | `.reading-pane__action-button` | 9 | `src/qmail/screens/ReadingPane.css` | 475 |
 | `.reading-pane__action-button` | 9 | `src/qmail/screens/ReadingPane.css` | 482 |
 | `.dashboard` | 8 | `src/wallet/components/MainDashboard.css` | 26 |
+| `.wallet-path` | 8 | `src/wallet/components/MainDashboard.css` | 1119 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 1342 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 1352 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 1359 |
+| `.wallet-path` | 8 | `src/wallet/components/MainDashboard.css` | 1765 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 2273 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 2279 |
 | `.echo-status-output` | 8 | `src/wallet/components/MainDashboard.css` | 2283 |
@@ -153,6 +155,7 @@ _This is a **lower-bound** usage signal, not an exact count. The regex only catc
 | `.balance-value` | 8 | `src/qmail/screens/AccountPane.css` | 358 |
 | `.balance-value` | 8 | `src/qmail/screens/AccountPane.css` | 828 |
 | `.reading-pane__sender` | 8 | `src/qmail/screens/ReadingPane.css` | 34 |
+| `.field-hint` | 7 | `src/index.css` | 112 |
 | `.balance-card` | 7 | `src/qmail/screens/AccountPane.css` | 301 |
 | `.balance-card` | 7 | `src/qmail/screens/AccountPane.css` | 312 |
 | `.balance-card` | 7 | `src/qmail/screens/AccountPane.css` | 319 |
@@ -196,12 +199,14 @@ _This is a **lower-bound** usage signal, not an exact count. The regex only catc
 | `.navigation-pane__link` | 6 | `src/qmail/screens/NavigationPane.css` | 89 |
 | `.navigation-pane__link` | 6 | `src/qmail/screens/NavigationPane.css` | 263 |
 | `.navigation-pane__link` | 6 | `src/qmail/screens/NavigationPane.css` | 304 |
-| `.wallet-path` | 5 | `src/wallet/components/MainDashboard.css` | 1119 |
-| `.wallet-path` | 5 | `src/wallet/components/MainDashboard.css` | 1765 |
 | `.amount-input` | 5 | `src/wallet/components/tabs/ExportTab.css` | 91 |
 | `.amount-input` | 5 | `src/wallet/components/tabs/ExportTab.css` | 105 |
 | `.amount-input` | 5 | `src/wallet/components/tabs/ExportTab.css` | 111 |
 | `.amount-input` | 5 | `src/wallet/components/tabs/ExportTab.css` | 119 |
+| `.locker-key-input` | 5 | `src/wallet/components/tabs/LockerTab.css` | 122 |
+| `.locker-key-input` | 5 | `src/wallet/components/tabs/LockerTab.css` | 136 |
+| `.locker-key-input` | 5 | `src/wallet/components/tabs/LockerTab.css` | 141 |
+| `.locker-key-input` | 5 | `src/wallet/components/tabs/LockerTab.css` | 148 |
 | `.quick-amount-btn` | 5 | `src/wallet/components/tabs/LockerTab.css` | 219 |
 | `.quick-amount-btn` | 5 | `src/wallet/components/tabs/LockerTab.css` | 233 |
 | `.quick-amount-btn` | 5 | `src/wallet/components/tabs/LockerTab.css` | 240 |
@@ -289,10 +294,6 @@ _This is a **lower-bound** usage signal, not an exact count. The regex only catc
 | `.results-close-button` | 4 | `src/wallet/components/tabs/AuthenticateTab.css` | 973 |
 | `.results-close-button` | 4 | `src/wallet/components/tabs/AuthenticateTab.css` | 980 |
 | `.results-close-button` | 4 | `src/wallet/components/tabs/AuthenticateTab.css` | 984 |
-| `.locker-key-input` | 4 | `src/wallet/components/tabs/LockerTab.css` | 122 |
-| `.locker-key-input` | 4 | `src/wallet/components/tabs/LockerTab.css` | 136 |
-| `.locker-key-input` | 4 | `src/wallet/components/tabs/LockerTab.css` | 141 |
-| `.locker-key-input` | 4 | `src/wallet/components/tabs/LockerTab.css` | 148 |
 | `.progress-section` | 4 | `src/wallet/components/tabs/LockerTab.css` | 344 |
 | `.progress-bar-container` | 4 | `src/wallet/components/tabs/LockerTab.css` | 359 |
 | `.progress-text` | 4 | `src/wallet/components/tabs/LockerTab.css` | 414 |
