@@ -67,21 +67,16 @@
   font-weight: 400;
 }
 
+/* Layout/local overrides on top of .btn .btn--danger (primitives.css).
+   The logout button is intentionally quieter than other danger
+   buttons: tighter padding, smaller radius, lighter shadow. */
 .logout-button {
-  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
-  color: white;
   padding: 10px 24px;
-  font-size: var(--font-size-md);
-  font-weight: 500;
   border-radius: var(--radius-md);
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-base);
   box-shadow: var(--shadow-sm);
 }
 
 .logout-button:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
 

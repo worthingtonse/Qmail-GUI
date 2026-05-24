@@ -126,7 +126,7 @@ const footerRef = useRef(null);
         <div className="header-right">
           <button 
             ref={logoutButtonRef}
-            className="logout-button glass-sound-btn" 
+            className="btn btn--danger logout-button glass-sound-btn"
             onClick={handleLogout}
             title="Logout from CloudCoin Pro"
           >

@@ -125,18 +125,16 @@ button.success:hover,
   box-shadow: var(--shadow-lg), var(--glow-success);
 }
 
-/* Error/Danger Button — SHIM:
- *   `button.danger` retired in 3.2i (last bare-class consumer)
- *   `.logout-button` retired in 3.2c (MainDashboard) */
-button.danger,
-.logout-button {
+/* Error/Danger Button — SHIM: `button.danger` retired in 3.2i.
+   `.logout-button` shim was retired in 3.2c — MainDashboard now
+   uses .btn .btn--danger directly. */
+button.danger {
   background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
   color: white;
   box-shadow: var(--shadow-md);
 }
 
-button.danger:hover,
-.logout-button:hover {
+button.danger:hover {
   box-shadow: var(--shadow-lg);
 }
 
