@@ -1,12 +1,26 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24 (rev 1.3 — 3.2b restructured per GPT review of 3.2a)
+**Date:** 2026-05-24 (rev 1.4 — 3.2b extended to bare-class shims; qmail/* migration deferred)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** 3.1 + 3.5 + 3.3 + 3.4 + 3.2a shipped; 3.6 deferred; 3.2b next
+**Status:** 3.1 + 3.5 + 3.3 + 3.4 + 3.2a shipped; 3.6 deferred; 3.2b shipping
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `975bb1f` (Phase 3.2a)
+**Prerequisite commits:** through `15f7ac5` (Phase 3.2a review docs)
 
 **Changelog:**
+
+- **v1.4 (2026-05-24)** — While implementing 3.2b, a JSX survey
+  surfaced ~30 bare-class consumers (`<button className="primary">`
+  etc.) of App.css's grouped variant rules — roughly 3× the
+  estimate. Many sit in qmail/* screens (`ComposeModal`,
+  `ContactsPane`, `EmailListPane`, `QMailDashboard`, `ReadingPane`,
+  `WalletSetupScreen`) that were never on Track F's E1–E7 list.
+  Extending v1.3's hybrid: `button.primary/.secondary/.success/`
+  `.danger/.ghost` rules ALSO become `/* SHIM */` rules in App.css
+  (retired in 3.2i, after every per-file adoption removes the last
+  bare-class consumer). qmail/* screen JSX migration gets its own
+  follow-on track (3.2j or Phase 4) — NOT bundled into 3.2b. Net
+  effect: 3.2b stays small (App.css edits only, zero JSX), and the
+  bare-class fold lands when there are zero consumers left.
 
 - **v1.3 (2026-05-24)** — Restructured 3.2b alias handling after GPT
   review of 3.2a (see `docs/opu.gpt-handoff-css-phase32a.txt`):
@@ -339,11 +353,15 @@ aliases split into two groups by live-JSX-consumer status:
   - `.payout-option` (PayoutTab.jsx) → shim of `.btn--success`
   - `.test-cli-btn` (SettingsTab.jsx) → shim of `.btn--success`
 
-  *Bare-class consumers (JSX rename in same commit):*
-  - `button.primary/.secondary/.success/.danger/.ghost` rules — fold
-    into `.btn--*` variants AND delete the App.css grouped rule.
-    Rename any `<button className="primary">` etc. JSX sites to
-    `className="btn btn--primary"`.
+  *Bare-class consumers (per v1.4 — KEEP as SHIM, retire in 3.2i):*
+  - `button.primary/.secondary/.success/.danger/.ghost` — kept as
+    `/* SHIM */` rules in App.css. ~30 JSX sites still use these
+    bare class names; many sit in qmail/* screens
+    (ComposeModal/ContactsPane/EmailListPane/QMailDashboard/
+    ReadingPane/WalletSetupScreen) that were not part of Track F's
+    E1–E7 scope. Migrating that JSX is its own follow-on track
+    (3.2j or Phase 4), NOT 3.2b. The bare-class rules retire in
+    3.2i, after every consumer has been migrated.
 
   *Bare-element rule:* `button { ... }` at App.css L11 stays for
   now — it acts as the unstyled-button base. 3.2i decides whether
@@ -588,9 +606,10 @@ complexity.
 | 3.2f | LockerTab `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
 | 3.2g | AccountPane `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
 | 3.2h | ServiceSelectionScreen `.btn` adoption + JSX | ~3 JSX | ~15m | ~3 | pending |
-| 3.2i | Cleanup — verify overrides are layout-only | 0 | ~30m | 0 | pending |
+| 3.2j | qmail/* screens — bare-class JSX migration (NEW per v1.4) | ~30 JSX | ~1h | ~30 | pending — follow-on track, not strictly Phase 3 |
+| 3.2i | Cleanup — remove bare-class shims; verify overrides are layout-only | 0 | ~30m | 0 | pending — runs after 3.2j |
 
-**Total remaining: ~3.5 hours across 3.2b–i.** Each sub-commit is its own commit.
+**Total remaining: ~4.5 hours across 3.2b–j + i.** Each sub-commit is its own commit. (3.2i runs last since it removes the bare-class shims that 3.2j's renames depend on.)
 
 **Pause points for GPT review:**
 

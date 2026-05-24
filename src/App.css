@@ -57,24 +57,39 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* Primary Button */
-button.primary,
-.submit-button,
-.agree-button,
-.continue-button {
+/* -----------------------------------------------------------------
+ * Phase 3.2b — App.css alias reconciliation (commit pending).
+ *
+ * Canonical owner of button shape is now `src/styles/primitives.css`
+ * (`.btn`, `.btn--primary/--secondary/--success/--danger/--ghost`,
+ * added in commit 975bb1f).
+ *
+ * Orphan aliases removed in this commit (zero JSX consumers — already
+ * BEM-migrated): .submit-button, .agree-button, .continue-button,
+ * .exit-button, .reset-button.
+ *
+ * The rules below are SHIMS retained until each consumer's per-file
+ * adoption sub-commit lands (see opu.css-phase3-plan.md §4 table for
+ * 3.2c–h schedule). They duplicate primitives.css's `.btn--*` rules
+ * by design so live consumers keep their styling during the rolling
+ * migration. Each shim's removal sub-commit is named inline.
+ * ----------------------------------------------------------------- */
+
+/* Primary Button — SHIM: remove `button.primary` in 3.2i (last) */
+button.primary {
   background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
   color: white;
   box-shadow: var(--shadow-md), var(--glow-primary);
 }
 
-button.primary:hover,
-.submit-button:hover,
-.agree-button:hover,
-.continue-button:hover {
+button.primary:hover {
   box-shadow: var(--shadow-lg), var(--glow-primary);
 }
 
-/* Secondary Button */
+/* Secondary Button — SHIM:
+ *   `button.secondary` retired in 3.2i (last bare-class consumer)
+ *   `.browse-button` retired in 3.2c (MainDashboard) + 3.2e (Auth)
+ *   `.change-password-btn`, `.backup-btn` retired in 3.2c (Settings via MainDashboard) */
 button.secondary,
 .browse-button,
 .change-password-btn,
@@ -93,7 +108,9 @@ button.secondary:hover,
   border-color: var(--border-strong);
 }
 
-/* Success Button */
+/* Success Button — SHIM:
+ *   `button.success` retired in 3.2i (last bare-class consumer)
+ *   `.payout-option`, `.test-cli-btn` retired in 3.2c (MainDashboard) */
 button.success,
 .payout-option,
 .test-cli-btn {
@@ -108,24 +125,23 @@ button.success:hover,
   box-shadow: var(--shadow-lg), var(--glow-success);
 }
 
-/* Error/Danger Button */
+/* Error/Danger Button — SHIM:
+ *   `button.danger` retired in 3.2i (last bare-class consumer)
+ *   `.logout-button` retired in 3.2c (MainDashboard) */
 button.danger,
-.logout-button,
-.exit-button {
+.logout-button {
   background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
   color: white;
   box-shadow: var(--shadow-md);
 }
 
 button.danger:hover,
-.logout-button:hover,
-.exit-button:hover {
+.logout-button:hover {
   box-shadow: var(--shadow-lg);
 }
 
-/* Ghost Button */
-button.ghost,
-.reset-button {
+/* Ghost Button — SHIM: remove `button.ghost` in 3.2i (last) */
+button.ghost {
   background: transparent;
   color: var(--accent-primary);
   border: none;
@@ -133,8 +149,7 @@ button.ghost,
   text-decoration: none;
 }
 
-button.ghost:hover,
-.reset-button:hover {
+button.ghost:hover {
   background: rgba(167, 139, 250, 0.1);
   box-shadow: none;
   transform: none;
