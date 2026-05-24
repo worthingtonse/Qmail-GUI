@@ -281,7 +281,7 @@ const AuthenticateTab = () => {
             <p className="upload-text">Drag and drop CloudCoin files here</p>
             <p className="upload-subtext">or</p>
             <button 
-              className="browse-button" 
+              className="btn btn--primary browse-button"
               onClick={handleFileSelect}
               disabled={isProcessing}
             >

@@ -102,7 +102,7 @@ const SettingsTab = () => {
         {/* Change Password */}
         <div className="setting-item">
           <span>Manage your password</span>
-          <button className="change-password-btn" onClick={handleChangePassword}>
+          <button className="btn btn--primary change-password-btn" onClick={handleChangePassword}>
             Change Password
           </button>
         </div>
@@ -126,8 +126,8 @@ const SettingsTab = () => {
                 className="backup-path-input"
                 disabled={isBackingUp}
               />
-              <button 
-                className="backup-btn"
+              <button
+                className="btn btn--primary backup-btn"
                 onClick={handleCreateBackup}
                 disabled={isBackingUp || !backupDestination.trim()}
               >
@@ -165,8 +165,8 @@ const SettingsTab = () => {
         <div className="setting-item cli-test-section">
           <div className="cli-test-content">
             <h4>RAIDA Network Test (Echo)</h4>
-            <button 
-              className="test-cli-btn"
+            <button
+              className="btn btn--success test-cli-btn"
               onClick={handleEchoTest}
               disabled={isEchoRunning}
             >

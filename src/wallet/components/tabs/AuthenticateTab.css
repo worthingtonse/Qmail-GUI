@@ -101,54 +101,40 @@
   font-weight: 400;
 }
 
+/* Layout/local overrides on top of .btn .btn--primary (primitives.css).
+   Auth's browse button:
+     - wider horizontal padding for the file-picker affordance
+     - smaller corner radius
+     - custom margin in the upload-box flow
+     - brighter ripple (white 20% vs primitive 10%) and a custom rgba
+       glow on hover (no global --glow-primary surface in this design)
+     - wallet-tabs slate-gradient disabled state (drift D10) — kept
+       as per-file per GPT review of 3.2a Q2 */
 .browse-button {
-  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
-  color: white;
-  border: none;
   padding: 12px 32px;
   border-radius: var(--radius-md);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
   margin: var(--space-lg) 0;
   box-shadow: var(--shadow-md);
-  position: relative;
-  overflow: hidden;
 }
 
 .browse-button::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-radius: 50%;
   background: rgba(255, 255, 255, 0.2);
-  transform: translate(-50%, -50%);
-  transition: width var(--transition-smooth), height var(--transition-smooth);
 }
 
-.browse-button:hover:not(:disabled)::before {
-  width: 300px;
-  height: 300px;
+/* Suppress the primitive's hover ripple while disabled. The primitive
+   leaves the ripple on `.btn:hover::before` (no :disabled qualifier);
+   Auth's slate-disabled state needs the ripple silenced. */
+.browse-button:disabled:hover::before {
+  width: 0;
+  height: 0;
 }
 
 .browse-button:hover:not(:disabled) {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-lg), 0 0 20px rgba(167, 139, 250, 0.4);
-}
-
-.browse-button:active {
-  transform: translateY(0);
 }
 
 .browse-button:disabled {
   background: linear-gradient(135deg, #556c7c 0%, #4a5f6e 100%);
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
   opacity: 0.5;
 }
 

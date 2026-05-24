@@ -58,21 +58,28 @@ button:disabled {
 }
 
 /* -----------------------------------------------------------------
- * Phase 3.2b — App.css alias reconciliation (commit pending).
+ * Phase 3.2 — App.css button-rule reconciliation.
  *
- * Canonical owner of button shape is now `src/styles/primitives.css`
+ * Canonical owner of button shape is `src/styles/primitives.css`
  * (`.btn`, `.btn--primary/--secondary/--success/--danger/--ghost`,
  * added in commit 975bb1f).
  *
- * Orphan aliases removed in this commit (zero JSX consumers — already
+ * 3.2b removed orphan aliases (zero JSX consumers, all already
  * BEM-migrated): .submit-button, .agree-button, .continue-button,
  * .exit-button, .reset-button.
  *
- * The rules below are SHIMS retained until each consumer's per-file
- * adoption sub-commit lands (see opu.css-phase3-plan.md §4 table for
- * 3.2c–h schedule). They duplicate primitives.css's `.btn--*` rules
- * by design so live consumers keep their styling during the rolling
- * migration. Each shim's removal sub-commit is named inline.
+ * 3.2c and the 3.2-omnibus commit retired the alias shims for live
+ * consumers (.logout-button, .browse-button, .change-password-btn,
+ * .backup-btn, .payout-option, .test-cli-btn) by adding
+ * `btn btn--variant` to their JSX and trimming per-file rules to
+ * layout-only overrides.
+ *
+ * The rules below are the REMAINING bare-class SHIMS for
+ * `button.primary/.secondary/.success/.danger/.ghost`. They cover
+ * ~30 JSX sites — most in qmail/* screens that were not in Track F's
+ * E1–E7 scope. The bare-class JSX migration is its own follow-on
+ * track (3.2j); these shims retire in 3.2i once 3.2j drains the
+ * last consumer.
  * ----------------------------------------------------------------- */
 
 /* Primary Button — SHIM: remove `button.primary` in 3.2i (last) */
@@ -86,42 +93,34 @@ button.primary:hover {
   box-shadow: var(--shadow-lg), var(--glow-primary);
 }
 
-/* Secondary Button — SHIM:
- *   `button.secondary` retired in 3.2i (last bare-class consumer)
- *   `.browse-button` retired in 3.2c (MainDashboard) + 3.2e (Auth)
- *   `.change-password-btn`, `.backup-btn` retired in 3.2c (Settings via MainDashboard) */
-button.secondary,
-.browse-button,
-.change-password-btn,
-.backup-btn {
+/* Secondary Button — SHIM: `button.secondary` retired in 3.2i.
+   Alias shims for `.browse-button`, `.change-password-btn`, and
+   `.backup-btn` were retired in the 3.2-omnibus commit — those
+   buttons were never actually secondary-glass in the live cascade
+   (per-file rules in MainDashboard.css/AuthenticateTab.css overrode
+   to primary-gradient). They now consume .btn .btn--primary directly. */
+button.secondary {
   background: var(--card-bg);
   color: var(--text-primary);
   border: 1px solid var(--border-medium);
   backdrop-filter: var(--glass-blur);
 }
 
-button.secondary:hover,
-.browse-button:hover,
-.change-password-btn:hover,
-.backup-btn:hover {
+button.secondary:hover {
   background: var(--card-hover);
   border-color: var(--border-strong);
 }
 
-/* Success Button — SHIM:
- *   `button.success` retired in 3.2i (last bare-class consumer)
- *   `.payout-option`, `.test-cli-btn` retired in 3.2c (MainDashboard) */
-button.success,
-.payout-option,
-.test-cli-btn {
+/* Success Button — SHIM: `button.success` retired in 3.2i.
+   `.payout-option` and `.test-cli-btn` shims were retired in the
+   3.2-omnibus commit. */
+button.success {
   background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
   color: white;
   box-shadow: var(--shadow-md), var(--glow-success);
 }
 
-button.success:hover,
-.payout-option:hover,
-.test-cli-btn:hover:not(:disabled) {
+button.success:hover {
   box-shadow: var(--shadow-lg), var(--glow-success);
 }
 

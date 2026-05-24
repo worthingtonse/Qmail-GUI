@@ -1203,23 +1203,12 @@
   margin-top: var(--space-lg);
 }
 
+/* Layout/local overrides on top of .btn .btn--success (primitives.css).
+   Payout options are wide left-aligned cards-as-buttons, not standard
+   CTAs. The padding + text-align deviation is intentional. */
 .payout-option {
-  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
-  color: white;
   padding: var(--space-md) var(--space-lg);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  border-radius: var(--radius-lg);
   text-align: left;
-  border: none;
-  cursor: pointer;
-  box-shadow: var(--shadow-md), var(--glow-success);
-  transition: all var(--transition-base);
-}
-
-.payout-option:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg), var(--glow-success);
 }
 
 /* Settings Options */
@@ -1270,23 +1259,17 @@
   font-size: var(--font-size-md);
 }
 
-.change-password-btn,
-.backup-btn {
-  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
-  color: white;
+/* Layout/local overrides on top of .btn .btn--primary (primitives.css).
+   Settings buttons share the quieter shadow pair (--shadow-sm rest /
+   --shadow-md hover) instead of the primitive's --shadow-md/--shadow-lg
+   so they don't compete visually with the page CTAs. */
+.change-password-btn {
   padding: 10px 24px;
-  font-size: var(--font-size-md);
-  font-weight: 500;
   border-radius: var(--radius-md);
-  border: none;
-  cursor: pointer;
   box-shadow: var(--shadow-sm), var(--glow-primary);
-  transition: all var(--transition-base);
 }
 
-.change-password-btn:hover,
-.backup-btn:hover {
-  transform: translateY(-2px);
+.change-password-btn:hover {
   box-shadow: var(--shadow-md), var(--glow-primary);
 }
 
@@ -1308,29 +1291,22 @@
   font-weight: 600;
 }
 
+/* Layout/local overrides on top of .btn .btn--success (primitives.css).
+   Same quieter shadow pair as the other settings-area CTAs. Slate-
+   gradient disabled state is the wallet-tabs convention (drift D10)
+   and stays as a per-file override per the 3.2a GPT review (Q2). */
 .test-cli-btn {
-  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
-  color: white;
-  border: none;
   padding: 12px 28px;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: var(--font-size-md);
-  font-weight: 500;
   box-shadow: var(--shadow-sm), var(--glow-success);
-  transition: all var(--transition-base);
 }
 
 .test-cli-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md), var(--glow-success);
 }
 
 .test-cli-btn:disabled {
   background: linear-gradient(135deg, #556c7c 0%, #4a5f6e 100%);
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
   opacity: 0.6;
 }
 
@@ -2238,30 +2214,23 @@
   cursor: not-allowed;
 }
 
-/* Re-style backup-btn to match test-cli-btn for consistency */
+/* Layout/local overrides on top of .btn .btn--primary (primitives.css).
+   Backup button matches test-cli-btn's shape (padding 12px 28px,
+   radius-md) for visual consistency in the settings panel. Same
+   quieter shadow pair + slate-gradient disabled state as the
+   other settings CTAs. */
 .backup-btn {
-  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
-  color: white;
-  border: none;
   padding: 12px 28px;
   border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: var(--font-size-md);
-  font-weight: 500;
   box-shadow: var(--shadow-sm), var(--glow-primary);
-  transition: all var(--transition-base);
 }
 
 .backup-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md), var(--glow-primary);
 }
 
 .backup-btn:disabled {
   background: linear-gradient(135deg, #556c7c 0%, #4a5f6e 100%);
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
   opacity: 0.6;
 }
 
