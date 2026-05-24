@@ -12,6 +12,7 @@
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",
+    "css:audit": "node scripts/css-analysis/inventory.mjs && node scripts/css-analysis/canonicalize.mjs && node scripts/css-analysis/cluster.mjs && node scripts/css-analysis/report.mjs",
     "preview": "vite preview",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
@@ -40,6 +41,7 @@
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "postcss": "^8.5.15",
     "vite": "^4.5.3",
     "vitest": "^4.1.7",
     "wait-on": "^7.2.0"

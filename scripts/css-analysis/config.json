@@ -1,0 +1,98 @@
+{
+  "comment": "Configuration for the css-analysis toolchain. See README.txt.",
+
+  "css_files": [
+    "src/App.css",
+    "src/index.css",
+    "src/screens/ServiceSelectionScreen.css",
+    "src/wallet/components/MainDashboard.css",
+    "src/wallet/components/PasswordScreen.css",
+    "src/wallet/components/USBCheckScreen.css",
+    "src/wallet/components/WelcomeScreen.css",
+    "src/wallet/components/DicewarePasswordCreator.css",
+    "src/wallet/components/tabs/ExportTab.css",
+    "src/wallet/components/tabs/AuthenticateTab.css",
+    "src/wallet/components/tabs/LockerTab.css",
+    "src/wallet/components/tabs/ReceiptModal.css",
+    "src/qmail/screens/AccountPane.css",
+    "src/qmail/screens/ComposeModal.css",
+    "src/qmail/screens/EmailListPane.css",
+    "src/qmail/screens/ContactsPane.css",
+    "src/qmail/screens/QMailDashboard.css",
+    "src/qmail/screens/ReadingPane.css",
+    "src/qmail/screens/NavigationPane.css",
+    "src/qmail/screens/AddContactModal.css",
+    "src/qmail/screens/WalletSetupScreen.css",
+    "src/components/common/notifications/NotificationContainer.css"
+  ],
+
+  "jsx_glob": "src/**/*.jsx",
+
+  "token_lookup_comment": "Maps EXACT raw-value strings to token names. Only used in Step 2 (canonical signature). Fuzzy matching lives in cluster.mjs Algorithm 2.",
+  "token_lookup": {
+    "colors": {
+      "#0f1419": "var(--primary-bg-start)",
+      "#1a1f2e": "var(--primary-bg-mid)",
+      "#1e2532": "var(--primary-bg-end)",
+      "#151921": "var(--secondary-bg)",
+      "#a78bfa": "var(--accent-primary)",
+      "#7dd3fc": "var(--accent-secondary)",
+      "#fbbf24": "var(--accent-tertiary)",
+      "#34d399": "var(--accent-success)",
+      "#f87171": "var(--accent-error)",
+      "#f8fafc": "var(--text-primary)",
+      "#cbd5e1": "var(--text-secondary)",
+      "#94a3b8": "var(--text-tertiary)"
+    },
+    "font_sizes": {
+      "0.75rem": "var(--font-size-xs)",
+      "0.875rem": "var(--font-size-sm)",
+      "1rem": "var(--font-size-md)",
+      "1.25rem": "var(--font-size-lg)",
+      "1.5rem": "var(--font-size-xl)",
+      "2rem": "var(--font-size-2xl)",
+      "12px": "var(--font-size-xs)",
+      "14px": "var(--font-size-sm)",
+      "16px": "var(--font-size-md)",
+      "20px": "var(--font-size-lg)",
+      "24px": "var(--font-size-xl)",
+      "32px": "var(--font-size-2xl)"
+    },
+    "spacing": {
+      "0.25rem": "var(--space-xs)",
+      "0.5rem": "var(--space-sm)",
+      "1rem": "var(--space-md)",
+      "1.5rem": "var(--space-lg)",
+      "2rem": "var(--space-xl)",
+      "3rem": "var(--space-2xl)",
+      "4px": "var(--space-xs)",
+      "8px": "var(--space-sm)",
+      "16px": "var(--space-md)",
+      "24px": "var(--space-lg)",
+      "32px": "var(--space-xl)",
+      "48px": "var(--space-2xl)"
+    },
+    "radii": {
+      "4px": "var(--radius-xs)",
+      "8px": "var(--radius-sm)",
+      "12px": "var(--radius-md)",
+      "16px": "var(--radius-lg)",
+      "20px": "var(--radius-xl)",
+      "24px": "var(--radius-2xl)"
+    }
+  },
+
+  "spacing_props": ["padding", "padding-top", "padding-right", "padding-bottom", "padding-left", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "gap", "row-gap", "column-gap"],
+  "radius_props":  ["border-radius", "border-top-left-radius", "border-top-right-radius", "border-bottom-left-radius", "border-bottom-right-radius"],
+  "font_size_props": ["font-size"],
+  "color_props": ["color", "background", "background-color", "border-color", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color"],
+
+  "fuzzy_tolerance_pct_comment": "Algorithm 2 only — Step 2 canonical signatures stay exact (per GPT review item 4). Widen if first-pass clusters fragment.",
+  "fuzzy_tolerance_pct": 5,
+
+  "primitive_threshold_comment": "Minimum cluster size to be considered a primitive candidate.",
+  "primitive_threshold": 3,
+
+  "output_dir": "docs/css-audit",
+  "cache_dir": "docs/css-audit/cache"
+}
