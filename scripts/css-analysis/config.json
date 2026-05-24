@@ -28,12 +28,9 @@
 
   "jsx_glob": "src/**/*.jsx",
 
-  "token_lookup_comment": "Maps EXACT raw-value strings to token names. Only used in Step 2 (canonical signature). Fuzzy matching lives in cluster.mjs Algorithm 2.",
+  "token_lookup_comment": "Maps EXACT raw-value strings to token names. Only used in Step 2 (canonical signature). Fuzzy matching lives in cluster.mjs Algorithm 2. NOTE: --primary-bg is a single gradient token; individual stop colours (#0f1419, #1a1f2e, #1e2532) deliberately do NOT have token entries — see docs/opu.css-palette-drift.md §4.1 / D13.",
   "token_lookup": {
     "colors": {
-      "#0f1419": "var(--primary-bg-start)",
-      "#1a1f2e": "var(--primary-bg-mid)",
-      "#1e2532": "var(--primary-bg-end)",
       "#151921": "var(--secondary-bg)",
       "#a78bfa": "var(--accent-primary)",
       "#7dd3fc": "var(--accent-secondary)",
