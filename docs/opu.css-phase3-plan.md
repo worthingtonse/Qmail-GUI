@@ -1,10 +1,31 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24
+**Date:** 2026-05-24 (rev 1.1 — GPT review applied)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** Draft for review (GPT)
+**Status:** Approved for implementation; starting with 3.1
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `c72c173` (Phase 2.3 + 2.4 + handoff)
+**Prerequisite commits:** through `1e32cab` (this plan v1.0 commit)
+
+**Changelog:**
+
+- **v1.1 (2026-05-24)** — Applied six GPT review items:
+  1. §3.1 scope the universal focus rule to interactive selectors,
+     not bare `:focus-visible`; flagged as repo-wide behaviour change.
+  2. §3.2 added explicit App.css reconciliation step listing the
+     existing `button`/`button.primary`/`button.secondary`/etc. rules
+     that must be folded into `.btn` to avoid two competing sources.
+  3. §10 Q2 corrected — `12px 24px` is NOT cleaner than `10px 24px`
+     on "tier purity" grounds (12px is off-tier too). Canonical
+     padding stays `10px 24px` (the actual majority shape) or moves
+     to a modifier system if the size-variant survey shows demand.
+  4. §3.6 explicitly marked as a 2-file threshold exception with
+     rationale (same archetype family).
+  5. §10 Q3 resolved — gradient end-stop literals inside primitives
+     are intentional, documented as approved primitive-owned
+     literals; no audit-tool change needed.
+  6. §10 Q4 resolved — `fadeIn`/`slideIn`/etc. keyframes extracted
+     to primitives.css alongside the rules that use them.
+- **v1.0 (2026-05-24)** — Initial draft (commit `1e32cab`).
 
 This is the operational plan for Phase 3 (primitive extraction). It
 replaces the placeholder §4-Phase 3 block in the refactor plan with
@@ -115,23 +136,39 @@ Sites range from `.diceware-screen button:focus-visible` to
 `.account-pane__edit-profile-btn:focus`. All P2 (a) work that
 got copy-pasted across components.
 
-**Proposed primitive — universal rule, not a class:**
+**Proposed primitive — scoped to interactive elements, not bare `:focus-visible`:**
 
 ```css
 /* primitives.css */
-:focus-visible {
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 ```
 
-A universal rule beats a `.focus-ring` class here because:
-- Focus rings should apply to every focusable element, not opt-in.
-- It removes 30 per-component selectors in one rule.
-- The per-component `:focus` rules can be safely deleted — the
-  universal `:focus-visible` covers them.
-- Themes (especially high-contrast) already override with
-  `outline: 3px solid #ffff00 !important` in themes.css.
+Per GPT review item 1: bare `:focus-visible` would apply the outline
+to anything that can receive focus, including elements that
+deliberately suppress focus rings (e.g. a `<div tabindex="-1">` used
+for programmatic focus management). Scoping to the same interactive-
+element list the P2 (a) high-contrast block uses keeps the behaviour
+predictable and consistent with the existing theme override.
+
+**This IS a repo-wide behavior change** — not scoped to E1–E7. Any
+component anywhere in `src/` that didn't previously have a focus
+ring will inherit one. Phase 0.5 was the same shape (`.field-hint`
+is repo-wide too), but the surface is much larger here. Worth
+noting in the commit message; visual smoke should hit:
+
+- The 7 E1–E7 dirty files (where the 30 removed `:focus` rules live)
+- A few sample IN-REVIEW E-tracks (e.g. AccountPane.css, PasswordScreen.css)
+- The ThemeEditorModal + ThemePicker (custom-theme + Phase 1 work)
+- Any QMail screen with form fields
 
 **Per-component removals:** 30 `:focus` rules across 9 files, all
 the same. Audit re-run should show this cluster vanish entirely.
@@ -230,6 +267,51 @@ collapse to 3 primitive variants.
 **Per-component rename surface:** ~50 button-like classes across
 the 7 dirty files. Each becomes `<class>` → `class="btn btn--<variant>
 <existing-class>"`. JSX touches required.
+
+**App.css reconciliation (per GPT review item 2):**
+
+App.css already declares broad button styling that overlaps the new
+primitive:
+
+```
+src/App.css:11   button { ... }              ← bare-element base styles
+src/App.css:53   button:disabled { ... }
+src/App.css:61   button.primary { ... }
+src/App.css:70   button.primary:hover { ... }
+src/App.css:78   button.secondary, .browse-button { ... }
+src/App.css:88   button.secondary:hover, .browse-button:hover { ... }
+src/App.css:97   button.success { ... }
+src/App.css:105  button.success:hover { ... }
+src/App.css:112  button.danger { ... }
+src/App.css:120  button.danger:hover { ... }
+src/App.css:127  button.ghost, ... { ... }
+src/App.css:136  button.ghost:hover { ... }
+```
+
+3.2 MUST reconcile these as part of the `.btn` extraction, not
+leave them as a parallel ruleset. Concretely:
+
+  (a) The bare-element `button { ... }` rule moves to primitives.css
+      AS the base of `.btn`, so any `<button>` without a `.btn`
+      class still gets a reasonable default — but the canonical
+      path is `.btn` + a variant.
+  (b) `button.primary` → fold into `.btn--primary` in primitives.css
+      AND delete from App.css. Same for `button.secondary`/`success`/
+      `danger`/`ghost`. The JSX rename of `<button className="primary">`
+      to `<button className="btn btn--primary">` happens in the
+      same commit.
+  (c) `.browse-button` was already a multi-file collision — drops
+      into `.btn--ghost` or `.btn--secondary` (TBD per look) and
+      gets its own per-component class for layout.
+  (d) `button:disabled`, `button:hover`, `button:focus` rules: the
+      `:disabled` portion folds into `.btn:disabled` in primitives.
+      `:hover` and `:focus` are universal in 3.1 (`:focus-visible`)
+      and per-variant hover (each `.btn--<variant>:hover`) in 3.2.
+
+If App.css's existing button rules are LEFT in place alongside the
+new primitives, the codebase has two competing button-styling
+sources and reviewers will guess which wins. The 3.2 commit must
+make `.btn` the single owner of button shape.
 
 **Sized:** ~3 hours including JSX updates. Biggest primitive;
 ship after focus-ring proves the pattern.
@@ -360,6 +442,24 @@ multiple files).
 **Audit evidence:** 2 files (drift doc + collisions list).
 `.upload-box`, `.upload-icon`, `.upload-text` are the file-drop-area
 pattern used by both Authenticate and Locker.
+
+**THRESHOLD EXCEPTION (per GPT review item 4):** This is a 2-file
+pattern, below the formal "≥3 files AND semantic" rule defined in
+plan v2.5 §4 and §3.7 above. Including it in Phase 3 anyway because:
+
+- Both files (AuthenticateTab.css, LockerTab.css) belong to the
+  same archetype family (Wallet Ops: E2/E3/E4 + E1) per GPT's
+  archetype-family grouping. Two files in the same family with
+  identical shape are functionally equivalent to a ≥3-file
+  collision in a more diverse archetype.
+- The file-drop-area pattern is semantic (a recognisable UX
+  affordance) not just a numeric repetition.
+- If a third file later grows the same pattern, the primitive is
+  already there.
+
+If this exception feels weak, the alternative is to defer 3.6 to
+Phase 4 / 5 and let it fold into per-component CSS for now. Push
+back if you'd prefer that.
 
 **Proposed primitive:** Same shape as the existing definitions,
 deduped. Probably ~5 sub-classes.
@@ -538,34 +638,72 @@ I can see is "lets components disable focus rings selectively,"
 but `outline: none` on the per-component selector achieves the
 same thing.
 
-**Q2 — `.btn` canonical padding.**
-The literal-map's spacing-section showed `10px 24px` (7 hits) as
-the single most common non-tokenised padding pair. That's my
-canonical. But: `12px 24px` (4 hits combined incl. 1× `12px 24px`
-plus `1.2rem` mapped to `var(--space-lg)` via Phase 2.2)
-would be cleaner because it uses on-tier values. Trade-off: a
-slight visual size change on every button that currently uses
-`10px 24px`. Worth it for the token alignment, or stick with
-the raw `10px 24px` pair the majority uses?
+**Q2 — `.btn` canonical padding.** _Updated per GPT review item 3._
+
+The literal-map's spacing section shows `10px 24px` as the
+single most common non-tokenised pair across button-shaped sites
+(7+ hits). My initial draft argued for switching to `12px 24px`
+on "token-purity grounds" — that was wrong. `12px` is NOT a
+`--space-*` tier value either (the tiers are 4/8/16/24/32/48px);
+it's just as off-tier as `10px`, just with a different number.
+
+Corrected position: use `10px 24px` as the canonical primitive
+padding because it's the actual majority shape on disk. The
+token-alignment argument doesn't apply here. Phase 4 / Phase 5
+can revisit if a new `--btn-padding` token or a true spacing-
+ladder tier becomes worth adding (the v2.5 plan caps token count
+at ~80; we're well under).
+
+Alternative: split sizes via modifiers (`.btn--sm`, `.btn--lg`)
+each with its own padding. If multiple distinct button heights
+exist (12px/24px, 14px/16px, 14px/24px, 10px/24px etc.), a
+modifier system collapses them more cleanly than picking one.
+Worth Phase 3 doing — but only if the survey shows ≥3 sites
+per modifier size. Quick recount needed before 3.2 implementation.
 
 **Q3 — Gradient end-stops inside the primitive (`#8b5cf6` etc.)
-stay as literals.**
-GPT's Phase 2.1 pushback was exactly about not flattening these.
-The primitive houses them once. But the audit will STILL report
-them as raw colour literals (just in primitives.css now, not in
-component CSS). The `rows_with_raw_literals` count probably
-stays flat. Is that the right outcome, or should the primitives
-get their own colour-debt accounting that recognises "this
-literal is intentional, encoded in a primitive"?
+stay as literals.** _Resolved per GPT review item 5._
 
-**Q4 — Should I extract the `fadeIn` / `slideIn` keyframes too?**
+GPT's Phase 2.1 pushback was exactly about not flattening these.
+The primitive houses them once. The audit will still report them
+as raw colour literals (just in primitives.css now, not in
+component CSS), but that's fine — they're **approved primitive-
+owned literals**, not accidental debt.
+
+No audit-tool change needed. The reviewer convention: any raw hex
+appearing in `src/styles/primitives.css` is intentional unless
+flagged in a follow-up commit. Phase 3 commit messages will name
+the specific drifted-tier values they encode (e.g. "owns the
+`#8b5cf6` accent-primary gradient end-stop per drift doc D1") so
+the audit-trail is searchable via git history.
+
+A future enhancement could add a `--primitives-css-allowlist` to
+`scripts/css-analysis/config.json` that exempts primitives.css from
+the raw-literal count. Not doing it now — defer until Phase 5 if
+the literal-map noise becomes confusing.
+
+**Q4 — Extract the `fadeIn` / `slideIn` keyframes too.** _Resolved
+per GPT review item 6: yes._
+
 Multiple `.status-message`-using files define their own `fadeIn`
-keyframe inline. Extracting to primitives.css as named keyframes
-is the natural primitive layer for keyframes too. But the audit
-doesn't currently track `@keyframes` rules. Worth doing? My read:
-yes, ship a `fadeIn` keyframe in primitives.css and delete the
-per-component inline copies (they're all identical, modulo from-to
-percentages).
+keyframe inline. Same for `slideIn`, `popIn`, `fadeInUp`. If they're
+materially the same (verify before extraction), they belong in the
+primitive layer alongside the rule that uses them.
+
+Implementation note: each keyframe lands in primitives.css ONCE.
+Per-component inline keyframes get deleted as the relevant primitive
+(3.5 status-message, etc.) lands. If a file uses `animation: fadeIn`
+but defines its OWN slightly-different `@keyframes fadeIn`, the
+primitives.css definition wins via the cascade — verify per-file
+before deletion that the existing definition is the standard one
+(0→1 opacity over the duration). If a file has a deliberately
+DIFFERENT keyframe (e.g. fades to 0.8 not 1), keep it inline and
+rename to avoid the collision.
+
+The audit doesn't currently track `@keyframes` rules, so the
+collision detection has to be manual for this. Acceptable for the
+six known keyframe names (fadeIn, slideIn, fadeInUp, popIn,
+dropdownFadeIn, glass-ripple).
 
 ---
 
