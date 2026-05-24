@@ -139,7 +139,7 @@ const EmailListPane = ({
               </span>
               <button
                 type="button"
-                className="email-list-pane__trash-delete-button danger"
+                className="btn btn--danger email-list-pane__trash-delete-button"
                 onClick={() => setShowTrashConfirm(true)}
               >
                 <Trash2 size={14} />
@@ -212,7 +212,7 @@ const EmailListPane = ({
           <div className="email-list-pane__pagination">
             <button
               type="button"
-              className="secondary"
+              className="btn btn--secondary"
               disabled={currentPage === 0}
               onClick={() => onPageChange(currentPage - 1)}
             >
@@ -223,7 +223,7 @@ const EmailListPane = ({
             </span>
             <button
               type="button"
-              className="secondary"
+              className="btn btn--secondary"
               disabled={(currentPage + 1) * pageSize >= totalCount}
               onClick={() => onPageChange(currentPage + 1)}
             >
@@ -270,7 +270,7 @@ const EmailListPane = ({
             <footer className="email-list-pane__trash-confirm-actions">
               <button
                 type="button"
-                className="secondary"
+                className="btn btn--secondary"
                 disabled={isDeletingTrashPage}
                 onClick={() => setShowTrashConfirm(false)}
               >
@@ -278,7 +278,7 @@ const EmailListPane = ({
               </button>
               <button
                 type="button"
-                className="danger"
+                className="btn btn--danger"
                 disabled={isDeletingTrashPage}
                 onClick={handleConfirmDeleteVisibleTrash}
               >

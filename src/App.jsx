@@ -291,14 +291,14 @@ function App() {
 
               <div className="update-modal-actions">
                 <button
-                  className="update-download-btn primary"
+                  className="update-download-btn"
                   onClick={handleDownload}
                 >
                   <Download size={20} />
                   Download Update
                 </button>
                 <button
-                  className="update-later-btn secondary"
+                  className="update-later-btn"
                   onClick={() => setShowUpdateModal(false)}
                 >
                   Remind Me Later

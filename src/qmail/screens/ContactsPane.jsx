@@ -552,7 +552,7 @@ useEffect(() => {
             <footer className="contact-delete-actions">
               <button
                 type="button"
-                className="secondary"
+                className="btn btn--secondary"
                 disabled={isDeletingContact}
                 onClick={handleCancelDeleteContact}
               >
@@ -560,7 +560,7 @@ useEffect(() => {
               </button>
               <button
                 type="button"
-                className="danger"
+                className="btn btn--danger"
                 disabled={isDeletingContact}
                 onClick={handleConfirmDeleteContact}
               >
@@ -590,7 +590,7 @@ useEffect(() => {
           >
             <button
              type="button"
-             className="refresh-btn secondary"
+             className="btn btn--secondary refresh-btn"
              onClick={handleRefresh}
              disabled={loading}
              title="Refresh contacts"
@@ -600,7 +600,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`contacts-btn ${currentMode === "contacts" ? "active" : "secondary"}`}
+             className={`btn btn--secondary contacts-btn${currentMode === "contacts" ? " active" : ""}`}
              onClick={switchToRegularContacts}
              disabled={loading}
              title="View your contacts"
@@ -611,7 +611,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`popular-contacts-btn ${currentMode === "popular" ? "active" : "secondary"}`}
+             className={`btn btn--secondary popular-contacts-btn${currentMode === "popular" ? " active" : ""}`}
              onClick={switchToPopularContacts}
              disabled={loading}
              title="View popular contacts from DRD"
@@ -622,7 +622,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`contacts-btn ${currentMode === "lookup" ? "active" : "secondary"}`}
+             className={`btn btn--secondary contacts-btn${currentMode === "lookup" ? " active" : ""}`}
              onClick={switchToLookup}
              disabled={loading}
              title="Lookup serial numbers and saved contact addresses"
@@ -633,7 +633,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className="add-contact-btn primary"
+             className="btn btn--primary add-contact-btn"
              onClick={() => setIsAddContactOpen(true)}
              title="Add new contact"
             >
@@ -661,14 +661,14 @@ useEffect(() => {
             <div className="contacts-error-actions">
               <button
                 type="button"
-                className="retry-button secondary"
+                className="btn btn--secondary retry-button"
                 onClick={handleRefresh}
               >
                 Retry
               </button>
               <button
                 type="button"
-                className="retry-button secondary"
+                className="btn btn--secondary retry-button"
                 onClick={() => setError(null)}
               >
                 Dismiss
@@ -704,7 +704,7 @@ useEffect(() => {
                 />
                 <button
                   type="button"
-                  className="contacts-btn primary"
+                  className="btn btn--primary contacts-btn"
                   onClick={handleLookupContact}
                   disabled={lookupLoading}
                 >
@@ -769,7 +769,7 @@ useEffect(() => {
                 {!searchTerm.trim() && currentMode !== "popular" && (
                   <button
                     type="button"
-                    className="add-contact-btn primary"
+                    className="btn btn--primary add-contact-btn"
                     onClick={() => setIsAddContactOpen(true)}
                   >
                     <UserPlus size={16} /> Add Your First Contact
@@ -837,7 +837,7 @@ useEffect(() => {
                       {contact.source === "user" && (
                         <button
                           type="button"
-                          className="contact-action-btn danger"
+                          className="btn btn--danger contact-action-btn"
                           onClick={() => handleDeleteContact(contact)}
                           title="Delete contact"
                           aria-label={`Delete ${contact.name}`}

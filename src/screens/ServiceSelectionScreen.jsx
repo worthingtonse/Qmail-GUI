@@ -391,7 +391,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
           </div>
         </button>
         
-        <button onClick={() => { setCurrentStep('initial'); setLockerCode(''); setError(''); }} className="service-button secondary" disabled={loading}>
+        <button onClick={() => { setCurrentStep('initial'); setLockerCode(''); setError(''); }} className="btn btn--secondary service-button secondary" disabled={loading}>
           Back
         </button>
       </div>

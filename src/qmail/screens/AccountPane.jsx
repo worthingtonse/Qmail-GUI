@@ -285,7 +285,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
         <div className="error-section">
           <AlertTriangle size={48} />
           <p>Error: {error}</p>
-          <button className="retry-button secondary" onClick={handleRefresh}>
+          <button className="btn btn--secondary retry-button" onClick={handleRefresh}>
             <RefreshCw size={16} /> Retry
           </button>
         </div>
@@ -305,7 +305,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               <span>Online</span>
             </div>
             <button
-              className="refresh-btn secondary"
+              className="btn btn--secondary refresh-btn"
               onClick={handleRefresh}
               disabled={loading}
               title="Refresh account data"
@@ -396,7 +396,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               {/* Sync Directory button removed: /api/admin/sync was removed
                   from the backend in QMail v2. No replacement exists yet. */}
               <button
-                className="edit-profile-btn secondary"
+                className="btn btn--secondary edit-profile-btn"
                 onClick={loadServers}
                 disabled={serversLoading}
                 title="Refresh server status"
@@ -628,14 +628,14 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
             <div className="account-confirm-actions">
               <button
                 type="button"
-                className="secondary"
+                className="btn btn--secondary"
                 onClick={() => setShowSignOutConfirm(false)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="danger"
+                className="btn btn--danger"
                 onClick={handleConfirmSignOut}
               >
                 Sign Out

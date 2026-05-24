@@ -360,7 +360,7 @@ NEVER store your passphrase in plain text in cloud storage!`);
                   <span>Download HTML Backup</span>
                 </button>
                 
-                <button type="button" onClick={printPassphrase} className="btn-backup secondary">
+                <button type="button" onClick={printPassphrase} className="btn btn--secondary btn-backup secondary">
                   <Printer size={18} />
                   <span>Print Backup</span>
                 </button>

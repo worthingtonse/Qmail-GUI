@@ -1588,14 +1588,14 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
             <footer className="qmail-dashboard__attachment-confirm-actions">
               <button
                 type="button"
-                className="secondary"
+                className="btn btn--secondary"
                 onClick={() => setPendingDangerousAttachment(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
-                className="danger"
+                className="btn btn--danger"
                 onClick={handleConfirmDangerousAttachment}
               >
                 Save Anyway
