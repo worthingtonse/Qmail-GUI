@@ -17,7 +17,7 @@
   margin-bottom: var(--space-sm);
   color: var(--text-primary);
   font-weight: 500;
-  font-size: 0.95rem;
+  font-size: var(--font-size-md);
   letter-spacing: 0.01em;
 }
 
@@ -63,7 +63,7 @@
   bottom: 125%;
   right: 0;
   width: 240px;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
   font-weight: 400;
   line-height: 1.4;
   box-shadow: var(--shadow-lg);
@@ -96,7 +96,7 @@
   border-radius: var(--radius-md);
   padding: 14px 16px;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-family: var(--font-primary);
   transition: all var(--transition-base);
   backdrop-filter: var(--glass-blur);
@@ -134,7 +134,7 @@
   color: white;
   padding: 14px 32px;
   border-radius: var(--radius-lg);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   border: none;
   cursor: pointer;
@@ -259,7 +259,7 @@
 .status-message {
   text-align: center;
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: var(--font-size-md);
   margin: 0;
 }
 
@@ -335,13 +335,13 @@
 
 .result-label {
   color: var(--text-tertiary);
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
   font-weight: 500;
 }
 
 .result-value {
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -349,7 +349,7 @@
 .result-value.filename,
 .result-value.filepath {
   font-family: 'Fira Code', 'Courier New', monospace;
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -358,7 +358,7 @@
 
 .result-value.transaction-id {
   font-family: 'Fira Code', 'Courier New', monospace;
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
   color: var(--accent-secondary);
 }
 
@@ -383,7 +383,7 @@
 .results-title h4 {
   margin: 0;
   padding: 0;
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -403,7 +403,7 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -476,7 +476,7 @@
 
 .status-section .status-message {
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: var(--font-size-md);
 }
 
 /* Fix Modal Styles */
@@ -529,7 +529,7 @@
 .modal-header h4 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1.2rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
 }
 
@@ -596,7 +596,7 @@
 .fix-explanation h5 {
   margin: 0 0 var(--space-md) 0;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
@@ -638,7 +638,7 @@
   gap: var(--space-sm);
   margin: 0 0 var(--space-md) 0;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
 }
 
@@ -674,14 +674,14 @@
 .fix-outcome-warning .warning-text p {
   margin: 0 0 var(--space-sm) 0;
   color: var(--text-primary);
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
 }
 
 .fix-outcome-warning .warning-text ul {
   margin: var(--space-sm) 0;
   padding-left: var(--space-lg);
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
 }
 
 .fix-outcome-warning .warning-text li {
@@ -692,7 +692,7 @@
 .receipt-note {
   font-style: italic;
   color: var(--text-tertiary) !important;
-  font-size: 0.9rem;
+  font-size: var(--font-size-sm);
 }
 
 .modal-actions {
@@ -708,7 +708,7 @@
   color: white;
   padding: 14px 24px;
   border-radius: var(--radius-lg);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   border: none;
   cursor: pointer;
@@ -736,7 +736,7 @@
   backdrop-filter: var(--glass-blur);
   padding: 14px 24px;
   border-radius: var(--radius-lg);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -792,7 +792,7 @@
   border-radius: var(--radius-md);
   padding: 14px 16px;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-family: var(--font-primary);
   transition: all var(--transition-base);
   backdrop-filter: var(--glass-blur);
@@ -854,7 +854,7 @@
   background: transparent;
   border: none;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-family: var(--font-primary);
   text-align: left;
   cursor: pointer;
@@ -936,7 +936,7 @@
   .results-close-button {
     width: 28px;
     height: 28px;
-    font-size: 0.9rem;
+    font-size: var(--font-size-sm);
     margin-left: var(--space-sm);
   }
 }
@@ -947,7 +947,7 @@
   }
   
   .results-title h4 {
-    font-size: 1rem;
+    font-size: var(--font-size-md);
   }
   
   .success-icon {
@@ -958,7 +958,7 @@
   .results-close-button {
     width: 26px;
     height: 26px;
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
     margin-left: var(--space-xs);
   }
 }

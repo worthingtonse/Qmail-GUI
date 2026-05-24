@@ -95,7 +95,7 @@
 }
 
 .upload-subtext {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--text-tertiary);
   margin: var(--space-sm) 0;
   font-weight: 400;
@@ -107,7 +107,7 @@
   border: none;
   padding: 12px 32px;
   border-radius: var(--radius-md);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -210,7 +210,7 @@
   border: none;
   padding: 10px 24px;
   border-radius: var(--radius-md);
-  font-size: 0.95rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -305,13 +305,13 @@
 .file-name {
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   letter-spacing: -0.01em;
   word-break: break-word;
 }
 
 .file-size {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--text-tertiary);
   font-family: 'Fira Code', monospace;
 }
@@ -324,7 +324,7 @@
   padding: var(--space-xs);
   /* height: 32px; */
   border-radius: 50%;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   cursor: pointer;
   transition: all var(--transition-base);
   display: flex;
@@ -362,7 +362,7 @@
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: var(--space-md);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   letter-spacing: -0.01em;
 }
 
@@ -373,7 +373,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-family: var(--font-primary);
   box-sizing: border-box;
   transition: all var(--transition-base);
@@ -538,7 +538,7 @@
 }
 
 .progress-text {
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--accent-primary);
   text-align: center;
@@ -548,7 +548,7 @@
 }
 
 .status-message {
-  font-size: 0.95rem;
+  font-size: var(--font-size-md);
   color: var(--text-secondary);
   text-align: center;
   margin: 0;
@@ -593,7 +593,7 @@
 }
 
 .results-section h4 {
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
   /* margin-bottom: var(--space-lg); */
   font-weight: 600;
@@ -659,7 +659,7 @@
 }
 
 .result-label {
-  font-size: 0.85rem;
+  font-size: var(--font-size-sm);
   color: var(--text-tertiary);
   font-weight: 500;
   text-transform: uppercase;
@@ -667,7 +667,7 @@
 }
 
 .result-value {
-  font-size: 1.5rem;
+  font-size: var(--font-size-xl);
   color: var(--text-primary);
   font-weight: 700;
   font-family: 'Fira Code', monospace;
@@ -687,7 +687,7 @@
 }
 
 .receipt-id {
-  font-size: 0.9rem !important;
+  font-size: var(--font-size-sm) !important;
   word-break: break-all;
   color: var(--accent-secondary) !important;
   font-weight: 500 !important;
@@ -722,7 +722,7 @@
     padding: var(--space-md);
     border-radius: var(--radius-md);
     font-family: 'Fira Code', 'Courier New', monospace;
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
     overflow-x: auto;
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -747,7 +747,7 @@
 .results-header h4 {
   margin: 0;
   padding: 0;
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   color: var(--text-primary);
   font-weight: 600;
   text-align: left;
@@ -767,7 +767,7 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-base);
@@ -838,12 +838,12 @@
   }
   
   .upload-text {
-    font-size: 1rem;
+    font-size: var(--font-size-md);
   }
   
   .browse-button {
     padding: 10px 24px;
-    font-size: 0.95rem;
+    font-size: var(--font-size-md);
   }
   
   .selected-files-header {
@@ -877,7 +877,7 @@
   }
   
   .result-value {
-    font-size: 1.25rem;
+    font-size: var(--font-size-lg);
   }
 
  .results-header {
@@ -896,7 +896,7 @@
   .results-close-button {
     width: 28px;
     height: 28px;
-    font-size: 0.9rem;
+    font-size: var(--font-size-sm);
     margin-left: var(--space-sm);
   }
 }
@@ -907,7 +907,7 @@
   }
   
   .upload-text {
-    font-size: 0.95rem;
+    font-size: var(--font-size-md);
   }
   
   .files-list {
@@ -926,13 +926,13 @@
   }
   
   .results-header h4 {
-    font-size: 1rem;
+    font-size: var(--font-size-md);
   }
   
   .results-close-button {
     width: 26px;
     height: 26px;
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
     margin-left: var(--space-xs);
   }
 }

@@ -12,7 +12,7 @@ button {
   cursor: pointer;
   border: none;
   border-radius: var(--radius-lg);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   font-family: var(--font-primary);
   padding: 12px 24px;
@@ -146,7 +146,7 @@ button.ghost:hover,
   color: white;
   padding: 14px 24px;
   border-radius: var(--radius-lg);
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-weight: 500;
   width: 100%;
   box-shadow: var(--shadow-md), var(--glow-success);
@@ -167,7 +167,7 @@ textarea {
   color: var(--text-primary);
   border-radius: var(--radius-md);
   padding: 14px 16px;
-  font-size: 1rem;
+  font-size: var(--font-size-md);
   font-family: var(--font-primary);
   transition: all var(--transition-base);
   backdrop-filter: var(--glass-blur);
@@ -514,7 +514,7 @@ button:hover,
   background: none;
   border: none;
   color: var(--text-primary);
-  font-size: 1.2rem;
+  font-size: var(--font-size-lg);
   cursor: pointer;
   padding: var(--space-sm);
   border-radius: var(--radius-sm);
@@ -799,6 +799,6 @@ input:focus {
   }
 
   .update-modal-header h2 {
-    font-size: 1.5rem;
+    font-size: var(--font-size-xl);
   }
 }

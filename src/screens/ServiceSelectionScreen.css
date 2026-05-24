@@ -38,7 +38,7 @@
 
 .service-selection-container p {
   color: var(--text-secondary);
-  font-size: 1.05rem;
+  font-size: var(--font-size-md);
   margin-bottom: var(--space-2xl);
   line-height: 1.6;
   position: relative;
@@ -118,7 +118,7 @@
   padding: 18px 28px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 16px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   color: #ffffff;
 }
@@ -524,7 +524,7 @@
 
 .locker-code-input {
   padding: var(--space-lg);
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   text-align: center;
   letter-spacing: 0.2em;
   font-weight: 600;
