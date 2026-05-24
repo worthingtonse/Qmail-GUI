@@ -1,8 +1,14 @@
-/* Import the design-token vocabulary and the standard themes.
- * tokens.css must come first — themes.css overrides token values
- * per [data-theme=...] selector. See plan §2.1 / §2.2. */
+/* Import the design-token vocabulary, the standard themes, and
+ * the shared primitive layer. Order matters per plan §2.2:
+ *   tokens.css      vocabulary
+ *   themes.css      per-theme overrides
+ *   primitives.css  shared component shape (Phase 3+) — references
+ *                   the resolved tokens, so it imports AFTER themes
+ * Component CSS files load after this via Vite's bundling and may
+ * override primitive styles via per-component selectors. */
 @import url('./styles/tokens.css');
 @import url('./styles/themes.css');
+@import url('./styles/primitives.css');
 
 /* Import Modern Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');

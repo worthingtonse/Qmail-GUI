@@ -723,17 +723,6 @@
   }
 }
 
-.close-modal-btn:focus-visible,
-.send-button:focus-visible,
-.attach-button:focus-visible,
-.toggle-advanced-btn:focus-visible,
-.add-contacts-btn:focus-visible,
-.contact-suggestion:focus-visible,
-.attach-files-btn:focus-visible,
-.compose-modal__attachment-remove:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
 
 .contact-suggestions {
   scrollbar-width: thin;

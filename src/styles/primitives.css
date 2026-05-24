@@ -1,0 +1,56 @@
+/*
+ * QMail shared CSS primitives — extracted from per-component CSS
+ * by Phase 3 of docs/opu.css-phase3-plan.md.
+ *
+ * Primitives are SEMANTIC (.btn, .card, .status-message, etc.) and
+ * compose with per-component block classes:
+ *
+ *   <button class="btn btn--primary main-dashboard__save-btn">
+ *
+ * The primitive owns the *shape*; the component class owns
+ * *placement and local overrides*.
+ *
+ * Import order (per plan §2.2):
+ *   1. tokens.css       (vocabulary)
+ *   2. themes.css       (per-theme overrides)
+ *   3. primitives.css   (this file — references the resolved tokens)
+ *   4. component CSS    (component-scoped rules)
+ *
+ * Raw colour literals appearing inside this file (e.g. the gradient
+ * end-stops in .btn--primary) are APPROVED PRIMITIVE-OWNED literals
+ * per Phase 3 plan v1.1 §10 Q3 — not accidental debt. Specific
+ * drift-doc decisions are cited in the commit messages that
+ * introduce them.
+ */
+
+
+/* ============================================================
+ * 3.1 — Universal focus ring
+ * ============================================================
+ * Replaces 30 duplicated `:focus` / `:focus-visible` rules across
+ * 9 component CSS files in E1-E7 that all encoded the same
+ * outline + outline-offset combination.
+ *
+ * Scoped to interactive elements explicitly (not bare
+ * :focus-visible) so that programmatically-focused containers
+ * (e.g. <div tabindex="-1"> used for focus management) don't get
+ * an unwanted outline.
+ *
+ * This is a REPO-WIDE behaviour change — any focusable element
+ * anywhere in src/ that didn't have a focus ring before now
+ * inherits one. The high-contrast theme overrides this in
+ * themes.css with `outline: 3px solid #ffff00 !important`.
+ *
+ * If a component needs to suppress the ring (e.g. mouse-only
+ * controls), set `outline: none` on the per-component selector.
+ */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}

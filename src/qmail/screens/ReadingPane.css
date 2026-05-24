@@ -342,11 +342,6 @@
   background-color: var(--card-hover);
 }
 
-.reading-pane__attachment:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
 /* was: .attachment-icon */
 .reading-pane__attachment-icon {
   flex-shrink: 0;

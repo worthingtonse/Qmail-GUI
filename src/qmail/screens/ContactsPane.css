@@ -672,18 +672,6 @@
   }
 }
 
-/* ==================== ACCESSIBILITY ==================== */
-
-.contact-item:focus-visible,
-.contact-action-btn:focus-visible,
-.contacts-btn:focus-visible,
-.popular-contacts-btn:focus-visible,
-.add-contact-btn:focus-visible,
-.refresh-btn:focus-visible,
-.retry-button:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .contact-item,

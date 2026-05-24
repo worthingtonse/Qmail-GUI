@@ -962,12 +962,6 @@
   margin-right: auto;
 }
 
-/* Accessibility improvements */
-.results-close-button:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
 /* High contrast mode support */
 @media (prefers-contrast: high) {
   .results-close-button {

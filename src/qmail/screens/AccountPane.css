@@ -867,15 +867,6 @@ button.security-action {
   }
 }
 
-/* Focus styles for keyboard navigation */
-.edit-profile-btn:focus,
-.security-action:focus,
-.toggle-switch:focus,
-.retry-button:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
 .field-value.editable:focus {
   outline: none;
   border-color: var(--accent-primary);

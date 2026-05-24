@@ -65,11 +65,6 @@
   cursor: pointer;
 }
 
-.notification-container__item--clickable:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-
 .notification-container__item--success {
   --notification-accent: var(--accent-success);
   --notification-surface: var(--status-success-bg);
@@ -135,11 +130,6 @@
 
 .notification-container__close:active {
   transform: rotate(90deg) scale(0.95);
-}
-
-.notification-container__close:focus {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
 }
 
 /* was: .notification-message */
