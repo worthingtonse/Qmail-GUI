@@ -1,12 +1,31 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24 (rev 1.5 — Phase 3 COMPLETE)
+**Date:** 2026-05-24 (rev 1.6 — Phase 3 SIGNED OFF after GPT closeout review)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** Phase 3 COMPLETE. 3.1 + 3.5 + 3.3 + 3.4 + 3.2a/b/c/omnibus/j/i all shipped; 3.6 deferred to Phase 4
+**Status:** Phase 3 COMPLETE + signed off. 3.6 deferred to Phase 4.
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `6027ea0` (3.2c+omnibus+j GPT review)
+**Prerequisite commits:** through `e3b33ac` (3.2i closeout) + this commit
+**Final GPT review:** `docs/opu.gpt-handoff-css-phase3-complete.txt`
 
 **Changelog:**
+
+- **v1.6 (2026-05-24)** — GPT closeout review of Phase 3 found one
+  reopen item: the App.css bare-element `button:hover::before` rule
+  still lacked the `:not(:disabled)` qualifier that the primitive got
+  in 3.2i. Same disabled-ripple semantic bug, same fix:
+    `button:hover::before` → `button:hover:not(:disabled)::before`
+  Applied in this commit. Affects all non-.btn `<button>` consumers
+  that can be disabled (ComposeModal send/attach buttons, AddContactModal
+  buttons, Diceware buttons, etc.) — they no longer animate the
+  hover ripple while disabled.
+
+  GPT also flagged QMailDashboard.css L75-157 as containing scoped
+  `button.primary/.secondary/.success/.ghost` compatibility rules
+  with no remaining JSX consumers (post-3.2j). The `button.danger`
+  rule in that block IS still consumed (by `.contact-action-btn danger`
+  via ContactsPane.jsx — see the 3.2i revert list). Trim of the four
+  dead variant rules + the shared :where() layout block is PUNTED to
+  Track F as dead compatibility cleanup; not blocking Phase 3.
 
 - **v1.5 (2026-05-24)** — Phase 3 complete after 3.2i ships. Net
   result vs. the pre-3.2a baseline (commit 9780b84):

@@ -35,7 +35,7 @@ button::before {
   transition: width var(--transition-smooth), height var(--transition-smooth);
 }
 
-button:hover::before {
+button:hover:not(:disabled)::before {
   width: 300px;
   height: 300px;
 }
