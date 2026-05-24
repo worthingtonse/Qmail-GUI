@@ -187,7 +187,7 @@
 .tab-content {
   max-width: 800px;
   margin: 0 auto;
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn calc(400ms * var(--motion-scale)) ease-out;
 }
 
 /* When store-tab shows transactions, make it wider */
@@ -259,7 +259,7 @@
   padding: 40px 20px;
   text-align: center;
   background-color: #f8f9fa;
-  transition: all 0.3s ease;
+  transition: all calc(300ms * var(--motion-scale)) ease;
   cursor: pointer;
 }
 
@@ -302,7 +302,7 @@
   font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color calc(200ms * var(--motion-scale)) ease;
   margin: 15px 0;
 }
 
@@ -353,7 +353,7 @@
   border-radius: 4px;
   font-size: var(--font-size-sm);
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color calc(200ms * var(--motion-scale)) ease;
 }
 
 .clear-button:hover:not(:disabled) {
@@ -378,7 +378,7 @@
   background-color: #f8f9fa;
   border-radius: 6px;
   margin-bottom: var(--space-sm);
-  transition: background-color 0.2s ease;
+  transition: background-color calc(200ms * var(--motion-scale)) ease;
 }
 
 .file-item:hover {
@@ -412,7 +412,7 @@
   border-radius: 50%;
   font-size: var(--font-size-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all calc(200ms * var(--motion-scale)) ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -450,7 +450,7 @@
   border-radius: 6px;
   font-size: var(--font-size-sm);
   box-sizing: border-box;
-  transition: border-color 0.2s ease;
+  transition: border-color calc(200ms * var(--motion-scale)) ease;
 }
 
 .memo-input:focus {
@@ -479,7 +479,7 @@
   font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all calc(200ms * var(--motion-scale)) ease;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -517,7 +517,7 @@
 .progress-bar {
   height: 100%;
   background: linear-gradient(90deg, #4a90e2, #357abd);
-  transition: width 0.3s ease;
+  transition: width calc(300ms * var(--motion-scale)) ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -836,7 +836,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  animation: slideDown 0.3s ease-out;
+  animation: slideDown calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .success-icon {
@@ -1454,7 +1454,7 @@
   margin-top: auto;
   opacity: 0;
   transform: translateY(20px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity calc(300ms * var(--motion-scale)) ease, transform calc(300ms * var(--motion-scale)) ease;
 }
 
 .dashboard-footer.scroll-footer.visible {
@@ -1728,7 +1728,7 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all calc(200ms * var(--motion-scale)) ease;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }

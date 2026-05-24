@@ -54,14 +54,22 @@
 
   /* ============================================================
    * TRANSITIONS
-   * Per-component transitions should multiply duration by
-   * var(--motion-scale) so reduced-motion auto-applies. Example:
-   *   transition: all calc(250ms * var(--motion-scale)) ease;
+   * Tokens fold --motion-scale into their duration so every
+   * consumer respects high-contrast / reduced-motion automatically.
+   * The raw `--transition-*-ms` tokens expose the base duration if
+   * a component needs to compose it differently (e.g. in an
+   * animation that should still tick under motion-scale > 0).
+   * Plan §2.1 / Phase 2.4 (commit referenced in plan changelog).
    * ============================================================ */
-  --transition-fast:   150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base:   250ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow:   350ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-smooth: 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-fast-ms:   150ms;
+  --transition-base-ms:   250ms;
+  --transition-slow-ms:   350ms;
+  --transition-smooth-ms: 400ms;
+
+  --transition-fast:   calc(var(--transition-fast-ms)   * var(--motion-scale)) cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base:   calc(var(--transition-base-ms)   * var(--motion-scale)) cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:   calc(var(--transition-slow-ms)   * var(--motion-scale)) cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: calc(var(--transition-smooth-ms) * var(--motion-scale)) cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* ============================================================
    * TYPOGRAPHY FAMILIES

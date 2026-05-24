@@ -1,7 +1,7 @@
 /* Export Form */
 .export-form {
   margin-top: var(--space-lg);
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn calc(500ms * var(--motion-scale)) ease-out;
   width: 100%;
   max-width: 500px;
 }
@@ -188,7 +188,7 @@
   backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
   border-radius: var(--radius-lg);
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .progress-header {
@@ -225,7 +225,7 @@
   height: 100%;
   background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
   border-radius: 4px;
-  transition: width 0.3s ease;
+  transition: width calc(300ms * var(--motion-scale)) ease;
   box-shadow: 0 0 10px rgba(167, 139, 250, 0.5);
   position: relative;
   overflow: hidden;
@@ -271,7 +271,7 @@
   backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
   border-radius: var(--radius-lg);
-  animation: popIn 0.4s ease-out;
+  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
 }
 
 .results-header {
@@ -471,7 +471,7 @@
   border: var(--glass-border);
   border-radius: var(--radius-lg);
   text-align: center;
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .status-section .status-message {
@@ -492,7 +492,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .fix-modal {
@@ -505,7 +505,7 @@
   max-height: 80vh;
   overflow-y: auto;
   box-shadow: var(--shadow-xl);
-  animation: popIn 0.4s ease-out;
+  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
 }
 
 .modal-header {
@@ -845,7 +845,7 @@
   margin-top: var(--space-xs);
   max-height: 200px;
   overflow-y: auto;
-  animation: dropdownFadeIn 0.2s ease-out;
+  animation: dropdownFadeIn calc(200ms * var(--motion-scale)) ease-out;
 }
 
 .dropdown-option {
@@ -1004,7 +1004,7 @@
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
-  animation: popIn 0.4s ease-out;
+  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
   width: 100%;
   max-width: 500px;
   margin-left: auto;

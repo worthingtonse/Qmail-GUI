@@ -33,7 +33,7 @@
   justify-content: space-between;
   align-items: center;
   box-shadow: var(--shadow-md);
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .balance-label {
@@ -54,7 +54,7 @@
 /* Memo Section Styles (used for all input sections) */
 .memo-section {
   margin: var(--space-md) 0;
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn calc(300ms * var(--motion-scale)) ease-out;
   max-width: 500px;
   width: 100%;
   margin-left: auto;
@@ -349,7 +349,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-md);
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn calc(300ms * var(--motion-scale)) ease-out;
   max-width: 500px;
   width: 100%;
   margin-left: auto;
@@ -427,7 +427,7 @@
   text-align: center;
   margin: 0;
   line-height: 1.6;
-  animation: fadeIn 0.3s ease-out;
+  animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 @keyframes fadeIn {
@@ -448,7 +448,7 @@
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
-  animation: popIn 0.4s ease-out;
+  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
   width: 100%;
   max-width: 500px;
   margin-left: auto;
@@ -565,7 +565,7 @@
   flex-direction: column;
   gap: var(--space-xs);
   transition: all var(--transition-base);
-  animation: fadeInUp 0.3s ease-out backwards;
+  animation: fadeInUp calc(300ms * var(--motion-scale)) ease-out backwards;
 }
 
 .result-item:nth-child(1) { animation-delay: 0.1s; }
@@ -736,7 +736,7 @@
   backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn calc(300ms * var(--motion-scale)) ease-out;
 }
 
 .status-section .status-message {
