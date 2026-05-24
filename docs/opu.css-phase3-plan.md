@@ -1,12 +1,21 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24 (rev 1.1 — GPT review applied)
+**Date:** 2026-05-24 (rev 1.2 — 3.6 deferred after evidence inspection)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** Approved for implementation; starting with 3.1
+**Status:** 3.1 + 3.5 + 3.3 + 3.4 shipped; 3.6 deferred; 3.2 next
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `1e32cab` (this plan v1.0 commit)
+**Prerequisite commits:** through `9780b84` (Phase 3.4)
 
 **Changelog:**
+
+- **v1.2 (2026-05-24)** — 3.6 (`.upload-box` family) deferred to
+  Phase 4 after inspection revealed the plan's premise was wrong:
+  LockerTab.css has zero `.upload-*` selectors (the plan said
+  "Auth + Locker"); the actual second file is MainDashboard, and
+  Auth's glass design vs MainDashboard's Bootstrap drift don't
+  share a shape. Skip 3.6 entirely; proceed directly to 3.2 (.btn
+  family). The MainDashboard upload variant is already tracked in
+  `opu.css-palette-drift.md` D5–D8.
 
 - **v1.1 (2026-05-24)** — Applied six GPT review items:
   1. §3.1 scope the universal focus rule to interactive selectors,
@@ -437,34 +446,56 @@ multiple files).
 
 **Sized:** ~30 minutes (including `fadeIn` keyframe extraction).
 
-### 3.6 `.upload-box` / upload-area family
+### 3.6 `.upload-box` / upload-area family — **DEFERRED to Phase 4**
 
-**Audit evidence:** 2 files (drift doc + collisions list).
-`.upload-box`, `.upload-icon`, `.upload-text` are the file-drop-area
-pattern used by both Authenticate and Locker.
+**Status (post-3.4 inspection):** _Skipped. Plan premise falsified;
+not a valid primitive candidate._
 
-**THRESHOLD EXCEPTION (per GPT review item 4):** This is a 2-file
-pattern, below the formal "≥3 files AND semantic" rule defined in
-plan v2.5 §4 and §3.7 above. Including it in Phase 3 anyway because:
+**What v1.1 said:** 2-file threshold exception, Auth+Locker, same
+archetype family with identical shape.
 
-- Both files (AuthenticateTab.css, LockerTab.css) belong to the
-  same archetype family (Wallet Ops: E2/E3/E4 + E1) per GPT's
-  archetype-family grouping. Two files in the same family with
-  identical shape are functionally equivalent to a ≥3-file
-  collision in a more diverse archetype.
-- The file-drop-area pattern is semantic (a recognisable UX
-  affordance) not just a numeric repetition.
-- If a third file later grows the same pattern, the primitive is
-  already there.
+**What inspection found (2026-05-24, after Phase 3.4):**
 
-If this exception feels weak, the alternative is to defer 3.6 to
-Phase 4 / 5 and let it fold into per-component CSS for now. Push
-back if you'd prefer that.
+1. **LockerTab.css has zero `.upload-*` selectors.** The plan's
+   premise — "pattern used by both Authenticate and Locker" — is
+   wrong. Locker doesn't host this pattern at all.
 
-**Proposed primitive:** Same shape as the existing definitions,
-deduped. Probably ~5 sub-classes.
+2. **The actual second file is MainDashboard.css**, which carries
+   a fully Bootstrap-drifted variant (`3px dashed #4a90e2`,
+   `#f8f9fa` solid bg, `48px` raw font-size, `#333` / `#666`
+   colours, `#357abd` hover border).
 
-**Sized:** ~45 minutes.
+3. **Auth's and MainDashboard's shapes are wholly different**, not
+   "near-identical with minor drift":
+   - Auth: glass-morphism aesthetic (`var(--glass-bg)`, backdrop
+     blur, dashed `--border-medium`, `4rem` icon with drop-shadow
+     and infinite `floatIcon` animation, `--text-primary` /
+     `--text-tertiary` text colours).
+   - MainDashboard: Bootstrap legacy (solid surface, no animation,
+     `18px` raw text, drifted blue scheme).
+
+4. The MainDashboard variant is already tracked in
+   `docs/opu.css-palette-drift.md` decisions D5–D8.
+
+**Decision:** Skip 3.6 entirely. The plan's evidence was incorrect
+and the actual surface doesn't justify even a 2-file threshold
+exception (the shapes don't match). Auth's design stays per-file
+until Phase 4 per-file work decides whether to:
+- Reconcile MainDashboard's variant to Auth's design language
+  (large visual diff for the dashboard upload area)
+- Or document MainDashboard's variant as intentional (Bootstrap
+  legacy for the dashboard-specific upload flow)
+- Or extract Auth's design alone as a single-consumer primitive
+  if Phase 4 surfaces a third consumer.
+
+Per plan v2.5 §3.7 "Bad candidates" list:
+> "padding-only helpers; width-only helpers; color-only helpers;
+> arbitrary bundle names that mean nothing outside a spreadsheet."
+
+Speculative extraction with only one shape-matching consumer falls
+into the same bucket. Better to wait for Phase 4 evidence.
+
+**Sized:** ~0 minutes (no extraction performed). Move directly to 3.2.
 
 ### 3.7 What I'm NOT extracting in Phase 3
 
@@ -496,16 +527,16 @@ Per the plan v2.5 §4 "lowest-risk first" framing, ordered by:
 ascending blast radius, ascending JSX touches, ascending review
 complexity.
 
-| # | Primitive | Sites | Time | JSX touches | Visual risk |
+| # | Primitive | Sites | Time | JSX touches | Status |
 |--:|---|--:|--:|--:|---|
-| 3.1 | `.focus-ring` (universal :focus-visible) | 30 | ~30m | 0 | None (rule already universal) |
-| 3.5 | `.status-message` | 3 files | ~30m | 0 (class name unchanged) | None (3 sites already identical) |
-| 3.3 | `.progress-bar` family | 3+1 files | ~30m | 0 | None (3 already identical; 1 dashboard gets canonical look) |
-| 3.4 | `.results-grid` family | 4 files | ~1h | 1 (Export adds `--wide`) | Low (visual converges) |
-| 3.6 | `.upload-box` family | 2 files | ~45m | 0 | Low |
-| 3.2 | `.btn` family | ~50 sites | ~3h | many | **Medium** — biggest visual diff |
+| 3.1 | `.focus-ring` (universal :focus-visible) | 30 | ~30m | 0 | **SHIPPED `6a7f1e4`** |
+| 3.5 | `.status-message` | 3 files | ~30m | 0 (class name unchanged) | **SHIPPED `7209c84`** |
+| 3.3 | `.progress-bar` family (conservative) | 2 files | ~30m | 0 | **SHIPPED `e054804`** |
+| 3.4 | `.results-grid` family | 2 files | ~1h | 0 | **SHIPPED `9780b84`** |
+| ~~3.6~~ | ~~`.upload-box` family~~ | ~~2 files~~ | — | — | **DEFERRED to Phase 4** (premise falsified; see §3.6) |
+| 3.2 | `.btn` family | ~50 sites | ~3h | many | **NEXT** — biggest visual diff |
 
-**Total: ~6 hours** sequential. Each step is its own commit.
+**Total remaining: ~3 hours** (3.2 alone). Each step is its own commit.
 
 **Pause points for GPT review:**
 
