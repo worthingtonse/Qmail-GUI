@@ -1,12 +1,26 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24 (rev 1.2 — 3.6 deferred after evidence inspection)
+**Date:** 2026-05-24 (rev 1.3 — 3.2b restructured per GPT review of 3.2a)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** 3.1 + 3.5 + 3.3 + 3.4 shipped; 3.6 deferred; 3.2 next
+**Status:** 3.1 + 3.5 + 3.3 + 3.4 + 3.2a shipped; 3.6 deferred; 3.2b next
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `9780b84` (Phase 3.4)
+**Prerequisite commits:** through `975bb1f` (Phase 3.2a)
 
 **Changelog:**
+
+- **v1.3 (2026-05-24)** — Restructured 3.2b alias handling after GPT
+  review of 3.2a (see `docs/opu.gpt-handoff-css-phase32a.txt`):
+  pure App.css alias deletion would orphan styling for live JSX
+  consumers (`.logout-button`, `.browse-button`, `.change-password-btn`,
+  `.backup-btn`, `.payout-option`, `.test-cli-btn`). 3.2b now uses a
+  hybrid: delete the already-orphaned aliases
+  (`.submit-button`/`.agree-button`/`.continue-button`/`.exit-button`/
+  `.reset-button`, all migrated to BEM), keep the still-live aliases
+  as TEMPORARY shims with a `/* SHIM */` marker. Sub-commits 3.2c–h
+  retire shim coverage per area as each JSX adoption lands. Base
+  padding stays `12px 24px` (matches existing App.css `button` rule).
+  Wallet disabled slate gradient stays as per-file override; no
+  `.btn--disabled-slate` primitive yet.
 
 - **v1.2 (2026-05-24)** — 3.6 (`.upload-box` family) deferred to
   Phase 4 after inspection revealed the plan's premise was wrong:
@@ -297,30 +311,62 @@ src/App.css:127  button.ghost, ... { ... }
 src/App.css:136  button.ghost:hover { ... }
 ```
 
-3.2 MUST reconcile these as part of the `.btn` extraction, not
-leave them as a parallel ruleset. Concretely:
+3.2 reconciles these in sub-commits. v1.3 splits the work:
 
-  (a) The bare-element `button { ... }` rule moves to primitives.css
-      AS the base of `.btn`, so any `<button>` without a `.btn`
-      class still gets a reasonable default — but the canonical
-      path is `.btn` + a variant.
-  (b) `button.primary` → fold into `.btn--primary` in primitives.css
-      AND delete from App.css. Same for `button.secondary`/`success`/
-      `danger`/`ghost`. The JSX rename of `<button className="primary">`
-      to `<button className="btn btn--primary">` happens in the
-      same commit.
-  (c) `.browse-button` was already a multi-file collision — drops
-      into `.btn--ghost` or `.btn--secondary` (TBD per look) and
-      gets its own per-component class for layout.
-  (d) `button:disabled`, `button:hover`, `button:focus` rules: the
-      `:disabled` portion folds into `.btn:disabled` in primitives.
-      `:hover` and `:focus` are universal in 3.1 (`:focus-visible`)
-      and per-variant hover (each `.btn--<variant>:hover`) in 3.2.
+**3.2a (shipped, commit `975bb1f`):** Additive only — `.btn` base +
+`--primary/--secondary/--success/--danger/--ghost` variants added to
+primitives.css. No deletions, no JSX touched. App.css base `button`
+rule deliberately matched at `padding: 12px 24px` so the cascade
+order doesn't change visual output. GPT review confirmed this is
+the right foundation.
 
-If App.css's existing button rules are LEFT in place alongside the
-new primitives, the codebase has two competing button-styling
-sources and reviewers will guess which wins. The 3.2 commit must
-make `.btn` the single owner of button shape.
+**3.2b (next):** App.css reconciliation. Per GPT review of 3.2a,
+aliases split into two groups by live-JSX-consumer status:
+
+  *Orphan aliases (already BEM-migrated — DELETE outright):*
+  - `.submit-button`, `.agree-button`, `.continue-button`
+    (replaced by `password-screen__submit-button` etc.)
+  - `.exit-button`, `.reset-button` (also BEM-migrated)
+
+  *Live-consumer aliases (KEEP as `/* SHIM */` temporary
+  variant aliases — retire in 3.2c–h):*
+  - `.logout-button` (MainDashboard.jsx:129) → shim of `.btn--danger`
+  - `.browse-button` (AuthenticateTab.jsx:284) → shim of
+    `.btn--secondary` (the actual primary use is in Auth, where the
+    file already has its own override — that override stays)
+  - `.change-password-btn`, `.backup-btn` (SettingsTab.jsx) →
+    shim of `.btn--secondary`
+  - `.payout-option` (PayoutTab.jsx) → shim of `.btn--success`
+  - `.test-cli-btn` (SettingsTab.jsx) → shim of `.btn--success`
+
+  *Bare-class consumers (JSX rename in same commit):*
+  - `button.primary/.secondary/.success/.danger/.ghost` rules — fold
+    into `.btn--*` variants AND delete the App.css grouped rule.
+    Rename any `<button className="primary">` etc. JSX sites to
+    `className="btn btn--primary"`.
+
+  *Bare-element rule:* `button { ... }` at App.css L11 stays for
+  now — it acts as the unstyled-button base. 3.2i decides whether
+  to remove it once every button has an explicit `.btn` class.
+
+  Shims are clearly marked with a `/* SHIM: remove in 3.2X */`
+  comment naming the sub-commit that retires them.
+
+**3.2c–h (per file):** Each sub-commit adds `btn btn--variant` to
+the JSX of the relevant file's button sites, converts the per-file
+CSS rule to layout-only overrides, AND removes the matching shim
+from App.css. The shim list shrinks monotonically.
+
+**3.2i (final):** After all per-file adoption, verify no shims
+remain; verify every per-component override is layout/local only
+(no half-redefinitions of shape that the primitive already owns).
+
+If App.css's bare `button.primary` etc. were LEFT in place alongside
+the new primitives, the codebase would have two competing button-
+styling sources and reviewers would guess which wins. The hybrid
+plan above makes `.btn` the canonical owner immediately while the
+shims provide a safety net for live consumers until their migration
+sub-commit lands.
 
 **Sized:** ~3 hours including JSX updates. Biggest primitive;
 ship after focus-ring proves the pattern.
@@ -534,9 +580,17 @@ complexity.
 | 3.3 | `.progress-bar` family (conservative) | 2 files | ~30m | 0 | **SHIPPED `e054804`** |
 | 3.4 | `.results-grid` family | 2 files | ~1h | 0 | **SHIPPED `9780b84`** |
 | ~~3.6~~ | ~~`.upload-box` family~~ | ~~2 files~~ | — | — | **DEFERRED to Phase 4** (premise falsified; see §3.6) |
-| 3.2 | `.btn` family | ~50 sites | ~3h | many | **NEXT** — biggest visual diff |
+| 3.2a | `.btn` family — additive only (primitives.css) | 0 sites touched | ~1h | 0 | **SHIPPED `975bb1f`** |
+| 3.2b | App.css reconciliation + bare-class JSX | ~10 JSX | ~1h | ~10 | **NEXT** — hybrid alias plan |
+| 3.2c | MainDashboard `.btn` adoption + JSX | ~10 JSX | ~30m | ~10 | pending |
+| 3.2d | ExportTab `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
+| 3.2e | AuthenticateTab `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
+| 3.2f | LockerTab `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
+| 3.2g | AccountPane `.btn` adoption + JSX | ~5 JSX | ~20m | ~5 | pending |
+| 3.2h | ServiceSelectionScreen `.btn` adoption + JSX | ~3 JSX | ~15m | ~3 | pending |
+| 3.2i | Cleanup — verify overrides are layout-only | 0 | ~30m | 0 | pending |
 
-**Total remaining: ~3 hours** (3.2 alone). Each step is its own commit.
+**Total remaining: ~3.5 hours across 3.2b–i.** Each sub-commit is its own commit.
 
 **Pause points for GPT review:**
 
