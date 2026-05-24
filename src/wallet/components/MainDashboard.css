@@ -1740,33 +1740,22 @@
   font-family: monospace;
 }
 
+/* Layout/local overrides on top of .btn (primitives.css).
+   .refresh-btn is used as either btn--primary (TransactionsTab) or
+   btn--secondary (AccountPane/ContactsPane) — the variant comes from
+   the JSX className. This rule provides only layout-shared bits:
+   icon+label flex layout, quieter padding, slightly darker disabled. */
 .refresh-btn {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
-  color: white;
   padding: 10px 24px;
-  font-size: var(--font-size-md);
-  font-weight: 500;
   border-radius: var(--radius-md);
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-base);
-  box-shadow: var(--shadow-sm), var(--glow-primary);
-}
-
-.refresh-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md), var(--glow-primary);
 }
 
 .refresh-btn:disabled {
   opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
 }
-
 
 .refresh-btn .spinning {
   animation: spin 1s linear infinite;

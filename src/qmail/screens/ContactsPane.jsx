@@ -837,7 +837,7 @@ useEffect(() => {
                       {contact.source === "user" && (
                         <button
                           type="button"
-                          className="btn btn--danger contact-action-btn"
+                          className="contact-action-btn danger"
                           onClick={() => handleDeleteContact(contact)}
                           title="Delete contact"
                           aria-label={`Delete ${contact.name}`}

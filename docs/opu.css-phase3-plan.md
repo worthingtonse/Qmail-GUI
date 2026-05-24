@@ -1,12 +1,46 @@
 # CSS refactor — Phase 3 implementation plan
 
-**Date:** 2026-05-24 (rev 1.4 — 3.2b extended to bare-class shims; qmail/* migration deferred)
+**Date:** 2026-05-24 (rev 1.5 — Phase 3 COMPLETE)
 **Author:** Claude Opus 4.7 (1M context)
-**Status:** 3.1 + 3.5 + 3.3 + 3.4 + 3.2a shipped; 3.6 deferred; 3.2b shipping
+**Status:** Phase 3 COMPLETE. 3.1 + 3.5 + 3.3 + 3.4 + 3.2a/b/c/omnibus/j/i all shipped; 3.6 deferred to Phase 4
 **Plan reference:** `docs/opu.css-refactor.txt` v2.5 §4 + GPT review trail
-**Prerequisite commits:** through `15f7ac5` (Phase 3.2a review docs)
+**Prerequisite commits:** through `6027ea0` (3.2c+omnibus+j GPT review)
 
 **Changelog:**
+
+- **v1.5 (2026-05-24)** — Phase 3 complete after 3.2i ships. Net
+  result vs. the pre-3.2a baseline (commit 9780b84):
+    - audit  1828/177/120/1/40 → 1800/175/114/1/35
+              (-28 rules, -2 literals, -6 exact, -5 collisions)
+    - CSS bundle  ~241 kB → 237.54 kB
+  3.2i decisions captured below (§3.2i):
+    1. Primitive `.btn:hover::before` got the `:not(:disabled)`
+       qualifier per GPT review of 3.2c+omnibus+j.
+    2. Auth's local `.browse-button:disabled:hover::before` deleted
+       (now redundant after primitive fix).
+    3. MainDashboard.css `.refresh-btn` trimmed from full primary
+       button definition to layout-only (display:flex, gap, padding,
+       border-radius, :disabled opacity, spin animation). The rule
+       now serves both AccountPane/ContactsPane (.btn--secondary
+       consumer) and TransactionsTab (.btn--primary consumer).
+    4. TransactionsTab.jsx `.refresh-btn` migrated to btn btn--primary.
+    5. App.css bare-class shims (button.primary/.secondary/.success/
+       .danger/.ghost) DELETED — final shim retirement.
+    6. App.css bare-element `button { ... }` fallback KEPT (per
+       GPT-prompted audit: PasswordScreen, USBCheckScreen,
+       ThemePicker, NotificationContainer, DicewarePasswordCreator
+       all have self-styled non-.btn `<button>` elements that
+       benefit from the baseline ripple+layout rules).
+    7. JSX REVERTS for 7 sites where 3.2j had added `btn btn--variant`
+       prematurely — these are custom contextual buttons whose
+       per-file rule provides a full design that doesn't match
+       primitive CTA semantics (would have inherited unwanted
+       hover lift + ripple): ComposeModal `.close-modal-btn`,
+       `.network-retry-btn`, `.toggle-advanced-btn`,
+       `.attach-files-btn`, `.send-button`, `.attach-button`; plus
+       ContactsPane `.contact-action-btn` (depends on `.X.danger`
+       compound). These remain bare per-file-class consumers; the
+       App.css `button { ... }` fallback covers their baseline.
 
 - **v1.4 (2026-05-24)** — While implementing 3.2b, a JSX survey
   surfaced ~30 bare-class consumers (`<button className="primary">`

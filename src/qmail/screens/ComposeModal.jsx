@@ -1073,7 +1073,7 @@ const ComposeModal = ({
           </h3>
           <button
             type="button"
-            className="btn btn--ghost close-modal-btn"
+            className="close-modal-btn"
             onClick={onClose}
           >
             <X size={20} />
@@ -1098,7 +1098,7 @@ const ComposeModal = ({
               </div>
               <button
                 type="button"
-                className="btn btn--secondary network-retry-btn"
+                className="network-retry-btn"
                 onClick={checkNetworkStatus}
                 disabled={isSending || canSend === null}
               >
@@ -1122,7 +1122,7 @@ const ComposeModal = ({
           <div className="advanced-toggle">
             <button
               type="button"
-              className="btn btn--ghost toggle-advanced-btn"
+              className="toggle-advanced-btn"
               onClick={() => setShowAdvanced(!showAdvanced)}
               disabled={isSending}
             >
@@ -1215,7 +1215,7 @@ const ComposeModal = ({
           <div className="attachments-row">
             <button
               type="button"
-              className="btn btn--ghost attach-files-btn"
+              className="attach-files-btn"
               onClick={handleAttachClick}
               disabled={isSending || !attachmentsSupported}
               title={
@@ -1301,7 +1301,7 @@ const ComposeModal = ({
         <footer className="compose-modal-footer">
           <button
             type="button"
-            className="btn btn--primary send-button"
+            className="send-button"
             onClick={handleSend}
             disabled={sendControlsLocked || canSend === null}
             title={
@@ -1342,7 +1342,7 @@ const ComposeModal = ({
 
           <button
             type="button"
-            className="btn btn--secondary attach-button"
+            className="attach-button"
             onClick={() => handleSaveDraft()}
             disabled={
               sendControlsLocked ||

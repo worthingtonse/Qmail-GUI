@@ -121,14 +121,6 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* Suppress the primitive's hover ripple while disabled. The primitive
-   leaves the ripple on `.btn:hover::before` (no :disabled qualifier);
-   Auth's slate-disabled state needs the ripple silenced. */
-.browse-button:disabled:hover::before {
-  width: 0;
-  height: 0;
-}
-
 .browse-button:hover:not(:disabled) {
   box-shadow: var(--shadow-lg), 0 0 20px rgba(167, 139, 250, 0.4);
 }

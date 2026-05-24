@@ -57,100 +57,12 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* -----------------------------------------------------------------
- * Phase 3.2 — App.css button-rule reconciliation.
- *
- * Canonical owner of button shape is `src/styles/primitives.css`
- * (`.btn`, `.btn--primary/--secondary/--success/--danger/--ghost`,
- * added in commit 975bb1f).
- *
- * 3.2b removed orphan aliases (zero JSX consumers, all already
- * BEM-migrated): .submit-button, .agree-button, .continue-button,
- * .exit-button, .reset-button.
- *
- * 3.2c and the 3.2-omnibus commit retired the alias shims for live
- * consumers (.logout-button, .browse-button, .change-password-btn,
- * .backup-btn, .payout-option, .test-cli-btn) by adding
- * `btn btn--variant` to their JSX and trimming per-file rules to
- * layout-only overrides.
- *
- * The rules below are the REMAINING bare-class SHIMS for
- * `button.primary/.secondary/.success/.danger/.ghost`. They cover
- * ~30 JSX sites — most in qmail/* screens that were not in Track F's
- * E1–E7 scope. The bare-class JSX migration is its own follow-on
- * track (3.2j); these shims retire in 3.2i once 3.2j drains the
- * last consumer.
- * ----------------------------------------------------------------- */
-
-/* Primary Button — SHIM: remove `button.primary` in 3.2i (last) */
-button.primary {
-  background: linear-gradient(135deg, var(--accent-primary) 0%, #8b5cf6 100%);
-  color: white;
-  box-shadow: var(--shadow-md), var(--glow-primary);
-}
-
-button.primary:hover {
-  box-shadow: var(--shadow-lg), var(--glow-primary);
-}
-
-/* Secondary Button — SHIM: `button.secondary` retired in 3.2i.
-   Alias shims for `.browse-button`, `.change-password-btn`, and
-   `.backup-btn` were retired in the 3.2-omnibus commit — those
-   buttons were never actually secondary-glass in the live cascade
-   (per-file rules in MainDashboard.css/AuthenticateTab.css overrode
-   to primary-gradient). They now consume .btn .btn--primary directly. */
-button.secondary {
-  background: var(--card-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border-medium);
-  backdrop-filter: var(--glass-blur);
-}
-
-button.secondary:hover {
-  background: var(--card-hover);
-  border-color: var(--border-strong);
-}
-
-/* Success Button — SHIM: `button.success` retired in 3.2i.
-   `.payout-option` and `.test-cli-btn` shims were retired in the
-   3.2-omnibus commit. */
-button.success {
-  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
-  color: white;
-  box-shadow: var(--shadow-md), var(--glow-success);
-}
-
-button.success:hover {
-  box-shadow: var(--shadow-lg), var(--glow-success);
-}
-
-/* Error/Danger Button — SHIM: `button.danger` retired in 3.2i.
-   `.logout-button` shim was retired in 3.2c — MainDashboard now
-   uses .btn .btn--danger directly. */
-button.danger {
-  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
-  color: white;
-  box-shadow: var(--shadow-md);
-}
-
-button.danger:hover {
-  box-shadow: var(--shadow-lg);
-}
-
-/* Ghost Button — SHIM: remove `button.ghost` in 3.2i (last) */
-button.ghost {
-  background: transparent;
-  color: var(--accent-primary);
-  border: none;
-  padding: var(--space-sm) var(--space-md);
-  text-decoration: none;
-}
-
-button.ghost:hover {
-  background: rgba(167, 139, 250, 0.1);
-  box-shadow: none;
-  transform: none;
-}
+/* Phase 3.2 button-rule reconciliation — COMPLETE in 3.2i.
+   Variant ownership lives in src/styles/primitives.css (.btn,
+   .btn--primary/--secondary/--success/--danger/--ghost). The bare-
+   element `button { ... }` rules above remain as the unstyled-button
+   fallback for non-.btn consumers (PasswordScreen, USBCheckScreen,
+   ThemePicker, NotificationContainer, etc.). */
 
 /* Diceware Button */
 .diceware-button {

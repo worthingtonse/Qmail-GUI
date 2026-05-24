@@ -338,7 +338,11 @@ select:focus-visible,
   transition: width var(--transition-smooth), height var(--transition-smooth);
 }
 
-.btn:hover::before {
+/* Ripple expands on hover but only for interactive (non-disabled)
+   buttons. Without `:not(:disabled)` the ripple would still play on
+   pointer-over of disabled buttons, which contradicts the disabled
+   semantics defined below. */
+.btn:hover:not(:disabled)::before {
   width: 300px;
   height: 300px;
 }

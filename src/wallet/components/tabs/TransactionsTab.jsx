@@ -201,7 +201,7 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
             )}
           </div>
           <button 
-            className="refresh-btn"
+            className="btn btn--primary refresh-btn"
             onClick={loadTransactions}
             disabled={isLoading}
             title="Refresh transactions"
