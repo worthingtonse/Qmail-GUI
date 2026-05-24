@@ -82,3 +82,67 @@ select:focus-visible,
   line-height: 1.6;
   animation: fadeIn calc(300ms * var(--motion-scale)) ease-out;
 }
+
+
+/* ============================================================
+ * 3.3 — Progress bar (12px medium variant)
+ * ============================================================
+ * Canonical shape lifted from AuthenticateTab.css and LockerTab.css
+ * which were byte-identical. The pulse animation runs while a
+ * long-running coin operation is in flight; HC / reduced-motion
+ * collapses it via the existing safety net (P2 a + App.css).
+ *
+ * NOT extracted from this primitive (per plan v1.1 §3.3 conservative
+ * scope after audit inspection):
+ *   - MainDashboard.css uses a 30px-tall Bootstrap-style variant
+ *     (raw `#e9ecef` bg, `15px` radius, `10px` margin, blue
+ *     gradient bar with text inside). Different visual intent —
+ *     a "progress with %-text" display, not a pulse indicator.
+ *     Phase 4 per-file review will decide whether to rewrite or
+ *     keep that look.
+ *   - ExportTab.css uses an 8px-tall slim variant (4px radius,
+ *     smaller shadow, ::after shimmer). Distinct task-indicator
+ *     pattern. Phase 4 / 5 territory.
+ *
+ * If a third file later grows the canonical 12px+pulse pattern,
+ * this primitive is already here. If size variants become real
+ * primitive needs, add `.progress-bar-container--thin` / `--thick`
+ * modifiers then.
+ *
+ * The progressPulse keyframe stays per-file-defined (in
+ * AuthenticateTab.css and LockerTab.css — both copies are
+ * identical; Phase 5 cleanup can consolidate).
+ */
+.progress-bar-container {
+  width: 100%;
+  height: 12px;
+  background: var(--tertiary-bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--space-lg);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  border-radius: var(--radius-lg);
+  transition: width var(--transition-base);
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.5);
+  animation: progressPulse 2s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+}
+
+/* progressPulse — consumed by .progress-bar above. Both consumer
+   files (Auth, Locker) carried byte-identical copies; consolidating
+   here since only .progress-bar uses this name (no naming collision
+   with other animations as fadeIn has — see 3.5 deferral note). */
+@keyframes progressPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(167, 139, 250, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(167, 139, 250, 0.8);
+  }
+}
