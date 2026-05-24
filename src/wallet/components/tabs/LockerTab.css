@@ -400,22 +400,6 @@
   }
 }
 
-/* Results Section */
-.results-section {
-  margin: var(--space-md) 0;
-  padding: var(--space-2xl);
-  background: var(--glass-bg-strong);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
-  width: 100%;
-  max-width: 500px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
 @keyframes popIn {
   from {
     opacity: 0;
@@ -452,21 +436,9 @@
   flex: 1;
 }
 
-/* Results Close Button */
+/* Results Close Button — layout overrides on top of the
+   .results-close-button primitive in primitives.css. */
 .results-close-button {
-  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
-  color: white;
-  border: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-base);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
   box-shadow: var(--shadow-sm);
   position: relative;
@@ -510,23 +482,10 @@
   box-shadow: none;
 }
 
+/* Locker keeps a per-component margin-bottom on .results-grid;
+   the rest of the primitive comes from primitives.css. */
 .results-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: var(--space-md);
   margin-bottom: var(--space-lg);
-}
-
-.result-item {
-  background: var(--card-bg);
-  padding: var(--space-lg);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  transition: all var(--transition-base);
-  animation: fadeInUp calc(300ms * var(--motion-scale)) ease-out backwards;
 }
 
 .result-item:nth-child(1) { animation-delay: 0.1s; }
@@ -534,17 +493,6 @@
 .result-item:nth-child(3) { animation-delay: 0.2s; }
 .result-item:nth-child(4) { animation-delay: 0.25s; }
 .result-item:nth-child(5) { animation-delay: 0.3s; }
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .result-item:hover {
   transform: translateY(-2px);
@@ -577,22 +525,6 @@
     var(--status-error-bg) 0%,
     var(--card-bg) 100%
   );
-}
-
-.result-label {
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.result-value {
-  font-size: var(--font-size-xl);
-  color: var(--text-primary);
-  font-weight: 700;
-  font-family: 'Fira Code', monospace;
-  letter-spacing: -0.02em;
 }
 
 .result-item.success .result-value {

@@ -149,3 +149,125 @@ select:focus-visible,
     box-shadow: 0 0 30px rgba(167, 139, 250, 0.8);
   }
 }
+
+
+/* ============================================================
+ * 3.4 — Results display family
+ * ============================================================
+ * The "you just finished an operation, here is what happened"
+ * panel used by Authenticate and Locker tabs. Canonical shape
+ * lifted from AuthenticateTab.css and LockerTab.css which were
+ * byte-identical on these classes:
+ *
+ *   .results-section  (centered card with popIn mount animation)
+ *   .results-grid     (200px auto-fit columns, gap var(--space-md))
+ *   .result-item      (card item with fadeInUp staggered entry)
+ *   .result-label     (uppercase tracking small text)
+ *   .result-value     (large monospace value)
+ *   .results-close-button (red gradient circle button)
+ *
+ * Also extracted alongside .result-item:
+ *   @keyframes fadeInUp  (primitive-owned — single consumer, no
+ *                         name collision elsewhere in the codebase)
+ *
+ * NOT extracted (deferred to Phase 4 per-file review):
+ *   - .results-header — Auth uses justify-content: space-around;
+ *     Locker uses space-between with explicit border. Different
+ *     visual intent.
+ *   - @keyframes popIn — Auth/Locker define scale-only; ExportTab
+ *     defines scale+translateY (vertical motion variant). Same
+ *     fadeIn-shape name collision as documented in 3.5. Keep
+ *     per-file for now; follow-up will rename Export's variant
+ *     before consolidating.
+ *   - ExportTab.css full results-family — entirely distinct shape
+ *     (280px columns, glass background instead of glass-bg-strong,
+ *     flex space-between result-item layout instead of stacked).
+ *     A simple modifier won't capture all differences; defer.
+ *   - MainDashboard.css results-family — Bootstrap drift
+ *     (#f8f9fa surface, #6c757d accent, #28a745 success). Already
+ *     queued in opu.css-palette-drift.md.
+ *
+ * Locker keeps a minimal `.results-grid { margin-bottom: var(--space-lg) }`
+ * override because its layout has additional content below the grid;
+ * Auth does not need that override.
+ */
+.results-section {
+  margin: var(--space-md) 0;
+  padding: var(--space-2xl);
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  animation: popIn calc(400ms * var(--motion-scale)) ease-out;
+  width: 100%;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.result-item {
+  background: var(--card-bg);
+  padding: var(--space-lg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  transition: all var(--transition-base);
+  animation: fadeInUp calc(300ms * var(--motion-scale)) ease-out backwards;
+}
+
+.result-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.result-value {
+  font-size: var(--font-size-xl);
+  color: var(--text-primary);
+  font-weight: 700;
+  font-family: 'Fira Code', monospace;
+  letter-spacing: -0.02em;
+}
+
+.results-close-button {
+  background: linear-gradient(135deg, var(--accent-error) 0%, #ef4444 100%);
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* fadeInUp — consumed by .result-item above (and Auth's .file-item,
+   which also wants the same shape). Both definition files (Auth,
+   Locker) carried byte-identical copies; the primitive wins via
+   cascade for every consumer. No name collision with any other
+   keyframe in src/ (unlike fadeIn / popIn). */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
