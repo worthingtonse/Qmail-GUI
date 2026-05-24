@@ -842,7 +842,7 @@
   border: var(--glass-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  margin-top: 4px;
+  margin-top: var(--space-xs);
   max-height: 200px;
   overflow-y: auto;
   animation: dropdownFadeIn 0.2s ease-out;

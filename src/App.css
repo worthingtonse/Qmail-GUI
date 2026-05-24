@@ -129,7 +129,7 @@ button.ghost,
   background: transparent;
   color: var(--accent-primary);
   border: none;
-  padding: 8px 16px;
+  padding: var(--space-sm) var(--space-md);
   text-decoration: none;
 }
 

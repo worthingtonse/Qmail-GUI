@@ -221,7 +221,7 @@
   color: var(--text-primary);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
-  padding: 8px 16px;
+  padding: var(--space-sm) var(--space-md);
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
@@ -707,7 +707,7 @@
   background: linear-gradient(135deg, var(--accent-secondary) 0%, #0ea5e9 100%);
   color: white;
   border: none;
-  padding: 8px 16px;
+  padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-sm);
   font-size: var(--font-size-sm);
   font-weight: 500;
