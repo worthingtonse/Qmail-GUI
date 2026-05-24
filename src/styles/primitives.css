@@ -109,9 +109,12 @@ select:focus-visible,
  * primitive needs, add `.progress-bar-container--thin` / `--thick`
  * modifiers then.
  *
- * The progressPulse keyframe stays per-file-defined (in
- * AuthenticateTab.css and LockerTab.css — both copies are
- * identical; Phase 5 cleanup can consolidate).
+ * The progressPulse keyframe is extracted to this file below the
+ * .progress-bar rule. Both consumer files (Auth, Locker) had
+ * byte-identical copies AND no other rule in the codebase
+ * references the `progressPulse` name, so consolidating it
+ * alongside its only consumer is safe (unlike fadeIn — see §3.5
+ * note about the two-distinct-fadeIns problem).
  */
 .progress-bar-container {
   width: 100%;
