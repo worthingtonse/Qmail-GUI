@@ -83,6 +83,84 @@ rather than re-creating it. Run AUTO first.
 
 
 ===========================================================
+PART 0 — Preflight (Sean does this before invoking Claude)
+===========================================================
+
+This section was added after the initial checklist. Discovered
+during environment review:
+  - E:\Client1\core.exe is MISSING. Only E:\Client2\core.exe
+    exists (5/23 build, SHA256 11DE8907...).
+  - rest_core source on branch "qmail" has 38 modified-uncommitted
+    files. The four CORE-* backend tickets (CORE-H drafts/delete,
+    CORE-J starred filter, CORE-E send-progress stages, CORE-K
+    search has_more) are NOT in source — confirmed by grep. So
+    rebuilding rest_core for this smoke test is NOT required;
+    the checklist already lists those four as known-broken.
+  - E:\Client1\ has three Client_Data folders (Client_Data,
+    Client_Data_old, Client_Data3). Only Client_Data is live;
+    confirm before launching.
+
+Run these top to bottom. Each step is independent.
+
+[ ] P0.1  Confirm no stray core.exe is running.
+            powershell> Get-Process core -ErrorAction SilentlyContinue
+          Expected: nothing. If any: Stop-Process -Force -Id <PID>.
+
+[ ] P0.2  Copy E:\Client2\core.exe to E:\Client1\core.exe so both
+          clients run the same binary.
+            powershell> Copy-Item E:\Client2\core.exe E:\Client1\core.exe
+          The two clients are differentiated by their
+          Client_Data\rest_core.conf (different ports + identities),
+          not by the binary.
+
+[ ] P0.3  Confirm E:\Client1\Client_Data\rest_core.conf has
+          http_port=8081 and points at the SN 55076 (@chariot.
+          pyramid.byte) wallet. The Client_Data_old and Client_Data3
+          siblings won't be loaded but they shouldn't be there long-
+          term; ignore them for this test.
+
+[ ] P0.4  Confirm E:\Client2\Client_Data\rest_core.conf has
+          http_port=8082 and points at the SN 55077 (@chariot.
+          harbor.byte) wallet.
+
+[ ] P0.5  Launch Client1 backend in its own terminal.
+            cmd> cd /d E:\Client1 && core.exe
+          Leave it running. Window can be minimized.
+
+[ ] P0.6  Launch Client2 backend in its own terminal.
+            cmd> cd /d E:\Client2 && core.exe
+          Leave it running.
+
+[ ] P0.7  Sanity-ping both backends from a third terminal:
+            curl http://localhost:8081/api/raida/echo
+            curl http://localhost:8082/api/raida/echo
+          Both should return JSON with array_usable=true (or at
+          least a populated raidas list). If either 404s or
+          ECONNREFUSEDs, the backend didn't bind — check the
+          terminal output of P0.5/P0.6 and fix before continuing.
+
+[ ] P0.8  Launch Client1 GUI dev server in its own terminal.
+            cmd> cd /d D:\Code\src\JavaScript\Qmail-GUI && npm run dev
+          Wait for "Local: http://localhost:5173/".
+
+[ ] P0.9  Launch Client2 GUI dev server in its own terminal.
+            cmd> cd /d D:\Code\src\JavaScript\Qmail-GUI && npm run dev2
+          Wait for "Local: http://localhost:5174/".
+
+[ ] P0.10 Open two browser windows side-by-side:
+            http://localhost:5173/?backendPort=8081   (Client1)
+            http://localhost:5174/?backendPort=8082   (Client2)
+
+[ ] P0.11 Tell Claude "ready" and they will start PART 1.
+
+If P0.7 fails after P0.5/P0.6: don't proceed. Either core.exe
+silently exited (check the terminal), or rest_core.conf is wrong,
+or another process owns the port. Fix the root cause; don't paper
+over it by moving to a different port (the GUI URL params hard-
+code 8081/8082).
+
+
+===========================================================
 PART 1 — AUTO (Claude runs this; you don't need to do anything)
 ===========================================================
 
