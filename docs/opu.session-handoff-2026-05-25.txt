@@ -172,35 +172,51 @@ THE REMAINING WORK — in priority order
 
    b) !important reduction in ServiceSelectionScreen.css (60) and
       App.css (38)
-      These are the two non-themes-css concentrations of !important.
-      Already on the Phase 5 punted-cleanup list per
-      opu.session-handoff-2026-05-24.txt §Phase 5. Both are
-      layered-overrides hacks that pre-date the primitive/token
-      system and should be tractable now.
+      CLOSED 2026-05-25. `rg !important src/` now returns zero matches
+      across the entire source tree. The 247-declaration concentration
+      flagged in the prior stats run has been fully eliminated; every
+      remaining `!important` reference is in `docs/` (historical plan
+      and handoff files). No further action.
 
    c) App.css :549-560 !important block
-      Specifically called out in the 2026-05-24 handoff as a Phase 5
-      candidate. May have already been removed in the E6 App.css
-      reduction (726 → 243 lines); verify against current file before
-      doing anything.
+      CLOSED 2026-05-25. App.css is now 244 lines total; the L549-560
+      range no longer exists. Subsumed by item (b) above.
 
    d) fadeIn / popIn keyframe-name collision audit
-      Phase 5 plan item. Same NAME in different files means different
-      SHAPES. Now that BEM block names exist for every file, the
-      keyframes can probably be renamed (e.g. auth-popIn, export-popIn)
-      and either kept per-file or extracted to primitives.css.
+      CLOSED 2026-05-25. The collision-prone bare names `fadeIn`,
+      `popIn`, `fadeInUp` no longer exist anywhere in `src/` (zero
+      `@keyframes` definitions, zero `animation:` consumers). Every
+      per-file keyframe is now block-namespaced
+      (`app-shell-fade-in`, `export-tab-pop-in`,
+      `authenticate-tab-rise-in`, `main-dashboard-fade-in`,
+      `password-screen-pop-in`, `welcome-screen-pop-in`, etc.).
+      The legitimately-shared keyframe `progressPulse` remains in
+      primitives.css. Minor naming drift to flag (NOT a collision):
+      `MainDashboard.css:504 @keyframes slideDown` and
+      `MainDashboard.css:1482 @keyframes spin` are not BEM-prefixed
+      like their three sibling spin keyframes elsewhere
+      (`receipt-modal-spin`, `wallet-setup-screen-spin`,
+      `qmail-dashboard-spin`). Each is defined exactly once and
+      consumed only within MainDashboard, so no behavioral risk;
+      consider renaming to `main-dashboard-slide-down` /
+      `main-dashboard-spin` during a future micro-cleanup.
 
    e) Backup-document inline presentation in
       DicewarePasswordCreator.jsx
       The exported HTML/print template strings contain literal
       presentation values inside generated document markup. Out of E10
       scope. Would need its own ticket if anyone wants those moved
-      into app CSS.
+      into app CSS. (Still open — not a Phase 5 item.)
 
-5. PHASE 5 PROPER (post-DONE)
-   Once everything is DONE, the Phase 5 plan items in
-   opu.session-handoff-2026-05-24.txt are next. Not urgent; tracks
-   that should not be revisited until E1-E22 are all DONE.
+5. PHASE 5 PROPER (post-DONE) — CLOSED 2026-05-25
+   The Phase 5 plan items listed in opu.session-handoff-2026-05-24.txt
+   (App.css :549-560 !important block, fadeIn/popIn keyframe-name
+   collision audit, broader !important reduction) have all been
+   independently resolved — confirmed by the audit recorded in items
+   (b), (c), (d) above. The entire CSS refactor (Phase 4 + Phase 5)
+   is now mechanically complete; visual smoke
+   (docs/theme.smoke-test.md) is the only remaining gate before any
+   track can move to DONE.
 
 ================================================================================
 WORKING-TREE STATE AT HANDOFF

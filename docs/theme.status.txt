@@ -18,7 +18,7 @@ How to use this file:
     complete first.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-25 by opu (E22 independently gate-checked: G1/G2 pass, G3/JSX n/a for global stylesheet, all 21 token refs resolve; full Phase 4 batch E1-E22 now REVIEWED, visual smoke is the only remaining Phase 4 gate)
+Last updated: 2026-05-25 by opu (Phase 5 audit closed: !important reduction, fadeIn/popIn collision audit, and App.css L549-560 block all independently resolved by gpt's E-track rename passes; rg confirms 0 !important in src/ and 0 fadeIn|popIn refs. Full Phase 4 batch E1-E22 REVIEWED; visual smoke is the only remaining gate for any track to move to DONE.)
 
 Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 

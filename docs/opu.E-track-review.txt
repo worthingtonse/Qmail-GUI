@@ -807,11 +807,50 @@ Remaining Phase 4 outstanding work:
   - Visual smoke for the entire E1-E22 group (docs/theme.smoke-test.md),
     which is the gate before DONE.
 
-Out-of-Phase-4 cleanups noted during this run:
+Out-of-Phase-4 cleanups noted during this run — all CLOSED 2026-05-25:
   - QMailDashboard.css dead --font-size-base alias: CLOSED in
     commit c1446b6 (E12 cleanup landed in the Phase 4 CSS commit).
-  - !important concentrations in ServiceSelectionScreen.css (60) and
-    App.css (38) flagged in stats run; on Phase 5 punted-cleanup list.
+    Verification: `rg --font-size-base src/` returns zero matches.
+  - !important reduction: CLOSED. `rg !important src/` returns zero
+    matches across the entire source tree. The 247-declaration
+    concentration flagged in the prior stats run (60 in
+    ServiceSelectionScreen.css, 38 in App.css) has been fully
+    eliminated. The App.css L549-560 !important block specifically
+    called out in the 2026-05-24 handoff is also gone (App.css is
+    now 244 lines total).
+  - fadeIn / popIn keyframe-name collision: CLOSED. The
+    collision-prone bare names fadeIn, popIn, fadeInUp no longer
+    exist anywhere in src/ (zero @keyframes definitions, zero
+    animation: consumers). Every per-file keyframe is now
+    block-namespaced (e.g. app-shell-fade-in, export-tab-pop-in,
+    authenticate-tab-rise-in, main-dashboard-fade-in,
+    password-screen-pop-in, welcome-screen-pop-in). The
+    legitimately-shared progressPulse remains in primitives.css.
+
+Minor naming drift remaining (NOT a collision; future micro-cleanup):
+  - MainDashboard.css:504 @keyframes slideDown and
+    MainDashboard.css:1482 @keyframes spin are not BEM-prefixed
+    like their three sibling spin keyframes elsewhere
+    (receipt-modal-spin, wallet-setup-screen-spin,
+    qmail-dashboard-spin). Each is defined exactly once and
+    consumed only within MainDashboard, so no behavioral risk.
+    Consider renaming to main-dashboard-slide-down /
+    main-dashboard-spin during a future cleanup pass.
+
+================================================================================
+PHASE 5 CLOSEOUT — 2026-05-25
+================================================================================
+
+With the audit recorded above, the entire CSS refactor (Phase 4 +
+Phase 5) is mechanically complete. The Phase 5 plan items inherited
+from opu.session-handoff-2026-05-24.txt (App.css L549-560 !important
+block, fadeIn/popIn keyframe-name collision audit, broader !important
+reduction) were all independently resolved during gpt's E-track rename
+passes — no separate Phase 5 cleanup commits were needed.
+
+Visual smoke (docs/theme.smoke-test.md) is the only remaining gate
+before any track can move to DONE. That is the user's responsibility
+to run in the live dev app.
 
 ================================================================================
 END
