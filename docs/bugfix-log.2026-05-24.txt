@@ -12,7 +12,8 @@ entries. If a fix is later reverted, add a follow-up entry.
 Fixed by:    Claude Opus 4.7 (1M context)
 Reported by: Sean (manual GUI testing)
 Severity:    HIGH
-Commit:      uncommitted — pending Sean approval
+Commit:      Qmail-GUI 98c7c0c (combined with BUG-52)
+             rest_core  ae2aa22 (CMake mirror + kill-by-name)
 
 **Symptom**: Sean launched E:\Client3\QMail.exe (5/22/2026 build)
 and the expected Client_Data folder structure never appeared next
@@ -128,7 +129,8 @@ core debug logging, and the dev-only RAIDA-11 LAN override.
 Fixed by:    Claude Opus 4.7 (1M context)
 Reported by: Sean (manual GUI testing, follow-up to BUG-51)
 Severity:    HIGH
-Commit:      uncommitted — pending Sean approval
+Commit:      Qmail-GUI 98c7c0c (combined with BUG-51)
+             rest_core  4467849 (-data-dir flag)
 
 **Symptom**: After BUG-51 fix, launching QMail.exe still did not
 produce a Client_Data folder next to QMail.exe. Each launch
