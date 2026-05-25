@@ -19,14 +19,14 @@ const PayoutTab = () => {
       <h3>Payout CloudCoins</h3>
       <div className="feature-placeholder">
         <p>Convert your CloudCoins to other currencies or transfer them.</p>
-        <div className="payout-options">
-          <button className="btn btn--success payout-option" onClick={handleTransferToBank}>
+        <div className="main-dashboard__payout-options">
+          <button className="btn btn--success main-dashboard__payout-option" onClick={handleTransferToBank}>
             Transfer to Bank
           </button>
-          <button className="btn btn--success payout-option" onClick={handleSendToWallet}>
+          <button className="btn btn--success main-dashboard__payout-option" onClick={handleSendToWallet}>
             Send to Another Wallet
           </button>
-          <button className="btn btn--success payout-option" onClick={handleExportCoins}>
+          <button className="btn btn--success main-dashboard__payout-option" onClick={handleExportCoins}>
             Export CloudCoins
           </button>
         </div>

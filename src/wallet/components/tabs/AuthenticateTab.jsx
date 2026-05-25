@@ -266,28 +266,28 @@ const AuthenticateTab = () => {
   return (
     <div className="tab-content">
       <h3>Authenticate CloudCoins</h3>
-      <div className="feature-placeholder">
+      <div className="feature-placeholder authenticate-tab">
         <p>Upload CloudCoin files to authenticate them with RAIDA servers.</p>
         
         {/* Drag and Drop Area */}
-        <div className="upload-area">
+        <div className="authenticate-tab__upload-area">
           <div 
-            className={`upload-box ${isDragging ? 'dragging' : ''}`}
+            className={`authenticate-tab__upload-box ${isDragging ? 'authenticate-tab__upload-box--dragging' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <span className="upload-icon">☁️</span>
-            <p className="upload-text">Drag and drop CloudCoin files here</p>
-            <p className="upload-subtext">or</p>
+            <span className="authenticate-tab__upload-icon">☁️</span>
+            <p className="authenticate-tab__upload-text">Drag and drop CloudCoin files here</p>
+            <p className="authenticate-tab__upload-subtext">or</p>
             <button 
-              className="btn btn--primary browse-button"
+              className="btn btn--primary authenticate-tab__browse-button"
               onClick={handleFileSelect}
               disabled={isProcessing}
             >
               Browse Files
             </button>
-            <p className="upload-info">Supported: .bin, .png</p>
+            <p className="authenticate-tab__upload-info">Supported: .bin, .png</p>
           </div>
           
           {/* Hidden file input */}
@@ -297,32 +297,32 @@ const AuthenticateTab = () => {
             multiple
             accept=".bin,.png"
             onChange={handleFileInputChange}
-            style={{ display: 'none' }}
+            className="authenticate-tab__file-input"
           />
         </div>
 
         {/* Selected Files List */}
         {selectedFiles.length > 0 && (
-          <div className="selected-files">
-            <div className="selected-files-header">
+          <div className="authenticate-tab__selected-files">
+            <div className="authenticate-tab__selected-files-header">
               <h4>Selected Files ({selectedFiles.length})</h4>
               <button 
-                className="clear-button" 
+                className="btn btn--danger authenticate-tab__clear-button" 
                 onClick={clearFiles}
                 disabled={isProcessing}
               >
                 Clear All
               </button>
             </div>
-            <div className="files-list">
+            <div className="authenticate-tab__files-list">
               {selectedFiles.map((file, index) => (
-                <div key={index} className="file-item">
-                  <div className="file-info">
-                    <span className="file-name">{file.name}</span>
-                    <span className="file-size">{formatFileSize(file.size)}</span>
+                <div key={index} className="authenticate-tab__file-item">
+                  <div className="authenticate-tab__file-info">
+                    <span className="authenticate-tab__file-name">{file.name}</span>
+                    <span className="authenticate-tab__file-size">{formatFileSize(file.size)}</span>
                   </div>
                   <button 
-                    className="remove-button" 
+                    className="btn btn--danger authenticate-tab__remove-button" 
                     onClick={() => removeFile(index)}
                     disabled={isProcessing}
                   >
@@ -336,7 +336,7 @@ const AuthenticateTab = () => {
 
         {/* File Directory Input */}
         {selectedFiles.length > 0 && (
-          <div className="memo-section">
+          <div className="authenticate-tab__memo-section">
             <label htmlFor="file-directory-input">
               Files Directory:
               <small className="field-hint">
@@ -350,14 +350,14 @@ const AuthenticateTab = () => {
               onChange={(e) => setFileDirectory(e.target.value)}
               placeholder="e.g., Downloads, testcoins, or C:\Your\Files\Path"
               disabled={isProcessing}
-              className="memo-input"
+              className="authenticate-tab__memo-input"
             />
           </div>
         )}
 
         {/* Memo Input */}
         {selectedFiles.length > 0 && (
-          <div className="memo-section">
+          <div className="authenticate-tab__memo-section">
             <label htmlFor="memo-input">Transaction Memo (Optional):</label>
             <input
               id="memo-input"
@@ -366,14 +366,14 @@ const AuthenticateTab = () => {
               onChange={(e) => setMemo(e.target.value)}
               placeholder="Enter a memo for this import..."
               disabled={isProcessing}
-              className="memo-input"
+              className="authenticate-tab__memo-input"
             />
           </div>
         )}
 
         {/* Wallet Path Input */}
         {selectedFiles.length > 0 && (
-          <div className="memo-section">
+          <div className="authenticate-tab__memo-section">
             <label htmlFor="wallet-path-input">
               Wallet Path:
               <small className="field-hint">
@@ -387,16 +387,16 @@ const AuthenticateTab = () => {
               onChange={(e) => setWalletPath(e.target.value)}
               placeholder="e.g., CloudCoin/Wallets/Default or C:\Your\Wallet\Path"
               disabled={isProcessing}
-              className="memo-input"
+              className="authenticate-tab__memo-input"
             />
           </div>
         )}
 
         {/* Import Button */}
         {selectedFiles.length > 0 && (
-          <div className="import-actions">
+          <div className="authenticate-tab__actions">
             <button 
-              className="import-button" 
+              className="btn btn--success authenticate-tab__import-button" 
               onClick={handleImport}
               disabled={isProcessing}
             >
@@ -407,66 +407,66 @@ const AuthenticateTab = () => {
 
         {/* Progress Section */}
         {isProcessing && (
-          <div className="progress-section">
-            <div className="progress-bar-container">
+          <div className="authenticate-tab__progress">
+            <div className="authenticate-tab__progress-track">
               <div 
-                className="progress-bar" 
-                style={{ width: `${progress}%` }}
+                className="authenticate-tab__progress-bar" 
+                style={{ '--authenticate-tab-progress-width': `${progress}%` }}
               />
             </div>
-            <p className="progress-text">{progress}%</p>
-            <p className="status-message">{statusMessage}</p>
+            <p className="authenticate-tab__progress-text">{progress}%</p>
+            <p className="authenticate-tab__status-message">{statusMessage}</p>
           </div>
         )}
 
         {/* Results Section */}
         {taskResult && !isProcessing && showResults && (
-          <div className="results-section">
-            <div className="results-header">
+          <div className="authenticate-tab__results">
+            <div className="authenticate-tab__results-header">
               <h4>Import Results</h4>
               <button 
-                className="results-close-button" 
+                className="btn btn--danger authenticate-tab__close-button" 
                 onClick={clearResults}
                 title="Close results"
               >
                 ✕
               </button>
             </div>
-            <div className="results-grid">
+            <div className="authenticate-tab__results-grid">
               {taskResult.data && (
                 <>
                   {taskResult.data.total_processed !== undefined && (
-                    <div className="result-item">
-                      <span className="result-label">Total Processed:</span>
-                      <span className="result-value">{taskResult.data.total_processed}</span>
+                    <div className="authenticate-tab__result-item">
+                      <span className="authenticate-tab__result-label">Total Processed:</span>
+                      <span className="authenticate-tab__result-value">{taskResult.data.total_processed}</span>
                     </div>
                   )}
                   {taskResult.data.pown_results && (
                     <>
-                      <div className="result-item success">
-                        <span className="result-label">Authenticated (Bank):</span>
-                        <span className="result-value">{taskResult.data.pown_results.bank}</span>
+                      <div className="authenticate-tab__result-item authenticate-tab__result-item--success">
+                        <span className="authenticate-tab__result-label">Authenticated (Bank):</span>
+                        <span className="authenticate-tab__result-value">{taskResult.data.pown_results.bank}</span>
                       </div>
-                      <div className="result-item warning">
-                        <span className="result-label">Fracked:</span>
-                        <span className="result-value">{taskResult.data.pown_results.fracked}</span>
+                      <div className="authenticate-tab__result-item authenticate-tab__result-item--warning">
+                        <span className="authenticate-tab__result-label">Fracked:</span>
+                        <span className="authenticate-tab__result-value">{taskResult.data.pown_results.fracked}</span>
                       </div>
-                      <div className="result-item error">
-                        <span className="result-label">Counterfeit:</span>
-                        <span className="result-value">{taskResult.data.pown_results.counterfeit}</span>
+                      <div className="authenticate-tab__result-item authenticate-tab__result-item--error">
+                        <span className="authenticate-tab__result-label">Counterfeit:</span>
+                        <span className="authenticate-tab__result-value">{taskResult.data.pown_results.counterfeit}</span>
                       </div>
                       {taskResult.data.pown_results.limbo > 0 && (
-                        <div className="result-item">
-                          <span className="result-label">Limbo:</span>
-                          <span className="result-value">{taskResult.data.pown_results.limbo}</span>
+                        <div className="authenticate-tab__result-item">
+                          <span className="authenticate-tab__result-label">Limbo:</span>
+                          <span className="authenticate-tab__result-value">{taskResult.data.pown_results.limbo}</span>
                         </div>
                       )}
                     </>
                   )}
                   {taskResult.data.receipt_id && (
-                    <div className="result-item">
-                      <span className="result-label">Receipt ID:</span>
-                      <span className="result-value receipt-id">{taskResult.data.receipt_id}</span>
+                    <div className="authenticate-tab__result-item">
+                      <span className="authenticate-tab__result-label">Receipt ID:</span>
+                      <span className="authenticate-tab__result-value authenticate-tab__result-value--receipt-id">{taskResult.data.receipt_id}</span>
                     </div>
                   )}
                 </>
@@ -477,8 +477,8 @@ const AuthenticateTab = () => {
 
         {/* Status Message (when not processing) */}
         {!isProcessing && statusMessage && !taskResult && (
-          <div className="status-section">
-            <p className="status-message">{statusMessage}</p>
+          <div className="authenticate-tab__status">
+            <p className="authenticate-tab__status-message authenticate-tab__status-message--error">{statusMessage}</p>
           </div>
         )}
       </div>

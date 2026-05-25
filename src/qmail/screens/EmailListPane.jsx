@@ -172,12 +172,12 @@ const EmailListPane = ({
 
       <div className="email-list-pane__list">
         {isLoading ? (
-          <div className="loading-state">
+          <div className="email-list-pane__loading-state">
             <RefreshCw size={24} className="spinning" />
             <p>Loading {getFolderTitle(currentFolder).toLowerCase()}...</p>
           </div>
         ) : emails.length === 0 ? (
-          <div className="empty-state">
+          <div className="email-list-pane__empty-state">
             <Mail size={48} />
             <h3>No emails found</h3>
             <p>

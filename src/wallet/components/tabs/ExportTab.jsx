@@ -44,7 +44,7 @@ const ExportTab = () => {
   // Handle click outside dropdown to close it
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownOpen && !event.target.closest('.custom-dropdown')) {
+      if (dropdownOpen && !event.target.closest('.export-tab__dropdown')) {
         setDropdownOpen(false);
       }
     };
@@ -306,27 +306,27 @@ const ExportTab = () => {
   return (
     <div className="tab-content">
       <h3>Export CloudCoins</h3>
-      <div className="feature-placeholder">
+      <div className="feature-placeholder export-tab">
         <p>Export CloudCoins from your active wallet to a destination folder for sharing or transfer.</p>
         
         {/* Export Form */}
-        <div className="export-form">
+        <div className="export-tab__form">
            {/* Wallet Selector */}
-        <div className="form-group">
-          <label htmlFor="wallet-select">
+        <div className="export-tab__field">
+          <label htmlFor="wallet-select" className="export-tab__label">
             Select Wallet to Export From
-            <span className="required">*</span>
-            <div className="tooltip">
-              <Info size={16} className="info-icon" />
-              <span className="tooltiptext">Choose which wallet to export CloudCoins from</span>
+            <span className="export-tab__required">*</span>
+            <div className="export-tab__tooltip">
+              <Info size={16} className="export-tab__info-icon" />
+              <span className="export-tab__tooltip-text">Choose which wallet to export CloudCoins from</span>
             </div>
           </label>
           
           {/* Custom Dropdown */}
-          <div className="custom-dropdown">
+          <div className="export-tab__dropdown">
             <button
               type="button"
-              className={`dropdown-trigger ${walletsLoading || isProcessing ? 'disabled' : ''}`}
+              className={`export-tab__dropdown-trigger ${walletsLoading || isProcessing ? 'export-tab__dropdown-trigger--disabled' : ''}`}
               onClick={() => setDropdownOpen(!dropdownOpen)}
               disabled={walletsLoading || isProcessing}
             >
@@ -338,7 +338,7 @@ const ExportTab = () => {
                 'Select a wallet...'
               )}
               <svg 
-                className={`dropdown-arrow ${dropdownOpen ? 'open' : ''}`} 
+                className={`export-tab__dropdown-arrow ${dropdownOpen ? 'export-tab__dropdown-arrow--open' : ''}`} 
                 width="16" 
                 height="16" 
                 viewBox="0 0 24 24" 
@@ -351,12 +351,12 @@ const ExportTab = () => {
             </button>
             
             {dropdownOpen && !walletsLoading && (
-              <div className="dropdown-options">
+              <div className="export-tab__dropdown-options">
                 {availableWallets.map((wallet, index) => (
                   <button
                     key={index}
                     type="button"
-                    className={`dropdown-option ${selectedWallet?.name === wallet.name ? 'selected' : ''}`}
+                    className={`export-tab__dropdown-option ${selectedWallet?.name === wallet.name ? 'export-tab__dropdown-option--selected' : ''}`}
                     onClick={() => {
                       setSelectedWallet(wallet);
                       setDropdownOpen(false);
@@ -372,13 +372,13 @@ const ExportTab = () => {
           </div>
         </div>
           {/* Amount Input */}
-          <div className="form-group">
-            <label htmlFor="amount-input">
+          <div className="export-tab__field">
+            <label htmlFor="amount-input" className="export-tab__label">
               Amount to Export
-              <span className="required">*</span>
-              <div className="tooltip">
-                <Info size={16} className="info-icon" />
-                <span className="tooltiptext">Enter the number of CloudCoin units to export</span>
+              <span className="export-tab__required">*</span>
+              <div className="export-tab__tooltip">
+                <Info size={16} className="export-tab__info-icon" />
+                <span className="export-tab__tooltip-text">Enter the number of CloudCoin units to export</span>
               </div>
             </label>
             <input
@@ -390,17 +390,17 @@ const ExportTab = () => {
               onChange={(e) => setAmount(e.target.value)}
               placeholder="Enter amount (e.g., 100, 250)"
               disabled={isProcessing}
-              className="amount-input"
+              className="export-tab__amount-input"
             />
           </div>
 
           {/* Destination Input with Dropdown */}
-          <div className="form-group">
-            <label htmlFor="destination-input">
+          <div className="export-tab__field">
+            <label htmlFor="destination-input" className="export-tab__label">
               Destination Folder
-              <div className="tooltip">
-                <Info size={16} className="info-icon" />
-                <span className="tooltiptext">
+              <div className="export-tab__tooltip">
+                <Info size={16} className="export-tab__info-icon" />
+                <span className="export-tab__tooltip-text">
                   Enter destination path for exported files:
                   • Full paths: C:\Users\YourName\Documents, D:\Exports
                   • Folder names: Downloads, Documents, Desktop (auto-expanded)
@@ -408,7 +408,7 @@ const ExportTab = () => {
                 </span>
               </div>
             </label>
-            <div style={{ position: 'relative' }}>
+            <div className="export-tab__destination-wrap">
               <input
                 id="destination-input"
                 type="text"
@@ -417,7 +417,7 @@ const ExportTab = () => {
                 onChange={(e) => setDestination(e.target.value)}
                 placeholder="e.g., Downloads, Documents, or C:\Your\Custom\Path"
                 disabled={isProcessing}
-                className="destination-input"
+                className="export-tab__destination-input"
               />
               <datalist id="export-locations">
                 {exportLocations.map((location, index) => (
@@ -428,9 +428,9 @@ const ExportTab = () => {
           </div>
 
           {/* Export Button */}
-          <div className="export-actions">
+          <div className="export-tab__actions">
             <button 
-              className="export-button" 
+              className="export-tab__submit-button" 
               onClick={handleExport}
               disabled={isProcessing || !amount || !selectedWallet || !destination.trim()}
             >
@@ -441,80 +441,80 @@ const ExportTab = () => {
 
         {/* Progress Section */}
         {isProcessing && (
-          <div className="progress-section">
-            <div className="progress-header">
-              <h4>Exporting CloudCoins</h4>
-              <span className="progress-percentage">{progress}%</span>
+          <div className="export-tab__progress">
+            <div className="export-tab__progress-header">
+              <h4 className="export-tab__progress-heading">Exporting CloudCoins</h4>
+              <span className="export-tab__progress-percentage">{progress}%</span>
             </div>
-            <div className="progress-bar-container">
+            <div className="export-tab__progress-track">
               <div 
-                className="progress-bar" 
-                style={{ width: `${progress}%` }}
+                className="export-tab__progress-bar" 
+                style={{ '--export-tab-progress-width': `${progress}%` }}
               />
             </div>
-            <p className="status-message">{statusMessage}</p>
+            <p className="export-tab__status-message">{statusMessage}</p>
           </div>
         )}
 
         {/* Results Section with Close Button */}
         {taskResult && !isProcessing && showResults && (
-          <div className="results-section">
-            <div className="results-header">
-              <div className="results-title">
-                <CheckCircle size={24} className="success-icon" />
-                <h4>Export Results</h4>
+          <div className="export-tab__results">
+            <div className="export-tab__results-header">
+              <div className="export-tab__results-title">
+                <CheckCircle size={24} className="export-tab__results-icon" />
+                <h4 className="export-tab__results-heading">Export Results</h4>
               </div>
               <button 
-                className="results-close-button" 
+                className="export-tab__close-button" 
                 onClick={clearResults}
                 title="Close results"
               >
                 ✕
               </button>
             </div>
-            <div className="results-grid">
+            <div className="export-tab__results-grid">
               {taskResult.data && (
                 <>
                   {taskResult.data.amount !== undefined && (
-                    <div className="result-item">
-                      <span className="result-label">Amount Requested:</span>
-                      <span className="result-value">{taskResult.data.amount}</span>
+                    <div className="export-tab__result-item">
+                      <span className="export-tab__result-label">Amount Requested:</span>
+                      <span className="export-tab__result-value">{taskResult.data.amount}</span>
                     </div>
                   )}
                   {taskResult.data.exported !== undefined && (
-                    <div className="result-item success">
-                      <span className="result-label">Coins Exported:</span>
-                      <span className="result-value">{taskResult.data.exported}</span>
+                    <div className="export-tab__result-item export-tab__result-item--success">
+                      <span className="export-tab__result-label">Coins Exported:</span>
+                      <span className="export-tab__result-value">{taskResult.data.exported}</span>
                     </div>
                   )}
                   {taskResult.data.exported_value !== undefined && (
-                    <div className="result-item success">
-                      <span className="result-label">Total Value Exported:</span>
-                      <span className="result-value">{taskResult.data.exported_value}</span>
+                    <div className="export-tab__result-item export-tab__result-item--success">
+                      <span className="export-tab__result-label">Total Value Exported:</span>
+                      <span className="export-tab__result-value">{taskResult.data.exported_value}</span>
                     </div>
                   )}
                   {taskResult.data.filename && (
-                    <div className="result-item">
-                      <span className="result-label">Filename:</span>
-                      <span className="result-value filename">{taskResult.data.filename}</span>
+                    <div className="export-tab__result-item">
+                      <span className="export-tab__result-label">Filename:</span>
+                      <span className="export-tab__result-value export-tab__result-value--filename">{taskResult.data.filename}</span>
                     </div>
                   )}
                   {taskResult.data.file_path && (
-                    <div className="result-item">
-                      <span className="result-label">File Path:</span>
-                      <span className="result-value filepath">{taskResult.data.file_path}</span>
+                    <div className="export-tab__result-item">
+                      <span className="export-tab__result-label">File Path:</span>
+                      <span className="export-tab__result-value export-tab__result-value--filepath">{taskResult.data.file_path}</span>
                     </div>
                   )}
                   {taskResult.data.destination && (
-                    <div className="result-item">
-                      <span className="result-label">Destination:</span>
-                      <span className="result-value">{taskResult.data.destination}</span>
+                    <div className="export-tab__result-item">
+                      <span className="export-tab__result-label">Destination:</span>
+                      <span className="export-tab__result-value">{taskResult.data.destination}</span>
                     </div>
                   )}
                   {taskResult.data.transaction_id && (
-                    <div className="result-item">
-                      <span className="result-label">Transaction ID:</span>
-                      <span className="result-value transaction-id">{taskResult.data.transaction_id}</span>
+                    <div className="export-tab__result-item">
+                      <span className="export-tab__result-label">Transaction ID:</span>
+                      <span className="export-tab__result-value export-tab__result-value--transaction-id">{taskResult.data.transaction_id}</span>
                     </div>
                   )}
                 </>
@@ -525,37 +525,37 @@ const ExportTab = () => {
 
         {/* Status Message (when not processing) */}
         {!isProcessing && statusMessage && !taskResult && (
-          <div className="status-section">
-            <p className="status-message">{statusMessage}</p>
+          <div className="export-tab__status">
+            <p className="export-tab__status-message">{statusMessage}</p>
           </div>
         )}
       </div>
 
       {/* Fix Modal */}
       {showFixModal && (
-        <div className="modal-overlay" onClick={closeFixModal}>
-          <div className="fix-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title">
-                <Wrench size={24} className="modal-icon" />
-                <h4>Fracked Coins Detected</h4>
+        <div className="export-tab__modal-overlay" onClick={closeFixModal}>
+          <div className="export-tab__fix-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="export-tab__modal-header">
+              <div className="export-tab__modal-title">
+                <Wrench size={24} className="export-tab__modal-icon" />
+                <h4 className="export-tab__modal-heading">Fracked Coins Detected</h4>
               </div>
-              <button className="modal-close" onClick={closeFixModal}>
+              <button className="export-tab__modal-close" onClick={closeFixModal}>
                 <X size={20} />
               </button>
             </div>
             
-            <div className="modal-content">
-              <div className="fracked-warning">
-                <AlertTriangle size={24} className="warning-icon" />
-                <div className="warning-text">
+            <div className="export-tab__modal-content">
+              <div className="export-tab__warning">
+                <AlertTriangle size={24} className="export-tab__warning-icon" />
+                <div className="export-tab__warning-text">
                   <p><strong>{frackedCount} fracked coins</strong> found in your wallet.</p>
                   <p>Fracked coins have partial authentication (13-24/25 RAIDAs). Use the Fix operation to heal them for better reliability.</p>
                 </div>
               </div>
 
-              <div className="fix-explanation">
-                <h5>How Fix Works:</h5>
+              <div className="export-tab__fix-explanation">
+                <h5 className="export-tab__fix-explanation-heading">How Fix Works:</h5>
                 <ul>
                   <li><strong>Get Ticket:</strong> Passing RAIDAs provide authentication tickets</li>
                   <li><strong>Fix:</strong> Tickets are presented to failing RAIDAs to update their databases</li>
@@ -565,27 +565,27 @@ const ExportTab = () => {
 
               {/* Fix Results */}
               {fixResult && !isFixing && (
-                <div className={`fix-result ${fixResult.error ? 'error' : 'success'}`}>
+                <div className={`export-tab__fix-result ${fixResult.error ? 'export-tab__fix-result--error' : 'export-tab__fix-result--success'}`}>
                   {fixResult.error ? (
                     <>
-                      <h5>
-                        <X size={18} className="result-icon" />
+                      <h5 className="export-tab__fix-result-heading">
+                        <X size={18} className="export-tab__fix-result-icon" />
                         Fix Failed:
                       </h5>
                       <p>{fixResult.error}</p>
                     </>
                   ) : (
                     <>
-                      <h5>
-                        <CheckCircle size={18} className="result-icon" />
+                      <h5 className="export-tab__fix-result-heading">
+                        <CheckCircle size={18} className="export-tab__fix-result-icon" />
                         Fix Operation Completed!
                       </h5>
                       <p><strong>Wallet:</strong> {fixResult.wallet}</p>
                       <p><strong>Status:</strong> {fixResult.message}</p>
                       
-                      <div className="fix-outcome-warning">
-                        <AlertTriangle size={20} className="warning-icon" />
-                        <div className="warning-text">
+                      <div className="export-tab__fix-outcome-warning">
+                        <AlertTriangle size={20} className="export-tab__warning-icon" />
+                        <div className="export-tab__warning-text">
                           <p><strong>Important:</strong> Coins may have moved to different folders based on healing results:</p>
                           <ul>
                             <li><strong>Bank:</strong> Fully healed coins (25/25 RAIDAs)</li>
@@ -596,23 +596,23 @@ const ExportTab = () => {
                         </div>
                       </div>
                       
-                      <p className="receipt-note">Check your wallet&apos;s Receipts folder for detailed healing results.</p>
+                      <p className="export-tab__receipt-note">Check your wallet&apos;s Receipts folder for detailed healing results.</p>
                     </>
                   )}
                 </div>
               )}
             </div>
 
-            <div className="modal-actions">
+            <div className="export-tab__modal-actions">
               <button 
-                className="fix-modal-button" 
+                className="export-tab__fix-button" 
                 onClick={handleFix}
                 disabled={isFixing}
               >
                 {isFixing ? 'Healing Coins...' : 'Fix Fracked Coins'}
               </button>
               <button 
-                className="skip-button" 
+                className="export-tab__skip-button" 
                 onClick={closeFixModal}
                 disabled={isFixing}
               >

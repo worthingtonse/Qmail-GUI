@@ -97,38 +97,38 @@ const LockerDownloadTab = () => {
   return (
     <div className="tab-content">
       <h3>Download from Locker</h3>
-      <div className="feature-placeholder">
+      <div className="feature-placeholder locker-tab">
         <p>Download CloudCoins from a RAIDA locker using your locker key.</p>
         
         {/* Locker Key Input */}
-        <div className="memo-section">
-          <label htmlFor="locker-key-input">
+        <div className="locker-tab__field-group">
+          <label htmlFor="locker-tab-key-input">
             Locker Key:
-            <small className="field-hint">
+            <small className="locker-tab__field-hint">
               8-character key in format ABC-1234 (e.g., AFG-7YTB)
             </small>
           </label>
           <input
-            id="locker-key-input"
+            id="locker-tab-key-input"
             type="text"
             value={lockerKey}
             onChange={(e) => setLockerKey(e.target.value.toUpperCase())}
             placeholder="e.g., AFG-7YTB"
             disabled={isProcessing}
-            className="memo-input"
+            className="locker-tab__input"
             maxLength={8}
             pattern="[A-Z]{3}-[A-Z0-9]{4}"
           />
-          <small className="input-hint">
+          <small className="locker-tab__input-hint">
             Letters only: A-Z (excluding O, L, I), Numbers: 2-9 (excluding 0, 1)
           </small>
         </div>
 
         {/* Wallet Path Input */}
-        <div className="memo-section">
+        <div className="locker-tab__field-group">
           <label htmlFor="wallet-path-input">
             Destination Wallet Path:
-            <small className="field-hint">
+            <small className="locker-tab__field-hint">
               Where to store downloaded coins (optional - defaults to CloudCoin/Wallets/Default)
             </small>
           </label>
@@ -139,14 +139,14 @@ const LockerDownloadTab = () => {
             onChange={(e) => setWalletPath(e.target.value)}
             placeholder="e.g., CloudCoin/Wallets/Default or C:\Your\Wallet\Path"
             disabled={isProcessing}
-            className="memo-input"
+            className="locker-tab__input"
           />
         </div>
 
         {/* Download Button */}
-        <div className="import-actions">
+        <div className="locker-tab__actions">
           <button 
-            className="import-button" 
+            className="btn btn--success locker-tab__import-button"
             onClick={handleDownload}
             disabled={isProcessing || !lockerKey.trim()}
           >
@@ -156,72 +156,72 @@ const LockerDownloadTab = () => {
 
         {/* Progress Section */}
         {isProcessing && (
-          <div className="progress-section">
-            <div className="progress-bar-container">
+          <div className="locker-tab__progress">
+            <div className="locker-tab__progress-track">
               <div 
-                className="progress-bar" 
-                style={{ width: `${progress}%` }}
+                className="locker-tab__progress-bar"
+                style={{ '--locker-tab-progress-width': `${progress}%` }}
               />
             </div>
-            <p className="progress-text">{progress}%</p>
-            <p className="status-message">{statusMessage}</p>
+            <p className="locker-tab__progress-text">{progress}%</p>
+            <p className="locker-tab__status-message">{statusMessage}</p>
           </div>
         )}
 
         {/* Results Section with Close Button */}
         {taskResult && !isProcessing && showResults && (
-          <div className="results-section">
-            <div className="results-header">
+          <div className="locker-tab__results">
+            <div className="locker-tab__results-header">
               <h4>Download Results</h4>
               <button 
-                className="results-close-button" 
+                className="btn btn--danger locker-tab__close-button"
                 onClick={clearResults}
                 title="Close results"
               >
                 ✕
               </button>
             </div>
-            <div className="results-grid">
+            <div className="locker-tab__results-grid">
               {taskResult.data && (
                 <>
                   {taskResult.data.total_processed !== undefined && (
-                    <div className="result-item">
-                      <span className="result-label">Total Downloaded:</span>
-                      <span className="result-value">{taskResult.data.total_processed}</span>
+                    <div className="locker-tab__result-item">
+                      <span className="locker-tab__result-label">Total Downloaded:</span>
+                      <span className="locker-tab__result-value">{taskResult.data.total_processed}</span>
                     </div>
                   )}
                   {taskResult.data.total_value !== undefined && (
-                    <div className="result-item success">
-                      <span className="result-label">Total Value:</span>
-                      <span className="result-value">{taskResult.data.total_value} CloudCoins</span>
+                    <div className="locker-tab__result-item locker-tab__result-item--success">
+                      <span className="locker-tab__result-label">Total Value:</span>
+                      <span className="locker-tab__result-value">{taskResult.data.total_value} CloudCoins</span>
                     </div>
                   )}
                   {taskResult.data.pown_results && (
                     <>
-                      <div className="result-item success">
-                        <span className="result-label">Authenticated (Bank):</span>
-                        <span className="result-value">{taskResult.data.pown_results.bank}</span>
+                      <div className="locker-tab__result-item locker-tab__result-item--success">
+                        <span className="locker-tab__result-label">Authenticated (Bank):</span>
+                        <span className="locker-tab__result-value">{taskResult.data.pown_results.bank}</span>
                       </div>
-                      <div className="result-item warning">
-                        <span className="result-label">Fracked:</span>
-                        <span className="result-value">{taskResult.data.pown_results.fracked}</span>
+                      <div className="locker-tab__result-item locker-tab__result-item--warning">
+                        <span className="locker-tab__result-label">Fracked:</span>
+                        <span className="locker-tab__result-value">{taskResult.data.pown_results.fracked}</span>
                       </div>
-                      <div className="result-item error">
-                        <span className="result-label">Counterfeit:</span>
-                        <span className="result-value">{taskResult.data.pown_results.counterfeit}</span>
+                      <div className="locker-tab__result-item locker-tab__result-item--error">
+                        <span className="locker-tab__result-label">Counterfeit:</span>
+                        <span className="locker-tab__result-value">{taskResult.data.pown_results.counterfeit}</span>
                       </div>
                       {taskResult.data.pown_results.limbo > 0 && (
-                        <div className="result-item">
-                          <span className="result-label">Limbo:</span>
-                          <span className="result-value">{taskResult.data.pown_results.limbo}</span>
+                        <div className="locker-tab__result-item">
+                          <span className="locker-tab__result-label">Limbo:</span>
+                          <span className="locker-tab__result-value">{taskResult.data.pown_results.limbo}</span>
                         </div>
                       )}
                     </>
                   )}
                   {taskResult.data.receipt_id && (
-                    <div className="result-item">
-                      <span className="result-label">Receipt ID:</span>
-                      <span className="result-value receipt-id">{taskResult.data.receipt_id}</span>
+                    <div className="locker-tab__result-item">
+                      <span className="locker-tab__result-label">Receipt ID:</span>
+                      <span className="locker-tab__result-value locker-tab__result-value--receipt">{taskResult.data.receipt_id}</span>
                     </div>
                   )}
                 </>
@@ -232,13 +232,13 @@ const LockerDownloadTab = () => {
 
         {/* Status Message (when not processing) */}
         {!isProcessing && statusMessage && !taskResult && (
-          <div className="status-section">
-            <p className="status-message">{statusMessage}</p>
+          <div className="locker-tab__status">
+            <p className="locker-tab__status-message locker-tab__status-message--error">{statusMessage}</p>
           </div>
         )}
 
         {/* Info Section */}
-        <div className="info-section">
+        <div className="locker-tab__info">
           <h4>How Locker Download Works</h4>
           <ul>
             <li><strong>Two-Phase Process:</strong> The system first peeks into the locker to see what&apos;s available, then downloads the coins with new authentication numbers.</li>

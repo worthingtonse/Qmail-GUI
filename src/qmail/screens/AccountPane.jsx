@@ -27,55 +27,36 @@ import { useNotification } from "../../components/common/notifications/Notificat
 import { ThemePicker } from "../../theme/ThemePicker";
 import "./AccountPane.css";
 
-// FIX-16-0A: badge style for truly-disabled "Coming Soon" rows.
-// The row's opacity/cursor/hover behavior is handled by the
-// .coming-soon CSS class in AccountPane.css (added with the
-// gpt-batch1 follow-up). We no longer use pointer-events: none
-// because it suppresses the title-tooltip hover. Buttons inside the
-// row carry their own disabled state.
-const COMING_SOON_BADGE_STYLE = {
-  display: "inline-block",
-  marginLeft: "var(--space-sm)",
-  padding: "2px 8px",
-  borderRadius: "var(--radius-sm)",
-  fontSize: "var(--font-size-xs)",
-  fontWeight: 500,
-  backgroundColor: "var(--tertiary-bg)",
-  color: "var(--text-tertiary)",
-  border: "1px solid var(--border-subtle)",
-  verticalAlign: "middle",
-};
-
 const ComingSoonAction = ({ icon, title, description }) => (
   <div
-    className="security-action coming-soon"
+    className="account-pane__security-action account-pane__security-action--coming-soon"
     aria-disabled="true"
     tabIndex={-1}
     title="This feature is on the roadmap."
   >
-    <div className="security-action-icon">{icon}</div>
-    <div className="security-action-content">
-      <div className="security-action-title">
+    <div className="account-pane__security-action-icon">{icon}</div>
+    <div className="account-pane__security-action-content">
+      <div className="account-pane__security-action-title">
         {title}
-        <span style={COMING_SOON_BADGE_STYLE}>Coming Soon</span>
+        <span className="account-pane__coming-soon-badge">Coming Soon</span>
       </div>
-      <div className="security-action-description">{description}</div>
+      <div className="account-pane__security-action-description">{description}</div>
     </div>
   </div>
 );
 
 const ComingSoonToggle = ({ title, description }) => (
-  <div className="setting-item coming-soon">
-    <div className="setting-info">
-      <div className="setting-title">
+  <div className="account-pane__setting-item account-pane__setting-item--coming-soon">
+    <div className="account-pane__setting-info">
+      <div className="account-pane__setting-title">
         {title}
-        <span style={COMING_SOON_BADGE_STYLE}>Coming Soon</span>
+        <span className="account-pane__coming-soon-badge">Coming Soon</span>
       </div>
-      <div className="setting-description">{description}</div>
+      <div className="account-pane__setting-description">{description}</div>
     </div>
-    <div className="setting-control">
+    <div className="account-pane__setting-control">
       <button
-        className="toggle-switch"
+        className="account-pane__toggle"
         disabled
         aria-disabled="true"
         tabIndex={-1}
@@ -270,7 +251,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   if (loading && raidaServers.length === 0) {
     return (
       <div className="account-pane">
-        <div className="loading-state">
+        <div className="account-pane__loading-state">
           <RefreshCw size={48} className="spinning" />
           <p>Loading account information...</p>
         </div>
@@ -282,10 +263,10 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   if (error && raidaServers.length === 0) {
     return (
       <div className="account-pane">
-        <div className="error-section">
+        <div className="account-pane__error">
           <AlertTriangle size={48} />
           <p>Error: {error}</p>
-          <button className="btn btn--secondary retry-button" onClick={handleRefresh}>
+          <button className="btn btn--secondary account-pane__retry-button" onClick={handleRefresh}>
             <RefreshCw size={16} /> Retry
           </button>
         </div>
@@ -296,16 +277,16 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   return (
     <div className="account-pane">
       {/* Account Header */}
-      <div className="account-header">
-        <div className="account-header-title">
-          <h2>Account Management</h2>
-          <div className="account-header-actions">
-            <div className="account-status online">
-              <div className="status-indicator"></div>
+      <div className="account-pane__header">
+        <div className="account-pane__header-title">
+          <h2 className="account-pane__title">Account Management</h2>
+          <div className="account-pane__header-actions">
+            <div className="account-pane__status account-pane__status--online">
+              <div className="account-pane__status-indicator"></div>
               <span>Online</span>
             </div>
             <button
-              className="btn btn--secondary refresh-btn"
+              className="btn btn--secondary account-pane__refresh-button"
               onClick={handleRefresh}
               disabled={loading}
               title="Refresh account data"
@@ -316,7 +297,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
         </div>
       </div>
 
-      <div className="account-content">
+      <div className="account-pane__content">
         {/* FIX-05: Server Status section removed.
             It was hard-coded to { status: "healthy", service: "QMail
             Client Core", version: "1.0.0" } and never updated from a
@@ -330,17 +311,17 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
             totalAvailable fields — NOT from /api/system/version-check
             (that endpoint is for update availability, not health). */}
 
-        <div className="profile-section">
-          <div className="section-header">
-            <h3 className="section-title">
+        <div className="account-pane__profile">
+          <div className="account-pane__section-header">
+            <h3 className="account-pane__section-title">
               <User size={20} />
               Profile Information
             </h3>
             {userAccount && (
               <button
-                className={`edit-profile-btn ${
-                  isEditing ? "danger" : "secondary"
-                }`}
+                className={`btn ${
+                  isEditing ? "btn--danger" : "btn--secondary"
+                } account-pane__edit-button`}
                 onClick={handleEditProfile}
               >
                 {isEditing ? <X size={16} /> : <Edit size={16} />}
@@ -349,54 +330,54 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
             )}
           </div>
 
-          <div className="profile-details">
+          <div className="account-pane__profile-details">
             {userAccount ? (
               <>
-                <div className="profile-field">
-                  <label className="field-label">QMail Address</label>
-                  <div className="field-value">
+                <div className="account-pane__profile-field">
+                  <label className="account-pane__field-label">QMail Address</label>
+                  <div className="account-pane__field-value">
                     {userAccount.pretty_address ||
                       `${userAccount.address}@${userAccount.domain}`}
                   </div>
                 </div>
 
-                <div className="profile-field">
-                  <label className="field-label">Serial Number</label>
-                  <div className="field-value">
+                <div className="account-pane__profile-field">
+                  <label className="account-pane__field-label">Serial Number</label>
+                  <div className="account-pane__field-value">
                     #{userAccount.serial_number || "N/A"}
                   </div>
                 </div>
 
                 {userAccount.recovery_email && (
-                  <div className="profile-field">
-                    <label className="field-label">Recovery Email</label>
-                    <div className="field-value">
+                  <div className="account-pane__profile-field">
+                    <label className="account-pane__field-label">Recovery Email</label>
+                    <div className="account-pane__field-value">
                       {userAccount.recovery_email}
                     </div>
                   </div>
                 )}
               </>
             ) : (
-              <div className="profile-field">
-                <label className="field-label">QMail Address</label>
-                <div className="field-value">Loading...</div>
+              <div className="account-pane__profile-field">
+                <label className="account-pane__field-label">QMail Address</label>
+                <div className="account-pane__field-value">Loading...</div>
               </div>
             )}
           </div>
         </div>
 
         {/* RAIDA Network Status Section */}
-        <div className="balance-section">
-          <div className="section-header">
-            <h3 className="section-title">
+        <div className="account-pane__network">
+          <div className="account-pane__section-header">
+            <h3 className="account-pane__section-title">
               <Server size={20} />
               RAIDA Network Status
             </h3>
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div className="account-pane__section-actions">
               {/* Sync Directory button removed: /api/admin/sync was removed
                   from the backend in QMail v2. No replacement exists yet. */}
               <button
-                className="btn btn--secondary edit-profile-btn"
+                className="btn btn--secondary account-pane__refresh-button"
                 onClick={loadServers}
                 disabled={serversLoading}
                 title="Refresh server status"
@@ -420,93 +401,90 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               entirely. Identity repair will return as an explicit
               manual action once CORE-F provides a safe health source. */}
 
-          <div className="balance-grid">
-            <div className="balance-card total">
-              <div className="balance-label">Total Coins</div>
-              <div className="balance-value">
+          <div className="account-pane__balance-grid">
+            <div className="account-pane__balance-card account-pane__balance-card--total">
+              <div className="account-pane__balance-label">Total Coins</div>
+              <div className="account-pane__balance-value">
                 {walletBalance?.totalCoins || 0}
               </div>
-              <div className="balance-description">All coins in wallet</div>
+              <div className="account-pane__balance-description">All coins in wallet</div>
             </div>
 
-            <div className="balance-card verified">
-              <div className="balance-label">Bank (Ready)</div>
-              <div className="balance-value">
+            <div className="account-pane__balance-card account-pane__balance-card--verified">
+              <div className="account-pane__balance-label">Bank (Ready)</div>
+              <div className="account-pane__balance-value">
                 {walletBalance?.folders.bank.coins || 0}
               </div>
-              <div className="balance-description">
+              <div className="account-pane__balance-description">
                 {walletBalance?.folders.bank.value.toFixed(1) || 0} CC value
               </div>
             </div>
 
-            <div className="balance-card counterfeit">
-              <div className="balance-label">Fracked (Needs Repair)</div>
-              <div className="balance-value">
+            <div className="account-pane__balance-card account-pane__balance-card--counterfeit">
+              <div className="account-pane__balance-label">Fracked (Needs Repair)</div>
+              <div className="account-pane__balance-value">
                 {walletBalance?.folders.fracked.coins || 0}
               </div>
-              <div className="balance-description">
+              <div className="account-pane__balance-description">
                 {walletBalance?.folders.fracked.value.toFixed(1) || 0} CC value
               </div>
             </div>
 
-            <div className="balance-card suspect">
-              <div className="balance-label">Limbo (Processing)</div>
-              <div className="balance-value">
+            <div className="account-pane__balance-card account-pane__balance-card--suspect">
+              <div className="account-pane__balance-label">Limbo (Processing)</div>
+              <div className="account-pane__balance-value">
                 {walletBalance?.folders.limbo.coins || 0}
               </div>
-              <div className="balance-description">
+              <div className="account-pane__balance-description">
                 {walletBalance?.folders.limbo.value.toFixed(1) || 0} CC value
               </div>
             </div>
 
-            <div className="balance-card network-online">
-              <div className="balance-label">Online</div>
-              <div className="balance-value">{serverStats.online}</div>
-              <div className="balance-description">Available servers</div>
+            <div className="account-pane__balance-card account-pane__balance-card--network-online">
+              <div className="account-pane__balance-label">Online</div>
+              <div className="account-pane__balance-value">{serverStats.online}</div>
+              <div className="account-pane__balance-description">Available servers</div>
             </div>
 
-            <div className="balance-card network-offline">
-              <div className="balance-label">Offline</div>
-              <div className="balance-value">{serverStats.offline}</div>
-              <div className="balance-description">Unavailable servers</div>
+            <div className="account-pane__balance-card account-pane__balance-card--network-offline">
+              <div className="account-pane__balance-label">Offline</div>
+              <div className="account-pane__balance-value">{serverStats.offline}</div>
+              <div className="account-pane__balance-description">Unavailable servers</div>
             </div>
 
-            <div className="balance-card network-unknown">
-              <div className="balance-label">Uptime</div>
-              <div className="balance-value">
+            <div className="account-pane__balance-card account-pane__balance-card--network-unknown">
+              <div className="account-pane__balance-label">Uptime</div>
+              <div className="account-pane__balance-value">
                 {serverStats.total > 0
                   ? Math.round((serverStats.online / serverStats.total) * 100)
                   : 0}
                 %
               </div>
-              <div className="balance-description">Network availability</div>
+              <div className="account-pane__balance-description">Network availability</div>
             </div>
           </div>
 
           {/* Server List */}
           {raidaServers.length > 0 && (
-            <div className="server-list">
-              <h4
-                className="text-sm text-secondary"
-                style={{ marginBottom: "var(--space-md)" }}
-              >
+            <div className="account-pane__server-list">
+              <h4 className="account-pane__server-list-title">
                 Server Details ({raidaServers.length})
               </h4>
-              <div className="server-grid">
+              <div className="account-pane__server-grid">
                 {raidaServers.map((server, index) => {
                   const serverId = server.server_id ?? server.raida_index ?? index;
                   return (
-                    <div key={serverId} className="server-item">
-                      <div className="server-status">
+                    <div key={serverId} className="account-pane__server-item">
+                      <div className="account-pane__server-status">
                         {server.is_available ? (
-                          <Wifi size={16} className="text-success" />
+                          <Wifi size={16} className="account-pane__server-icon--online" />
                         ) : (
-                          <WifiOff size={16} className="text-danger" />
+                          <WifiOff size={16} className="account-pane__server-icon--offline" />
                         )}
                       </div>
-                      <div className="server-info">
-                        <div className="server-id">{serverId}</div>
-                        <div className="server-address">
+                      <div className="account-pane__server-info">
+                        <div className="account-pane__server-id">{serverId}</div>
+                        <div className="account-pane__server-address">
                           {server.ip_address}:{server.port}
                         </div>
                       </div>
@@ -519,9 +497,9 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
         </div>
 
         {/* Security Section */}
-        <div className="security-section">
-          <div className="section-header">
-            <h3 className="section-title">
+        <div className="account-pane__security">
+          <div className="account-pane__section-header">
+            <h3 className="account-pane__section-title">
               <Shield size={20} />
               Security & Privacy
             </h3>
@@ -531,7 +509,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               no pointer cursor, aria-disabled, skipped by Tab nav, reduced
               opacity. Delete Account is hidden entirely (safety-critical
               control that doesn't exist). */}
-          <div className="security-actions">
+          <div className="account-pane__security-actions">
             <ComingSoonAction
               icon={<Key size={20} />}
               title="Change Password"
@@ -550,15 +528,15 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
             {onSignOut && (
               <button
                 type="button"
-                className="security-action sign-out-action"
+                className="account-pane__security-action account-pane__security-action--sign-out"
                 onClick={() => setShowSignOutConfirm(true)}
               >
-                <div className="security-action-icon warning">
+                <div className="account-pane__security-action-icon account-pane__security-action-icon--warning">
                   <LogOut size={20} />
                 </div>
-                <div className="security-action-content">
-                  <div className="security-action-title">Sign Out</div>
-                  <div className="security-action-description">
+                <div className="account-pane__security-action-content">
+                  <div className="account-pane__security-action-title">Sign Out</div>
+                  <div className="account-pane__security-action-description">
                     Return to the start screen on this device
                   </div>
                 </div>
@@ -569,15 +547,15 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
         </div>
 
         {/* Settings Section */}
-        <div className="settings-section">
-          <div className="section-header">
-            <h3 className="section-title">
+        <div className="account-pane__settings">
+          <div className="account-pane__section-header">
+            <h3 className="account-pane__section-title">
               <Settings size={20} />
               Application Settings
             </h3>
           </div>
 
-          <div className="settings-grid">
+          <div className="account-pane__settings-grid">
             <ThemePicker />
             <ComingSoonToggle
               title="Email Notifications"
@@ -597,18 +575,18 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
 
       {showSignOutConfirm && (
         <div
-          className="account-confirm-overlay"
+          className="account-pane__confirm-overlay"
           role="presentation"
           onClick={() => setShowSignOutConfirm(false)}
         >
           <div
-            className="account-confirm-modal"
+            className="account-pane__confirm-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="sign-out-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="account-confirm-header">
+            <div className="account-pane__confirm-header">
               <LogOut size={22} />
               <h3 id="sign-out-title">Sign Out</h3>
             </div>
@@ -617,7 +595,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               restart. Your local identity files will remain on this device.
             </p>
             {!storageAvailable && (
-              <div className="account-confirm-warning">
+              <div className="account-pane__confirm-warning">
                 <AlertTriangle size={16} />
                 <span>
                   This browser cannot save the sign-out preference, so sign-out
@@ -625,7 +603,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
                 </span>
               </div>
             )}
-            <div className="account-confirm-actions">
+            <div className="account-pane__confirm-actions">
               <button
                 type="button"
                 className="btn btn--secondary"

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, Download, X, Loader2 } from "lucide-react";
 import "./App.css";
+import "./UpdateModal.css";
 import ServiceSelectionScreen from "./screens/ServiceSelectionScreen";
 import WalletSetupScreen from "./qmail/screens/WalletSetupScreen";
 import Wallet from "./wallet/Wallet";
@@ -226,22 +227,12 @@ function App() {
   // Show loading spinner while checking identity / waiting for backend
   if (isLoading) {
     return (
-      <div
-        className="App"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: '100vh',
-          padding: '0 24px',
-          textAlign: 'center',
-        }}
-      >
-        <Loader2 className="spinning" size={64} style={{ color: 'var(--accent-primary)' }} />
-        <div style={{ color: 'var(--text-secondary)', fontSize: '14px', maxWidth: '420px' }}>
-          {loadingMessage}
+      <div className="app-shell">
+        <div className="app-shell__loading">
+          <Loader2 className="app-shell__loading-icon spinning" size={64} />
+          <div className="app-shell__loading-message">
+            {loadingMessage}
+          </div>
         </div>
       </div>
     );
@@ -249,56 +240,56 @@ function App() {
 
   return (
     <NotificationProvider>
-      <div className="App">
+      <div className="app-shell">
         {/* Update Modal */}
         {showUpdateModal && updateAvailable && (
-          <div className="update-modal-overlay">
+          <div className="update-modal__overlay">
             <div className="update-modal">
-              <div className="update-modal-header">
-                <AlertTriangle size={48} className="update-icon" />
+              <div className="update-modal__header">
+                <AlertTriangle size={48} className="update-modal__icon" />
                 <h2>Update Available</h2>
                 <button
-                  className="update-modal-close"
+                  className="update-modal__close"
                   onClick={() => setShowUpdateModal(false)}
                 >
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="update-modal-content">
-                <p className="update-message">{updateAvailable.message}</p>
+              <div className="update-modal__content">
+                <p className="update-modal__message">{updateAvailable.message}</p>
 
-                <div className="update-version-info">
-                  <div className="version-row">
-                    <span className="version-label">Current Version:</span>
-                    <span className="version-value">
+                <div className="update-modal__version-info">
+                  <div className="update-modal__version-row">
+                    <span className="update-modal__version-label">Current Version:</span>
+                    <span className="update-modal__version-value">
                       {updateAvailable.current_version}
                     </span>
                   </div>
-                  <div className="version-row">
-                    <span className="version-label">Latest Version:</span>
-                    <span className="version-value highlight">
+                  <div className="update-modal__version-row">
+                    <span className="update-modal__version-label">Latest Version:</span>
+                    <span className="update-modal__version-value update-modal__version-value--highlight">
                       {updateAvailable.latest_version}
                     </span>
                   </div>
                 </div>
 
-                <p className="update-description">
+                <p className="update-modal__description">
                   A new version of QMail is available. Please download and
                   install the latest version to continue using the application.
                 </p>
               </div>
 
-              <div className="update-modal-actions">
+              <div className="update-modal__actions">
                 <button
-                  className="update-download-btn"
+                  className="update-modal__download-button"
                   onClick={handleDownload}
                 >
                   <Download size={20} />
                   Download Update
                 </button>
                 <button
-                  className="update-later-btn"
+                  className="update-modal__later-button"
                   onClick={() => setShowUpdateModal(false)}
                 >
                   Remind Me Later

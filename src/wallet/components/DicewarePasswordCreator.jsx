@@ -322,9 +322,9 @@ NEVER store your passphrase in plain text in cloud storage!`);
 
   if (isLoadingWordlist) {
     return (
-      <main className="diceware-screen">
-        <section className="diceware-main-container" aria-busy="true">
-          <div className="diceware-loading" role="status">
+      <main className="diceware-password-creator">
+        <section className="diceware-password-creator__card" aria-busy="true">
+          <div className="diceware-password-creator__loading" role="status">
             <h3>Loading EFF Wordlist...</h3>
             <p>Please wait while we load the diceware dictionary.</p>
           </div>
@@ -335,60 +335,80 @@ NEVER store your passphrase in plain text in cloud storage!`);
 
   if (showPdfOptions) {
     return (
-      <main className="diceware-screen">
-        <section className="diceware-main-container">
-          <section className="diceware-pdf-screen">
-            <header className="diceware-pdf-header">
+      <main className="diceware-password-creator">
+        <section className="diceware-password-creator__card">
+          <section className="diceware-password-creator__backup-flow">
+            <header className="diceware-password-creator__backup-header">
               <h3>Passphrase Created Successfully!</h3>
               <p>Your secure passphrase is ready. We strongly recommend creating a backup before proceeding.</p>
             </header>
 
-            <section className="diceware-passphrase-display">
+            <section className="diceware-password-creator__passphrase-display">
               <h4>Your Passphrase:</h4>
-              <div className="diceware-passphrase-text">{userPassphrase}</div>
+              <div className="diceware-password-creator__passphrase-text">{userPassphrase}</div>
             </section>
 
-            <section className="diceware-backup-section">
+            <section className="diceware-password-creator__backup-section">
               <h4>Backup Options (Highly Recommended)</h4>
               <p>
                 Create a backup of your passphrase before proceeding. If you lose your passphrase, your CloudCoins cannot be recovered.
               </p>
               
-              <div className="diceware-backup-buttons">
-                <button type="button" onClick={generatePDF} className="btn-backup">
+              <div className="diceware-password-creator__backup-buttons">
+                <button
+                  type="button"
+                  onClick={generatePDF}
+                  className="diceware-password-creator__button diceware-password-creator__button--backup"
+                >
                   <Download size={18} />
                   <span>Download HTML Backup</span>
                 </button>
                 
-                <button type="button" onClick={printPassphrase} className="btn btn--secondary btn-backup secondary">
+                <button
+                  type="button"
+                  onClick={printPassphrase}
+                  className="diceware-password-creator__button diceware-password-creator__button--backup diceware-password-creator__button--backup-secondary"
+                >
                   <Printer size={18} />
                   <span>Print Backup</span>
                 </button>
 
-                <button type="button" onClick={openCloudStorageInfo} className="btn-backup info">
+                <button
+                  type="button"
+                  onClick={openCloudStorageInfo}
+                  className="diceware-password-creator__button diceware-password-creator__button--backup diceware-password-creator__button--backup-info"
+                >
                   <Cloud size={18} />
                   <span>Cloud Storage Tips</span>
                 </button>
               </div>
               
-              <p className="diceware-backup-tip">
+              <p className="diceware-password-creator__backup-tip">
                 <strong>Tip:</strong> Store physical copies in multiple secure locations (safe, safety deposit box, etc.)
               </p>
             </section>
 
-            <footer className="diceware-final-actions">
-              <div className="diceware-action-buttons">
-                <button type="button" onClick={() => setShowPdfOptions(false)} className="btn-back">
-                  <ArrowLeft size={18} className="diceware-button-icon" />
+            <footer className="diceware-password-creator__footer">
+              <div className="diceware-password-creator__action-buttons">
+                <button
+                  type="button"
+                  onClick={() => setShowPdfOptions(false)}
+                  className="diceware-password-creator__button diceware-password-creator__button--back"
+                >
+                  <ArrowLeft size={18} className="diceware-password-creator__button-icon" />
                   Back to Edit
                 </button>
                 
-                <button type="button" onClick={proceedWithoutBackup} className="btn-continue">
+                <button
+                  type="button"
+                  onClick={proceedWithoutBackup}
+                  className="diceware-password-creator__button diceware-password-creator__button--continue"
+                >
                   Continue with This Passphrase
                 </button>
               </div>
               
-              <p className="diceware-final-note">
+              <p className="diceware-password-creator__final-note">
                 Make sure you&apos;ve saved a backup before continuing.
               </p>
             </footer>
@@ -399,14 +419,14 @@ NEVER store your passphrase in plain text in cloud storage!`);
   }
 
   return (
-    <main className="diceware-screen">
-      <section className="diceware-main-container">
-        <header className="diceware-header">
+    <main className="diceware-password-creator">
+      <section className="diceware-password-creator__card">
+        <header className="diceware-password-creator__header">
           <h3>Create Your Secure Passphrase</h3>
           <p>Use a physical die to roll 25 times. Enter each result in the grid below, then generate your words.</p>
         </header>
 
-        <section className="diceware-instructions">
+        <section className="diceware-password-creator__instructions">
           <h4>
             <Dices size={20} />
             How to Use Physical Dice
@@ -421,24 +441,32 @@ NEVER store your passphrase in plain text in cloud storage!`);
           </ol>
         </section>
 
-        <section className="diceware-dice-section">
-          <header className="diceware-section-header">
+        <section className="diceware-password-creator__dice-section">
+          <header className="diceware-password-creator__section-header">
             <h4>Dice Grid (5 rows × 5 columns):</h4>
-            <div className="diceware-button-group">
-              <button type="button" onClick={autoGenerateAll} className="btn-auto-generate">
+            <div className="diceware-password-creator__button-group">
+              <button
+                type="button"
+                onClick={autoGenerateAll}
+                className="diceware-password-creator__button diceware-password-creator__button--auto-generate"
+              >
                 <Dices size={18} />
                 Auto Generate All
               </button>
-              <button type="button" onClick={clearGrid} className="btn-clear">
+              <button
+                type="button"
+                onClick={clearGrid}
+                className="diceware-password-creator__button diceware-password-creator__button--clear"
+              >
                 Clear All
               </button>
             </div>
           </header>
           
           {diceGrid.map((row, rowIndex) => (
-            <div key={rowIndex} className="diceware-row">
-              <div className="diceware-row-inputs">
-                <span className="diceware-row-label">Row {rowIndex + 1}:</span>
+            <div key={rowIndex} className="diceware-password-creator__row">
+              <div className="diceware-password-creator__row-inputs">
+                <span className="diceware-password-creator__row-label">Row {rowIndex + 1}:</span>
                 {row.map((cell, colIndex) => (
                   <input
                     key={`cell-${rowIndex}-${colIndex}`}
@@ -448,7 +476,7 @@ NEVER store your passphrase in plain text in cloud storage!`);
                     value={cell}
                     onChange={(e) => handleCellChange(rowIndex, colIndex, e.target.value)}
                     maxLength="1"
-                    className={`diceware-dice-input ${cell ? 'filled' : ''}`}
+                    className={`diceware-password-creator__dice-input${cell ? ' diceware-password-creator__dice-input--filled' : ''}`}
                     placeholder="?"
                   />
                 ))}
@@ -458,13 +486,13 @@ NEVER store your passphrase in plain text in cloud storage!`);
                 type="button"
                 onClick={() => generateWordForRow(rowIndex)}
                 disabled={!isRowComplete(rowIndex)}
-                className="btn-generate-word"
+                className="diceware-password-creator__button diceware-password-creator__button--generate-word"
               >
                 Generate Word
               </button>
               
               {generatedWords[rowIndex] && (
-                <div className={`diceware-generated-word ${generatedWords[rowIndex].includes('not found') ? 'error' : ''}`}>
+                <div className={`diceware-password-creator__generated-word${generatedWords[rowIndex].includes('not found') ? ' diceware-password-creator__generated-word--error' : ''}`}>
                   → {generatedWords[rowIndex]}
                 </div>
               )}
@@ -473,16 +501,16 @@ NEVER store your passphrase in plain text in cloud storage!`);
         </section>
 
         {generatedWords.filter(Boolean).length > 0 && (
-          <section className="diceware-words-display">
+          <section className="diceware-password-creator__words-display">
             <h4>Your Words:</h4>
-            <div className="diceware-words-list">
+           <div className="diceware-password-creator__words-list">
               {generatedWords.filter(word => word && !word.includes('not found')).join(', ')}
             </div>
           </section>
         )}
 
         {allRowsComplete() && generatedWords.filter(word => word && !word.includes('not found')).length === 5 && (
-          <section className="diceware-passphrase-card">
+          <section className="diceware-password-creator__passphrase-card">
             <h4>Create Your Passphrase</h4>
             <p>
               Create a sentence using at least 2 of your words. Minimum 16 characters. Include punctuation if desired.
@@ -496,23 +524,27 @@ NEVER store your passphrase in plain text in cloud storage!`);
               value={userPassphrase}
               onChange={(e) => setUserPassphrase(e.target.value)}
               placeholder="Enter your passphrase using your words..."
-              className="diceware-textarea"
+              className="diceware-password-creator__textarea"
             />
             
-            <div className={`diceware-char-count ${userPassphrase.length >= 16 ? 'valid' : ''}`}>
+            <div className={`diceware-password-creator__char-count${userPassphrase.length >= 16 ? ' diceware-password-creator__char-count--valid' : ''}`}>
               Length: {userPassphrase.length} characters 
               {userPassphrase.length < 16 && ' (need at least 16)'}
             </div>
             
             {userPassphrase.length >= 16 && (
-              <button type="button" onClick={handleCreatePassphrase} className="btn-use-passphrase">
+              <button
+                type="button"
+                onClick={handleCreatePassphrase}
+                className="diceware-password-creator__button diceware-password-creator__button--use-passphrase"
+              >
                 Use This Passphrase
               </button>
             )}
           </section>
         )}
 
-        <aside className="diceware-warning">
+        <aside className="diceware-password-creator__warning">
           <p>
             <strong>⚠ Important:</strong> If you lose your passphrase, you will lose your coins. Lost coins cannot be recovered.
           </p>

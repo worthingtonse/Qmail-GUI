@@ -170,39 +170,39 @@ const LockerUploadTab = () => {
   return (
     <div className="tab-content">
       <h3>Upload to Locker</h3>
-      <div className="feature-placeholder">
+      <div className="feature-placeholder locker-tab">
         <p>Upload CloudCoins from your wallet to a RAIDA locker for secure transfer.</p>
         
         {/* Wallet Balance Display */}
-        <div className="balance-section">
-          <div className="balance-display">
-            <span className="balance-label">Available Balance:</span>
-            <span className="balance-value">{walletBalance.toLocaleString()} CloudCoins</span>
+        <div className="locker-tab__balance">
+          <div className="locker-tab__balance-display">
+            <span className="locker-tab__balance-label">Available Balance:</span>
+            <span className="locker-tab__balance-value">{walletBalance.toLocaleString()} CloudCoins</span>
           </div>
         </div>
 
         {/* Locker Key Input */}
-        <div className="memo-section">
-          <label htmlFor="locker-key-input">
+        <div className="locker-tab__field-group">
+          <label htmlFor="locker-tab-key-input">
             Locker Key:
-            <small className="field-hint">
+            <small className="locker-tab__field-hint">
               Generate a new key or enter your own 8-character key (ABC-1234 format)
             </small>
           </label>
-          <div className="locker-key-input-group">
+          <div className="locker-tab__key-field">
             <input
-              id="locker-key-input"
+              id="locker-tab-key-input"
               type="text"
               value={lockerKey}
               onChange={(e) => setLockerKey(e.target.value.toUpperCase())}
               placeholder="e.g., AFG-7YTB"
               disabled={isProcessing}
-              className="locker-key-input"
+              className="locker-tab__key-input"
               maxLength={8}
               pattern="[A-Z]{3}-[A-Z0-9]{4}"
             />
             <button 
-              className="generate-key-button" 
+              className="btn btn--secondary locker-tab__generate-key-button"
               onClick={handleGenerateKey}
               disabled={isProcessing || isGeneratingKey}
               title="Generate a new random locker key"
@@ -210,20 +210,20 @@ const LockerUploadTab = () => {
               {isGeneratingKey ? 'Generating...' : 'Generate New Key'}
             </button>
           </div>
-          <small className="input-hint">
+          <small className="locker-tab__input-hint">
             Share this key with the recipient so they can download the coins
           </small>
         </div>
 
         {/* Amount Input */}
-        <div className="memo-section">
+        <div className="locker-tab__field-group">
           <label htmlFor="amount-input">
             Amount to Upload:
-            <small className="field-hint">
+            <small className="locker-tab__field-hint">
               Amount in CloudCoins (e.g., 100.25 or 1000)
             </small>
           </label>
-          <div className="amount-input-group">
+          <div className="locker-tab__amount-field">
             <input
               id="amount-input"
               type="number"
@@ -231,14 +231,14 @@ const LockerUploadTab = () => {
               onChange={(e) => setAmount(e.target.value)}
               placeholder="e.g., 100.25"
               disabled={isProcessing}
-              className="memo-input"
+              className="locker-tab__input"
               min="0.01"
               max={walletBalance}
               step="0.01"
             />
-            <div className="quick-amount-buttons">
+            <div className="locker-tab__quick-amounts">
               <button 
-                className="quick-amount-btn" 
+                className="locker-tab__quick-amount-button"
                 onClick={() => handleQuickAmount(25)}
                 disabled={isProcessing || walletBalance < 25}
                 title="Set amount to 25"
@@ -246,7 +246,7 @@ const LockerUploadTab = () => {
                 25
               </button>
               <button 
-                className="quick-amount-btn" 
+                className="locker-tab__quick-amount-button"
                 onClick={() => handleQuickAmount(100)}
                 disabled={isProcessing || walletBalance < 100}
                 title="Set amount to 100"
@@ -254,7 +254,7 @@ const LockerUploadTab = () => {
                 100
               </button>
               <button 
-                className="quick-amount-btn" 
+                className="locker-tab__quick-amount-button"
                 onClick={() => handleQuickAmount(250)}
                 disabled={isProcessing || walletBalance < 250}
                 title="Set amount to 250"
@@ -262,7 +262,7 @@ const LockerUploadTab = () => {
                 250
               </button>
               <button 
-                className="quick-amount-btn" 
+                className="locker-tab__quick-amount-button"
                 onClick={() => handleQuickAmount('half')}
                 disabled={isProcessing || walletBalance <= 0}
                 title="Set amount to half of balance"
@@ -270,7 +270,7 @@ const LockerUploadTab = () => {
                 Half
               </button>
               <button 
-                className="quick-amount-btn" 
+                className="locker-tab__quick-amount-button"
                 onClick={() => handleQuickAmount('all')}
                 disabled={isProcessing || walletBalance <= 0}
                 title="Set amount to all available balance"
@@ -280,17 +280,17 @@ const LockerUploadTab = () => {
             </div>
           </div>
           {amount && !validateAmount(amount) && (
-            <small className="input-error">
+            <small className="locker-tab__input-error">
               Amount must be between 0.01 and {walletBalance} CloudCoins
             </small>
           )}
         </div>
 
         {/* Source Wallet Path Input */}
-        <div className="memo-section">
+        <div className="locker-tab__field-group">
           <label htmlFor="wallet-path-input">
             Source Wallet Path:
-            <small className="field-hint">
+            <small className="locker-tab__field-hint">
               Where to take coins from (optional - defaults to CloudCoin/Wallets/Default)
             </small>
           </label>
@@ -301,14 +301,14 @@ const LockerUploadTab = () => {
             onChange={(e) => setWalletPath(e.target.value)}
             placeholder="e.g., CloudCoin/Wallets/Default or C:\Your\Wallet\Path"
             disabled={isProcessing}
-            className="memo-input"
+            className="locker-tab__input"
           />
         </div>
 
         {/* Upload Button */}
-        <div className="import-actions">
+        <div className="locker-tab__actions">
           <button 
-            className="import-button upload-button" 
+            className="btn btn--primary locker-tab__import-button locker-tab__import-button--upload"
             onClick={handleUpload}
             disabled={isProcessing || !lockerKey.trim() || !amount.trim() || !validateAmount(amount)}
           >
@@ -318,67 +318,67 @@ const LockerUploadTab = () => {
 
         {/* Progress Section */}
         {isProcessing && (
-          <div className="progress-section">
-            <div className="progress-bar-container">
+          <div className="locker-tab__progress">
+            <div className="locker-tab__progress-track">
               <div 
-                className="progress-bar" 
-                style={{ width: `${progress}%` }}
+                className="locker-tab__progress-bar"
+                style={{ '--locker-tab-progress-width': `${progress}%` }}
               />
             </div>
-            <p className="progress-text">{progress}%</p>
-            <p className="status-message">{statusMessage}</p>
+            <p className="locker-tab__progress-text">{progress}%</p>
+            <p className="locker-tab__status-message">{statusMessage}</p>
           </div>
         )}
 
         {/* Results Section with Close Button */}
         {taskResult && !isProcessing && showResults && (
-          <div className="results-section">
-            <div className="results-header">
+          <div className="locker-tab__results">
+            <div className="locker-tab__results-header">
               <h4>Upload Results</h4>
               <button 
-                className="results-close-button" 
+                className="btn btn--danger locker-tab__close-button"
                 onClick={clearResults}
                 title="Close results"
               >
                 ✕
               </button>
             </div>
-            <div className="results-grid">
+            <div className="locker-tab__results-grid">
               {taskResult.data && (
                 <>
-                  <div className="result-item success locker-key-result">
-                    <span className="result-label">Locker Key:</span>
-                    <span className="result-value locker-key-display">{lockerKey}</span>
+                  <div className="locker-tab__result-item locker-tab__result-item--success">
+                    <span className="locker-tab__result-label">Locker Key:</span>
+                    <span className="locker-tab__result-value locker-tab__result-value--locker-key">{lockerKey}</span>
                   </div>
                   {taskResult.data.total_processed !== undefined && (
-                    <div className="result-item">
-                      <span className="result-label">Coins Uploaded:</span>
-                      <span className="result-value">{taskResult.data.total_processed}</span>
+                    <div className="locker-tab__result-item">
+                      <span className="locker-tab__result-label">Coins Uploaded:</span>
+                      <span className="locker-tab__result-value">{taskResult.data.total_processed}</span>
                     </div>
                   )}
                   {taskResult.data.total_value !== undefined && (
-                    <div className="result-item success">
-                      <span className="result-label">Total Value:</span>
-                      <span className="result-value">{taskResult.data.total_value} CloudCoins</span>
+                    <div className="locker-tab__result-item locker-tab__result-item--success">
+                      <span className="locker-tab__result-label">Total Value:</span>
+                      <span className="locker-tab__result-value">{taskResult.data.total_value} CloudCoins</span>
                     </div>
                   )}
                   {taskResult.data.receipt_id && (
-                    <div className="result-item">
-                      <span className="result-label">Receipt ID:</span>
-                      <span className="result-value receipt-id">{taskResult.data.receipt_id}</span>
+                    <div className="locker-tab__result-item">
+                      <span className="locker-tab__result-label">Receipt ID:</span>
+                      <span className="locker-tab__result-value locker-tab__result-value--receipt">{taskResult.data.receipt_id}</span>
                     </div>
                   )}
                 </>
               )}
             </div>
-            <div className="sharing-section">
+            <div className="locker-tab__sharing">
               <h5>Share with Recipient:</h5>
-              <div className="share-info">
+              <div className="locker-tab__share-info">
                 <p>Give this locker key to the person who should receive the coins:</p>
-                <div className="locker-key-share">
-                  <code className="locker-key-code">{lockerKey}</code>
+                <div className="locker-tab__share-key">
+                  <code className="locker-tab__share-code">{lockerKey}</code>
                   <button 
-                    className="copy-button"
+                    className="btn btn--secondary locker-tab__copy-button"
                     onClick={() => {
                       navigator.clipboard.writeText(lockerKey);
                       showInfo(`Copied locker key ${lockerKey} to clipboard!`);
@@ -395,13 +395,13 @@ const LockerUploadTab = () => {
 
         {/* Status Message (when not processing) */}
         {!isProcessing && statusMessage && !taskResult && (
-          <div className="status-section">
-            <p className="status-message">{statusMessage}</p>
+          <div className="locker-tab__status">
+            <p className="locker-tab__status-message locker-tab__status-message--error">{statusMessage}</p>
           </div>
         )}
 
         {/* Info Section */}
-        <div className="info-section">
+        <div className="locker-tab__info">
           <h4>How Locker Upload Works</h4>
           <ul>
             <li><strong>Secure Storage:</strong> Your CloudCoins are stored securely in the RAIDA network using your chosen locker key.</li>

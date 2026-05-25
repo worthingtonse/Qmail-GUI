@@ -117,16 +117,16 @@ const footerRef = useRef(null);
   };
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div className="header-left">
-          <h1>CloudCoin Pro</h1>
-          <span className="version">v1.0 - July 30 2025</span>
+    <div className="main-dashboard">
+      <header className="main-dashboard__header">
+        <div className="main-dashboard__brand">
+          <h1 className="main-dashboard__title">CloudCoin Pro</h1>
+          <span className="main-dashboard__version">v1.0 - July 30 2025</span>
         </div>
-        <div className="header-right">
+        <div className="main-dashboard__header-actions">
           <button 
             ref={logoutButtonRef}
-            className="btn btn--danger logout-button glass-sound-btn"
+            className="btn btn--danger main-dashboard__logout-button glass-sound-btn"
             onClick={handleLogout}
             title="Logout from CloudCoin Pro"
           >
@@ -135,23 +135,23 @@ const footerRef = useRef(null);
         </div>
       </header>
 
-      <nav className="dashboard-nav">
+      <nav className="main-dashboard__nav">
         {tabs.map(tab => (
           <button
             key={tab.id}
             ref={el => tabRefs.current[tab.id] = el}
-            className={`nav-tab glass-sound-btn ${activeTab === tab.id ? 'active' : ''}`}
+            className={`main-dashboard__tab glass-sound-btn ${activeTab === tab.id ? 'main-dashboard__tab--active' : ''}`}
             onClick={() => handleTabChange(tab.id)}
             title={`Switch to ${tab.label} tab`}
           >
             {/* Render the icon component */}
-            <tab.icon size={32} className="tab-icon" />
-            <span className="tab-label">{tab.label}</span>
+            <tab.icon size={32} className="main-dashboard__tab-icon" />
+            <span className="main-dashboard__tab-label">{tab.label}</span>
           </button>
         ))}
       </nav>
 
-      <main className="dashboard-main">
+      <main className="main-dashboard__content">
         {renderTabContent()}
       </main>
 
@@ -161,7 +161,7 @@ const footerRef = useRef(null);
       </footer> */}
       <footer 
   ref={footerRef}
-  className={`dashboard-footer scroll-footer ${footerVisible ? 'visible' : ''}`}
+  className={`main-dashboard__footer main-dashboard__footer--scroll ${footerVisible ? 'main-dashboard__footer--visible' : ''}`}
 >
   <p>CloudCoin Pro - Secure storage on USB drive</p>
   <p>Free from the CloudCoin Consortium</p>

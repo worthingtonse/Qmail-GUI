@@ -73,9 +73,9 @@ const SettingsTab = () => {
   return (
     <div className="tab-content">
       <h3>Settings</h3>
-      <div className="settings-options">
+      <div className="main-dashboard__settings-list">
         {/* Auto-backup Setting */}
-        <div className="setting-item">
+        <div className="main-dashboard__setting-item">
           <label htmlFor="auto-backup">Auto-backup enabled</label>
           <input 
             id="auto-backup" 
@@ -86,7 +86,7 @@ const SettingsTab = () => {
         </div>
 
         {/* Notification Preferences */}
-        <div className="setting-item">
+        <div className="main-dashboard__setting-item">
           <label htmlFor="notifications">Notification preferences</label>
           <select 
             id="notifications"
@@ -100,34 +100,34 @@ const SettingsTab = () => {
         </div>
 
         {/* Change Password */}
-        <div className="setting-item">
+        <div className="main-dashboard__setting-item">
           <span>Manage your password</span>
-          <button className="btn btn--primary change-password-btn" onClick={handleChangePassword}>
+          <button className="btn btn--primary main-dashboard__change-password-button" onClick={handleChangePassword}>
             Change Password
           </button>
         </div>
 
         {/* Create Backup */}
-        <div className="setting-item cli-test-section"> {/* Re-using CLI test styles */}
-          <div className="cli-test-content">
+        <div className="main-dashboard__setting-item main-dashboard__setting-item--stacked">
+          <div className="main-dashboard__setting-content">
             <h4>Wallet Backup</h4>
-            <p className="backup-description">
+            <p className="main-dashboard__backup-description">
               Create a complete .zip backup of your active wallet.
               <strong>Must be an absolute path</strong> (e.g., C:\Backups or /home/user/backups).
               The directory will be created if it doesn&apos;t exist.
             </p>
             
-            <div className="backup-form">
+            <div className="main-dashboard__backup-form">
               <input
                 type="text"
                 placeholder="Enter absolute destination path..."
                 value={backupDestination}
                 onChange={(e) => setBackupDestination(e.target.value)}
-                className="backup-path-input"
+                className="main-dashboard__backup-path-input"
                 disabled={isBackingUp}
               />
               <button
-                className="btn btn--primary backup-btn"
+                className="btn btn--primary main-dashboard__backup-button"
                 onClick={handleCreateBackup}
                 disabled={isBackingUp || !backupDestination.trim()}
               >
@@ -137,20 +137,20 @@ const SettingsTab = () => {
 
             {/* Status Messages */}
             {isBackingUp && (
-              <div className="echo-status-output">
+              <div className="main-dashboard__status-output">
                 <h5>Creating backup...</h5>
               </div>
             )}
 
             {backupError && (
-              <div className="echo-status-output error">
+              <div className="main-dashboard__status-output main-dashboard__status-output--error">
                 <h5>Backup Failed:</h5>
                 <pre>{backupError}</pre>
               </div>
             )}
 
             {backupResult && (
-              <div className="echo-status-output success">
+              <div className="main-dashboard__status-output main-dashboard__status-output--success">
                 <h5>Backup Successful!</h5>
                 <p><strong>Wallet:</strong> {backupResult.wallet}</p>
                 <p><strong>Filename:</strong> {backupResult.filename}</p>
@@ -162,50 +162,48 @@ const SettingsTab = () => {
         </div>
         
         {/* RAIDA Network Test */}
-        <div className="setting-item cli-test-section">
-          <div className="cli-test-content">
+        <div className="main-dashboard__setting-item main-dashboard__setting-item--stacked">
+          <div className="main-dashboard__setting-content">
             <h4>RAIDA Network Test (Echo)</h4>
             <button
-              className="btn btn--success test-cli-btn"
+              className="btn btn--success main-dashboard__test-cli-button"
               onClick={handleEchoTest}
               disabled={isEchoRunning}
             >
               {isEchoRunning ? 'Pinging...' : 'Run Echo Test'}
             </button>
-
             {isEchoRunning && (
-              <div className="echo-status-output">
+              <div className="main-dashboard__status-output">
                 <h5>Pinging RAIDA Network...</h5>
               </div>
             )}
 
             {echoError && (
-              <div className="echo-status-output error">
+              <div className="main-dashboard__status-output main-dashboard__status-output--error">
                 <h5>Error:</h5>
                 <pre>{echoError}</pre>
               </div>
             )}
 
             {echoResult && echoResult.servers && (
-              <div className="echo-status-output">
+              <div className="main-dashboard__status-output">
                 <h5>
-                  Echo Results: 
-                  <span style={{ 
-                    color: passCount === serverCount ? 'var(--accent-success)' : 'var(--accent-error)', 
-                    paddingLeft: '8px' 
-                  }}>
+                  Echo Results:
+                  <span
+                    className={`main-dashboard__echo-summary ${passCount === serverCount ? 'main-dashboard__echo-summary--success' : 'main-dashboard__echo-summary--error'}`}
+                  >
                     {passCount} / {serverCount} Passed
                   </span>
                 </h5>
-                <div className="raida-grid">
+                <div className="main-dashboard__raida-grid">
                   {echoResult.servers.map((server) => (
-                    <div 
-                      key={server.index} 
-                      className={`raida-server-card ${server.status === 'Ready' ? 'success' : 'fail'}`}
+                    <div
+                      key={server.index}
+                      className={`main-dashboard__raida-card ${server.status === 'Ready' ? 'main-dashboard__raida-card--success' : 'main-dashboard__raida-card--fail'}`}
                       title={`Status: ${server.status}\nLatency: ${server.network_latency_ms}ms\nExecution: ${server.execution_time_ns}ns`}
                     >
-                      <span className="raida-index">RAIDA {server.index}</span>
-                      <span className="raida-latency">
+                      <span className="main-dashboard__raida-index">RAIDA {server.index}</span>
+                      <span className="main-dashboard__raida-latency">
                         {server.network_latency_ms} ms
                       </span>
                     </div>

@@ -984,7 +984,7 @@ const ComposeModal = ({
     };
 
     return (
-      <div className="send-progress">
+      <div className="compose-modal__send-progress">
         {getIcon()}
         <span>{sendProgress}</span>
         {progress > 0 && progress < 100 && (
@@ -1002,20 +1002,20 @@ const ComposeModal = ({
     }
 
     return (
-      <div className="contact-suggestions">
+      <div className="compose-modal__contact-suggestions">
         {filteredContacts.slice(0, 5).map((contact, index) => {
           const address = getContactAddress(contact);
           return (
             <button
               type="button"
               key={contact.userId || `${field}-${index}`}
-              className="contact-suggestion"
+              className="compose-modal__contact-suggestion"
               onClick={() => handleContactSelect(field, contact)}
             >
-              <div className="contact-name">
+              <div className="compose-modal__contact-name">
                 {contact.fullName || address || "Unknown Contact"}
               </div>
-              {address && <div className="contact-address">{address}</div>}
+              {address && <div className="compose-modal__contact-address">{address}</div>}
             </button>
           );
         })}
@@ -1024,10 +1024,10 @@ const ComposeModal = ({
   };
 
   const renderRecipientField = ({ field, label, value, placeholder }) => (
-    <div className="form-group recipient-field-group">
-      <div className="recipient-field">
+    <div className="compose-modal__field compose-modal__field--recipient">
+      <div className="compose-modal__recipient-row">
         <label htmlFor={field}>{label}</label>
-        <div className="recipient-input-container">
+        <div className="compose-modal__recipient-input">
           <input
             type="text"
             id={field}
@@ -1038,7 +1038,7 @@ const ComposeModal = ({
           />
           <button
             type="button"
-            className="add-contacts-btn"
+            className="compose-modal__add-contacts-button"
             onClick={() => toggleContactSuggestions(field)}
             disabled={isSending || contacts.length === 0}
             title="Show contacts"
@@ -1053,15 +1053,15 @@ const ComposeModal = ({
   );
 
   return (
-    <div className="compose-modal-overlay">
+    <div className="compose-modal__overlay">
       <section
         className="compose-modal glass-container"
         role="dialog"
         aria-modal="true"
         aria-labelledby="compose-modal-title"
       >
-        <header className="compose-modal-header">
-          <h3 id="compose-modal-title">
+        <header className="compose-modal__header">
+          <h3 id="compose-modal-title" className="compose-modal__title">
             {(() => {
               const mode = composeContext?.mode;
               if (mode === "draft") return "Edit Draft";
@@ -1073,16 +1073,16 @@ const ComposeModal = ({
           </h3>
           <button
             type="button"
-            className="close-modal-btn"
+            className="compose-modal__close-button"
             onClick={onClose}
           >
             <X size={20} />
           </button>
         </header>
-        <div className="compose-modal-body">
+        <div className="compose-modal__body">
           {/* Error Message */}
           {error && (
-            <div className="error-message" role="alert">
+            <div className="compose-modal__error" role="alert">
               <AlertCircle size={16} />
               <span>{error}</span>
             </div>
@@ -1090,15 +1090,15 @@ const ComposeModal = ({
 
           {/* Network Status Warning */}
           {networkStatus && canSend !== true && (
-            <div className="network-warning" role="status">
+            <div className="compose-modal__network-warning" role="status">
               <AlertCircle size={16} />
-              <div className="network-warning-copy">
+              <div className="compose-modal__network-warning-copy">
                 <strong>RAIDA network warning</strong>
                 <span>{networkStatus.message}</span>
               </div>
               <button
                 type="button"
-                className="network-retry-btn"
+                className="compose-modal__network-retry-button"
                 onClick={checkNetworkStatus}
                 disabled={isSending || canSend === null}
               >
@@ -1119,10 +1119,10 @@ const ComposeModal = ({
           })}
 
           {/* Advanced options toggle */}
-          <div className="advanced-toggle">
+          <div className="compose-modal__advanced-toggle">
             <button
               type="button"
-              className="toggle-advanced-btn"
+              className="compose-modal__advanced-toggle-button"
               onClick={() => setShowAdvanced(!showAdvanced)}
               disabled={isSending}
             >
@@ -1145,7 +1145,7 @@ const ComposeModal = ({
                 value: bcc,
                 placeholder: "0006.1.11223344 (separate multiple with commas)",
               })}
-              <div className="form-group">
+              <div className="compose-modal__field">
                 <label htmlFor="subsubject">Sub-Subject:</label>
                 <input
                   type="text"
@@ -1160,7 +1160,7 @@ const ComposeModal = ({
                   placeholder="Secondary subject header (optional)"
                 />
               </div>
-              <div className="form-group">
+              <div className="compose-modal__field">
                 <label htmlFor="storageWeeks">Storage Duration (weeks):</label>
                 <input
                   type="number"
@@ -1177,7 +1177,7 @@ const ComposeModal = ({
             </>
           )}
 
-          <div className="form-group">
+          <div className="compose-modal__field">
             <label htmlFor="subject">Subject: </label>
             <input
               type="text"
@@ -1191,7 +1191,7 @@ const ComposeModal = ({
               placeholder="Email subject"
             />
           </div>
-          <div className="form-group form-group-textarea">
+          <div className="compose-modal__field compose-modal__field--message">
             <label htmlFor="body">Message: </label>
             <textarea
               id="body"
@@ -1212,10 +1212,10 @@ const ComposeModal = ({
               - Picked files render as removable chips with size.
               - In a browser/Vite build (no electronAPI), the button
                 renders disabled with an explanatory tooltip. */}
-          <div className="attachments-row">
+          <div className="compose-modal__attachments">
             <button
               type="button"
-              className="attach-files-btn"
+              className="compose-modal__attach-files-button"
               onClick={handleAttachClick}
               disabled={isSending || !attachmentsSupported}
               title={
@@ -1237,7 +1237,7 @@ const ComposeModal = ({
             )}
 
             {attachments.length > 0 && (
-              <ul className="attachment-chips">
+              <ul className="compose-modal__attachment-chips">
                 {attachments.map((a) => (
                   <li
                     key={a.path}
@@ -1270,17 +1270,6 @@ const ComposeModal = ({
           {/* Enhanced Progress indicator */}
           {renderProgressIndicator()}
 
-          {/* Draft info */}
-          {/* {drafts.length > 0 && !isSending && (
-            <div style={{
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--text-tertiary)',
-              padding: 'var(--space-sm) 0'
-            }}>
-              {drafts.length} draft{drafts.length !== 1 ? 's' : ''} available
-            </div>
-          )} */}
-
           {/* gpt-batch5 #3: attachments aren't persisted with drafts
               (backend ticket CORE-N). Without this warning, a user
               who attached files and clicked Save Draft would expect
@@ -1298,10 +1287,10 @@ const ComposeModal = ({
             </div>
           )}
         </div>
-        <footer className="compose-modal-footer">
+        <footer className="compose-modal__footer">
           <button
             type="button"
-            className="send-button"
+            className="compose-modal__send-button"
             onClick={handleSend}
             disabled={sendControlsLocked || canSend === null}
             title={
@@ -1342,7 +1331,7 @@ const ComposeModal = ({
 
           <button
             type="button"
-            className="attach-button"
+            className="compose-modal__draft-button"
             onClick={() => handleSaveDraft()}
             disabled={
               sendControlsLocked ||

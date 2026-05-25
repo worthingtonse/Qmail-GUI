@@ -278,7 +278,7 @@ const StoreTab = () => {
   // Render the transactions view if selected
   if (viewMode === 'transactions' && selectedWallet) {
     return (
-      <div className="tab-content store-tab transactions-view">
+      <div className="tab-content main-dashboard__panel--store main-dashboard__panel--transactions-view">
         <TransactionsTab 
           wallet={selectedWallet} 
           walletPath={selectedWallet.path}
@@ -290,32 +290,32 @@ const StoreTab = () => {
 
   // Render using the EXACT original structure
   return (
-    <div className="tab-content store-tab">
+    <div className="tab-content main-dashboard__panel--store">
 
       {successMessage && (
-        <div className="success-message">
-          <span className="success-icon">✓</span>
+        <div className="main-dashboard__success-message">
+          <span className="main-dashboard__success-icon">✓</span>
           {successMessage}
         </div>
       )}
 
-      <div className="balance-display">
-        <h4>Current Balance: {isWalletsLoading ? '...' : balance.toLocaleString()} CloudCoins</h4>
+      <div className="main-dashboard__balance-display">
+        <h4 className="main-dashboard__balance-title">Current Balance: {isWalletsLoading ? '...' : balance.toLocaleString()} CloudCoins</h4>
       </div>
       
-      <div className="feature-placeholder wallet-list-container">
-        <div className="wallet-list-header">
+      <div className="feature-placeholder main-dashboard__wallet-list-panel">
+        <div className="main-dashboard__wallet-list-header">
           <p>Your authenticated CloudCoins are stored in the following wallets:</p>
-          <div className="header-buttons">
+          <div className="main-dashboard__wallet-list-buttons">
             <button 
-              className="create-wallet-btn"
+              className="main-dashboard__create-wallet-button"
               onClick={() => setShowCreateWallet(!showCreateWallet)}
               disabled={isWalletsLoading}
             >
               {showCreateWallet ? 'Cancel' : '+ Create New Wallet'}
             </button>
             <button 
-              className="add-location-btn"
+              className="main-dashboard__add-location-button"
               onClick={() => setShowAddLocation(!showAddLocation)}
               disabled={isWalletsLoading}
             >
@@ -325,20 +325,20 @@ const StoreTab = () => {
         </div>
 
         {showCreateWallet && (
-          <div className="create-wallet-form">
+          <div className="main-dashboard__wallet-form">
             <form onSubmit={handleCreateWallet}>
               <input
                 type="text"
                 placeholder="Enter wallet name..."
                 value={newWalletName}
                 onChange={(e) => setNewWalletName(e.target.value)}
-                className="wallet-name-input"
+                className="main-dashboard__wallet-name-input"
                 disabled={isCreating}
                 maxLength={50}
               />
               <button 
                 type="submit" 
-                className="submit-wallet-btn"
+                className="main-dashboard__wallet-submit-button"
                 disabled={isCreating || !newWalletName.trim()}
               >
                 {isCreating ? 'Creating...' : 'Create Wallet'}
@@ -348,71 +348,70 @@ const StoreTab = () => {
         )}
 
         {showAddLocation && (
-          <div className="create-wallet-form">
+          <div className="main-dashboard__wallet-form">
             <form onSubmit={handleAddLocation}>
               <input
                 type="text"
                 placeholder="Enter folder path (e.g., C:\MyWallets or /home/user/wallets)..."
                 value={newLocation}
                 onChange={(e) => setNewLocation(e.target.value)}
-                className="wallet-name-input"
+                className="main-dashboard__wallet-name-input"
                 disabled={isAddingLocation}
               />
               <button 
                 type="submit" 
-                className="submit-wallet-btn"
+                className="main-dashboard__wallet-submit-button"
                 disabled={isAddingLocation || !newLocation.trim()}
               >
                 {isAddingLocation ? 'Adding...' : 'Add Location'}
               </button>
             </form>
-            <p className="form-hint">Add a folder path to scan for existing wallets</p>
+            <p className="main-dashboard__form-hint">Add a folder path to scan for existing wallets</p>
           </div>
         )}
 
         {isWalletsLoading && (
-          <div className="echo-status-output">
+          <div className="main-dashboard__status-output">
             <h5>Loading Wallets...</h5>
           </div>
         )}
 
         {walletsError && (
-          <div className="echo-status-output error" >
+          <div className="main-dashboard__status-output main-dashboard__status-output--error" >
             <pre>{walletsError}</pre>
           </div>
         )}
 
         {!isWalletsLoading && !walletsError && (
-          <div className="wallet-list">
+          <div className="main-dashboard__wallet-list">
             {wallets.length > 0 ? (
               wallets.map((wallet, index) => (
                 <div 
                   key={wallet.name || index} 
-                  className={`wallet-item info-card ${wallet.active ? 'active' : ''} clickable-wallet`}
+                  className={`main-dashboard__wallet-item ${wallet.active ? 'main-dashboard__wallet-item--active' : ''}`}
                   onClick={() => handleWalletClick(wallet)}
-                  style={{ cursor: 'pointer' }}
                   title="Click to view transactions"
                 >
                   {renamingWallet === wallet.name ? (
-                    <div className="rename-wallet-form" onClick={(e) => e.stopPropagation()}>
+                    <div className="main-dashboard__rename-form" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="text"
                         value={newNameInput}
                         onChange={(e) => setNewNameInput(e.target.value)}
-                        className="rename-input"
+                        className="main-dashboard__rename-input"
                         placeholder="Enter new name..."
                         maxLength={50}
                         autoFocus
                       />
-                      <div className="rename-actions">
+                      <div className="main-dashboard__rename-actions">
                         <button
-                          className="rename-save-btn"
+                          className="main-dashboard__rename-save-button"
                           onClick={(e) => handleActionClick(e, () => handleRenameWallet(wallet), wallet)}
                         >
                           Save
                         </button>
                         <button
-                          className="rename-cancel-btn"
+                          className="main-dashboard__rename-cancel-button"
                           onClick={(e) => handleActionClick(e, cancelRename, wallet)}
                         >
                           Cancel
@@ -421,14 +420,14 @@ const StoreTab = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="wallet-header">
-                        <div className="wallet-title-section">
-                          <h5>{wallet.name}</h5>
-                          {wallet.active && <span className="active-badge">Active</span>}
+                      <div className="main-dashboard__wallet-header">
+                        <div className="main-dashboard__wallet-title-group">
+                          <h5 className="main-dashboard__wallet-name">{wallet.name}</h5>
+                          {wallet.active && <span className="main-dashboard__active-badge">Active</span>}
                         </div>
-                        <div className="wallet-actions" onClick={(e) => e.stopPropagation()}>
+                        <div className="main-dashboard__wallet-actions" onClick={(e) => e.stopPropagation()}>
                           <button
-                            className="action-btn rename-btn"
+                            className="main-dashboard__wallet-action-button main-dashboard__wallet-action-button--rename"
                             onClick={(e) => handleActionClick(e, startRename, wallet)}
                             title="Rename wallet"
                             disabled={deletingWallet !== null}
@@ -436,7 +435,7 @@ const StoreTab = () => {
                             <Pencil size={16} />
                           </button>
                           <button
-                            className="action-btn delete-btn"
+                            className="main-dashboard__wallet-action-button main-dashboard__wallet-action-button--delete"
                             onClick={(e) => handleActionClick(e, confirmDelete, wallet)}
                             title="Delete wallet"
                             disabled={deletingWallet !== null}
@@ -446,19 +445,19 @@ const StoreTab = () => {
                         </div>
                       </div>
                       
-                      <div className="wallet-balance-section">
-                        <p className="wallet-total-balance">
+                      <div className="main-dashboard__wallet-balance">
+                        <p className="main-dashboard__wallet-total-balance">
                           Total: {wallet.balance.toLocaleString()} CC ({wallet.coins || 0} coins)
                         </p>
                         {wallet.denomination_counts && Object.keys(wallet.denomination_counts).length > 0 && (
-                          <div className="denomination-breakdown">
-                            <p className="denomination-label">Denominations:</p>
-                            <div className="denomination-list">
+                          <div className="main-dashboard__denomination-breakdown">
+                            <p className="main-dashboard__denomination-label">Denominations:</p>
+                            <div className="main-dashboard__denomination-list">
                               {Object.entries(wallet.denomination_counts)
                                 .filter(([, count]) => count > 0)
                                 .sort(([a], [b]) => Number(b) - Number(a))
                                 .map(([denom, count]) => (
-                                  <span key={denom} className="denomination-item">
+                                  <span key={denom} className="main-dashboard__denomination-item">
                                     {denom}: {count}
                                   </span>
                                 ))
@@ -467,14 +466,14 @@ const StoreTab = () => {
                           </div>
                         )}
                         {(wallet.has_fracked || wallet.has_limbo) && (
-                          <div className="wallet-alerts">
-                            {wallet.has_fracked && <span className="alert-badge fracked">Has Fracked Coins</span>}
-                            {wallet.has_limbo && <span className="alert-badge limbo">Has Limbo Coins</span>}
+                          <div className="main-dashboard__wallet-alerts">
+                            {wallet.has_fracked && <span className="main-dashboard__alert-badge main-dashboard__alert-badge--fracked">Has Fracked Coins</span>}
+                            {wallet.has_limbo && <span className="main-dashboard__alert-badge main-dashboard__alert-badge--limbo">Has Limbo Coins</span>}
                           </div>
                         )}
                       </div>
                       {wallet.path && (
-                        <p className="wallet-path" title={wallet.path}>
+                        <p className="main-dashboard__wallet-path" title={wallet.path}>
                           {wallet.path.length > 30 
                             ? `...${wallet.path.substring(wallet.path.length - 30)}` 
                             : wallet.path}
@@ -482,21 +481,21 @@ const StoreTab = () => {
                       )}
                       
                       {showDeleteConfirm === wallet.name && (
-                        <div className="delete-confirm" onClick={(e) => e.stopPropagation()}>
-                          <p className="delete-warning">
-                            <AlertTriangle size={16} className="warning-icon" />
+                        <div className="main-dashboard__delete-confirm" onClick={(e) => e.stopPropagation()}>
+                          <p className="main-dashboard__delete-warning">
+                            <AlertTriangle size={16} className="main-dashboard__warning-icon" />
                             Delete wallet &quot;{wallet.name}&quot;?
                           </p>
-                          <div className="delete-actions">
+                          <div className="main-dashboard__delete-actions">
                             <button
-                              className="delete-yes-btn"
+                              className="main-dashboard__delete-yes-button"
                               onClick={(e) => handleActionClick(e, () => handleDeleteWallet(wallet), wallet)}
                               disabled={deletingWallet !== null}
                             >
                               {deletingWallet === wallet.name ? 'Deleting...' : 'Yes, Delete'}
                             </button>
                             <button
-                              className="delete-no-btn"
+                              className="main-dashboard__delete-no-button"
                               onClick={(e) => handleActionClick(e, cancelDelete, wallet)}
                               disabled={deletingWallet !== null}
                             >
@@ -515,7 +514,7 @@ const StoreTab = () => {
                 </div>
               ))
             ) : (
-              <div className="no-wallets-message">
+              <div className="main-dashboard__empty-wallets">
                 <p>No wallets found. Create your first wallet to get started!</p>
               </div>
             )}

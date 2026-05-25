@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
-import { avatarColorFromString } from "./avatarColor";
 import {
   getPopularContacts,
   getContacts,
@@ -24,6 +23,7 @@ import {
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 
 const SERIAL_NUMBER_PATTERN = /^\d+$/;
+const CONTACT_AVATAR_TONE_COUNT = 12;
 
 const normalizeContactValue = (value) =>
   String(value || "").trim().toLowerCase();
@@ -67,7 +67,6 @@ const ContactsPane = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle search with debouncing
 // Handle search with debouncing
 useEffect(() => {
   if (currentMode === "lookup") {
@@ -205,15 +204,18 @@ useEffect(() => {
     return value.charAt(0).toUpperCase() || "?";
   };
 
-  const getContactAvatarStyle = (contact) => {
-    const { bg, text } = avatarColorFromString(
-      contact?.email || contact?.name || contact?.id || "",
-    );
+  const getContactAvatarToneClass = (contact) => {
+    const value = String(contact?.email || contact?.name || contact?.id || "").trim().toLowerCase();
+    if (!value) {
+      return "contacts-pane__avatar--tone-0";
+    }
 
-    return {
-      "--contact-avatar-bg": bg,
-      "--contact-avatar-fg": text,
-    };
+    let hash = 5381;
+    for (let index = 0; index < value.length; index += 1) {
+      hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+    }
+
+    return `contacts-pane__avatar--tone-${hash % CONTACT_AVATAR_TONE_COUNT}`;
   };
 
   const isContactSavedLocally = (contact) => {
@@ -520,36 +522,36 @@ useEffect(() => {
       />
       {pendingDeleteContact && (
         <div
-          className="contact-delete-overlay"
+          className="contacts-pane__delete-overlay"
           role="presentation"
           onClick={handleCancelDeleteContact}
         >
           <section
-            className="contact-delete-modal"
+            className="contacts-pane__delete-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="delete-contact-title"
             onClick={(event) => event.stopPropagation()}
           >
-            <header className="contact-delete-header">
+            <header className="contacts-pane__delete-header">
               <AlertTriangle size={22} />
               <h3 id="delete-contact-title">Delete Contact?</h3>
             </header>
-            <p className="contact-delete-copy">
+            <p className="contacts-pane__delete-copy">
               This will remove {pendingDeleteContact.name} from your local
               contacts.
             </p>
             {pendingDeleteContact.email && (
-              <p className="contact-delete-address">
+              <p className="contacts-pane__delete-address">
                 {pendingDeleteContact.email}
               </p>
             )}
             {deleteContactError && (
-              <div className="contact-delete-error" role="alert">
+              <div className="contacts-pane__delete-error" role="alert">
                 {deleteContactError}
               </div>
             )}
-            <footer className="contact-delete-actions">
+            <footer className="contacts-pane__delete-actions">
               <button
                 type="button"
                 className="btn btn--secondary"
@@ -581,16 +583,16 @@ useEffect(() => {
         </div>
       )}
       <section className="contacts-pane" aria-label="Contacts and DRD search">
-        <header className="contacts-header">
+        <header className="contacts-pane__header">
           <h2>Contacts & DRD Search</h2>
           <div
-            className="contacts-header-actions"
+            className="contacts-pane__header-actions"
             role="toolbar"
             aria-label="Contacts actions"
           >
             <button
              type="button"
-             className="btn btn--secondary refresh-btn"
+             className="btn btn--secondary contacts-pane__refresh-button"
              onClick={handleRefresh}
              disabled={loading}
              title="Refresh contacts"
@@ -600,7 +602,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`btn btn--secondary contacts-btn${currentMode === "contacts" ? " active" : ""}`}
+             className={`btn btn--secondary contacts-pane__mode-button${currentMode === "contacts" ? " contacts-pane__mode-button--active" : ""}`}
              onClick={switchToRegularContacts}
              disabled={loading}
              title="View your contacts"
@@ -611,7 +613,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`btn btn--secondary popular-contacts-btn${currentMode === "popular" ? " active" : ""}`}
+             className={`btn btn--secondary contacts-pane__mode-button${currentMode === "popular" ? " contacts-pane__mode-button--active" : ""}`}
              onClick={switchToPopularContacts}
              disabled={loading}
              title="View popular contacts from DRD"
@@ -622,7 +624,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className={`btn btn--secondary contacts-btn${currentMode === "lookup" ? " active" : ""}`}
+             className={`btn btn--secondary contacts-pane__mode-button${currentMode === "lookup" ? " contacts-pane__mode-button--active" : ""}`}
              onClick={switchToLookup}
              disabled={loading}
              title="Lookup serial numbers and saved contact addresses"
@@ -633,7 +635,7 @@ useEffect(() => {
             </button>
             <button
              type="button"
-             className="btn btn--primary add-contact-btn"
+             className="btn btn--primary contacts-pane__add-button"
              onClick={() => setIsAddContactOpen(true)}
              title="Add new contact"
             >
@@ -643,32 +645,32 @@ useEffect(() => {
         </header>
 
         {currentMode !== "lookup" && (
-          <div className="search-bar-container" role="search">
-            <Search size={20} className="search-icon" />
+          <div className="contacts-pane__search" role="search">
+            <Search size={20} className="contacts-pane__search-icon" />
             <input
              type="text"
              placeholder="Search contacts or DRD alias..."
-              className="search-input"
-              value={searchTerm}
-              onChange={handleSearchChange}
+             className="contacts-pane__search-input"
+             value={searchTerm}
+             onChange={handleSearchChange}
             />
           </div>
         )}
 
         {error && (
-          <div className="error-message" role="alert">
+          <div className="contacts-pane__error" role="alert">
             <p>Error loading contacts: {error}</p>
-            <div className="contacts-error-actions">
+            <div className="contacts-pane__error-actions">
               <button
                 type="button"
-                className="btn btn--secondary retry-button"
+               className="btn btn--secondary contacts-pane__retry-button"
                 onClick={handleRefresh}
               >
                 Retry
               </button>
               <button
                 type="button"
-                className="btn btn--secondary retry-button"
+               className="btn btn--secondary contacts-pane__retry-button"
                 onClick={() => setError(null)}
               >
                 Dismiss
@@ -678,15 +680,15 @@ useEffect(() => {
         )}
 
         {currentMode === "lookup" ? (
-          <section className="contact-lookup-panel" aria-labelledby="contact-lookup-title">
-            <div className="contact-lookup-card">
+          <section className="contacts-pane__lookup-panel" aria-labelledby="contact-lookup-title">
+            <div className="contacts-pane__lookup-card">
               <h3 id="contact-lookup-title">Contact Lookup</h3>
               <p>
                 Serial number lookup uses the local QMail service. Address and
                 name lookup searches saved contacts only and does not query the
                 DRD.
               </p>
-              <div className="contact-lookup-form">
+              <div className="contacts-pane__lookup-form">
                 <input
                   type="text"
                   value={lookupInput}
@@ -704,7 +706,7 @@ useEffect(() => {
                 />
                 <button
                   type="button"
-                  className="btn btn--primary contacts-btn"
+                  className="btn btn--primary contacts-pane__lookup-button"
                   onClick={handleLookupContact}
                   disabled={lookupLoading}
                 >
@@ -717,23 +719,23 @@ useEffect(() => {
                 </button>
               </div>
               {lookupResult && (
-                <div className={`contact-lookup-result ${lookupResult.type}`}>
+                <div className={`contacts-pane__lookup-result contacts-pane__lookup-result--${lookupResult.type}`}>
                   <p>{lookupResult.message}</p>
                   {lookupResult.contacts?.map((contact) => (
                     <div
                       key={`${contact.id || contact.email}-${contact.name}`}
-                      className="contact-lookup-match"
+                      className="contacts-pane__lookup-match"
                     >
-                      <span className="contact-lookup-name">
+                      <span className="contacts-pane__lookup-name">
                         {contact.name || "Unknown Contact"}
                       </span>
                       {contact.email && (
-                        <span className="contact-lookup-email">
+                        <span className="contacts-pane__lookup-email">
                           {contact.email}
                         </span>
                       )}
                       {contact.id && (
-                        <span className="contact-lookup-serial">
+                        <span className="contacts-pane__lookup-serial">
                           SN {contact.id}
                         </span>
                       )}
@@ -744,9 +746,9 @@ useEffect(() => {
             </div>
           </section>
         ) : (
-          <div className="contact-list">
+          <div className="contacts-pane__list">
             {loading ? (
-              <div className="loading-state">
+              <div className="contacts-pane__loading-state">
                 <RefreshCw size={32} className="spinning" />
                 <p>
                   {searchTerm.trim()
@@ -757,7 +759,7 @@ useEffect(() => {
                 </p>
               </div>
             ) : contacts.length === 0 ? (
-              <div className="empty-state">
+              <div className="contacts-pane__empty-state">
                 <UserPlus size={48} />
                 <p>
                   {searchTerm.trim()
@@ -769,7 +771,7 @@ useEffect(() => {
                 {!searchTerm.trim() && currentMode !== "popular" && (
                   <button
                     type="button"
-                    className="btn btn--primary add-contact-btn"
+                    className="btn btn--primary contacts-pane__add-button"
                     onClick={() => setIsAddContactOpen(true)}
                   >
                     <UserPlus size={16} /> Add Your First Contact
@@ -777,14 +779,14 @@ useEffect(() => {
                 )}
               </div>
             ) : (
-              <div className="contacts-results">
+              <div className="contacts-pane__results">
                 {searchTerm.trim() && (
-                  <div className="search-results-info">
+                  <div className="contacts-pane__search-results-info">
                     Found {contacts.length} contact{contacts.length !== 1 ? "s" : ""} for &quot;{searchTerm}&quot;
                   </div>
                 )}
                 {!searchTerm.trim() && currentMode === "popular" && (
-                  <div className="mode-info">
+                  <div className="contacts-pane__mode-info">
                     Showing {contacts.length} popular contacts from the DRD network
                   </div>
                 )}
@@ -792,23 +794,21 @@ useEffect(() => {
                   const contactKey = getContactKey(contact);
                   const isSavingDrdContact = savingDrdContactId === contactKey;
                   const isSavedDrdContact = isContactSavedLocally(contact);
-
                   return (
                     <article
                       key={contactKey}
-                      className={`contact-item ${contact.source === "drd" ? "contact-drd" : "contact-user"}`}
+                      className={`contacts-pane__item contacts-pane__item--${contact.source === "drd" ? "drd" : "user"}`}
                     >
                       <div
-                        className={`contact-avatar status-${contact.status}`}
-                        style={getContactAvatarStyle(contact)}
+                        className={`contacts-pane__avatar contacts-pane__avatar--${contact.status} ${getContactAvatarToneClass(contact)}`}
                       >
                         <span>{getContactInitial(contact)}</span>
                       </div>
-                      <div className="contact-details">
-                        <div className="contact-name-row">
-                          <span className="contact-name">{contact.name}</span>
+                      <div className="contacts-pane__details">
+                        <div className="contacts-pane__name-row">
+                          <span className="contacts-pane__name">{contact.name}</span>
                           <span
-                            className={`contact-source-badge ${contact.source === "drd" ? "badge-drd" : "badge-user"}`}
+                            className={`contacts-pane__source-badge ${contact.source === "drd" ? "contacts-pane__source-badge--drd" : "contacts-pane__source-badge--user"}`}
                           >
                             {contact.source === "drd" ? (
                               <>
@@ -821,14 +821,14 @@ useEffect(() => {
                             )}
                           </span>
                         </div>
-                        <div className="contact-email">{contact.email}</div>
+                        <div className="contacts-pane__email">{contact.email}</div>
                         {contact.description && (
-                          <div className="contact-description">
+                          <div className="contacts-pane__description">
                             {contact.description}
                           </div>
                         )}
                         {contact.popularity > 0 && (
-                          <div className="contact-stats">
+                          <div className="contacts-pane__stats">
                             Popularity: {contact.popularity} | Contacts:{" "}
                             {contact.contactCount}
                           </div>
@@ -837,7 +837,7 @@ useEffect(() => {
                       {contact.source === "user" && (
                         <button
                           type="button"
-                          className="contact-action-btn danger"
+                          className="contacts-pane__action-button contacts-pane__action-button--danger"
                           onClick={() => handleDeleteContact(contact)}
                           title="Delete contact"
                           aria-label={`Delete ${contact.name}`}
@@ -848,7 +848,7 @@ useEffect(() => {
                       {contact.source === "drd" && (
                         <button
                           type="button"
-                          className={`contact-action-btn add ${isSavedDrdContact ? "saved" : ""}`}
+                          className={`contacts-pane__action-button contacts-pane__action-button--add${isSavedDrdContact ? " contacts-pane__action-button--saved" : ""}`}
                           onClick={() => handleAddPopularContact(contact)}
                           disabled={isSavingDrdContact || isSavedDrdContact}
                           title={
@@ -880,7 +880,7 @@ useEffect(() => {
         )}
 
         {/* Show info text based on current mode */}
-        <div className="drd-mock-info">
+        <div className="contacts-pane__info-panel">
           {searchTerm.trim() ? (
             <p>
                Searching the Distributed Resource Directory (DRD) for &quot;{searchTerm}&quot;.

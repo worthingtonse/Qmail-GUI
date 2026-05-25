@@ -68,20 +68,20 @@ const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
   };
 
   return (
-    <div className="compose-modal-overlay">
+    <div className="compose-modal__overlay">
       <section
         className="compose-modal add-contact-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-contact-modal-title"
       >
-        <header className="compose-modal-header add-contact-modal__header">
+        <header className="compose-modal__header add-contact-modal__header">
           <h2 id="add-contact-modal-title" className="add-contact-modal__title">
             Add New Contact
           </h2>
           <button
             onClick={handleClose}
-            className="close-modal-btn add-contact-modal__close-button"
+            className="compose-modal__close-button add-contact-modal__close-button"
             disabled={isSaving}
             type="button"
           >
@@ -89,12 +89,12 @@ const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
           </button>
         </header>
         <form
-          className="compose-modal-body add-contact-modal__body"
+          className="compose-modal__body add-contact-modal__body"
           onSubmit={handleSubmit}
           aria-busy={isSaving}
         >
           <section className="add-contact-modal__fields" aria-label="Contact details">
-            <div className="form-group add-contact-modal__field">
+            <div className="compose-modal__field add-contact-modal__field">
               <label className="add-contact-modal__label" htmlFor="contact-name">
                 Name / Alias:
               </label>
@@ -111,7 +111,7 @@ const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
               disabled={isSaving}
             />
             </div>
-            <div className="form-group add-contact-modal__field">
+            <div className="compose-modal__field add-contact-modal__field">
               <label className="add-contact-modal__label" htmlFor="contact-address-or-sn">
                 QMail address or serial number:
               </label>
@@ -146,9 +146,9 @@ const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
               <span>{error}</span>
             </div>
           )}
-          <footer className="compose-modal-footer add-contact-modal__footer">
+          <footer className="compose-modal__footer add-contact-modal__footer">
           <button
-            className="send-button add-contact-modal__save-button"
+            className="compose-modal__send-button add-contact-modal__save-button"
             disabled={isSaving}
             type="submit"
           >

@@ -46,7 +46,7 @@ const formatImportError = (result) => {
 
 // eslint-disable-next-line react/prop-types
 const ServiceSelectionScreen = ({ onSelectService }) => {
-  const [currentStep, setCurrentStep] = useState('initial'); // initial, locker-input, address-input
+  const [currentStep, setCurrentStep] = useState('initial'); // initial, locker-input
   const [lockerCode, setLockerCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -260,11 +260,13 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
   };
 
   const renderInitialScreen = () => (
-    <div className="service-selection-buttons">
+    <div className="service-selection-screen__actions">
       {checkingLocalIdentity && (
-        <div className="local-identity-check">
+        <div className="service-selection-screen__notice service-selection-screen__notice--checking">
           <Loader2 className="spinning" size={16} />
-          <span>Checking for an existing local identity...</span>
+          <span className="service-selection-screen__notice-copy">
+            Checking for an existing local identity...
+          </span>
         </div>
       )}
 
@@ -272,56 +274,69 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
         <button
           type="button"
           onClick={handleUseLocalIdentity}
-          className="service-button existing-identity"
+          className="service-selection-screen__button service-selection-screen__button--existing-identity"
           disabled={localIdentityLoading}
         >
-          <div className="service-button-content">
+          <div className="service-selection-screen__button-content">
             {localIdentityLoading ? (
-              <Loader2 className="service-button-icon spinning" size={24} />
+              <Loader2
+                className="service-selection-screen__button-icon spinning"
+                size={24}
+              />
             ) : (
-              <LogIn className="service-button-icon" size={24} />
+              <LogIn className="service-selection-screen__button-icon" size={24} />
             )}
-            <span>
+            <span className="service-selection-screen__button-copy">
               <strong>Use existing local identity</strong>
-              <small>An identity is already set up on this device</small>
+              <small className="service-selection-screen__button-subtitle">
+                An identity is already set up on this device
+              </small>
             </span>
           </div>
         </button>
       )}
 
       {localIdentityError && (
-        <div className="local-identity-error">
+        <div className="service-selection-screen__notice service-selection-screen__notice--error">
           <AlertCircle size={16} />
-          <span>{localIdentityError}</span>
+          <span className="service-selection-screen__notice-copy">{localIdentityError}</span>
           <button
             type="button"
             onClick={handleUseLocalIdentity}
             disabled={localIdentityLoading}
-            className="locker-error-retry"
+            className="service-selection-screen__locker-retry"
           >
             Retry
           </button>
         </div>
       )}
 
-      <button onClick={() => setCurrentStep('locker-input')} className="service-button qmail">
-        <div className="service-button-content">
-          <Download className="service-button-icon" size={24} />
+      <button
+        type="button"
+        onClick={() => setCurrentStep('locker-input')}
+        className="service-selection-screen__button service-selection-screen__button--qmail"
+      >
+        <div className="service-selection-screen__button-content">
+          <Download className="service-selection-screen__button-icon" size={24} />
           <span>I Have a Locker Code</span>
         </div>
       </button>
 
-      <button onClick={handleBuyLockerCode} className="service-button wallet">
-        <div className="service-button-content">
-          <ExternalLink className="service-button-icon" size={24} />
+      <button
+        type="button"
+        onClick={handleBuyLockerCode}
+        className="service-selection-screen__button service-selection-screen__button--wallet"
+      >
+        <div className="service-selection-screen__button-content">
+          <ExternalLink className="service-selection-screen__button-icon" size={24} />
           <span>Buy Locker Code</span>
         </div>
       </button>
 
       {showBuyLockerHint && (
-        <div className="buy-locker-hint">
+        <div className="service-selection-screen__notice service-selection-screen__notice--hint">
           <AlertCircle size={16} />
-          <span>
+          <span className="service-selection-screen__notice-copy">
             {"Once you have your code, come back here and tap 'I Have a Locker Code'."}
           </span>
         </div>
@@ -330,75 +345,91 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
   );
 
   const renderLockerInput = () => (
-    <div className="locker-input-section">
-      <div className="locker-code-label">Enter Your Locker Code</div>
+    <div className="service-selection-screen__locker-panel">
+      <div className="service-selection-screen__locker-label">Enter Your Locker Code</div>
       <input
         type="text"
         value={lockerCode}
         onChange={handleLockerInputChange}
         onKeyPress={(e) => e.key === 'Enter' && !loading && handleImport()}
         placeholder="XXX-XXXXX or any locker key"
-        className="locker-code-input"
+        className="service-selection-screen__locker-input"
         disabled={loading}
         autoFocus
       />
       
       {loading && (
-        <div className="locker-progress">
-          <span className="progress-text">{loadingMessage}</span>
+        <div className="service-selection-screen__locker-progress">
+          <span className="service-selection-screen__locker-progress-text">{loadingMessage}</span>
         </div>
       )}
       
       {error && (
-        <div className="locker-error">
+        <div className="service-selection-screen__locker-error">
           <AlertCircle size={16} />
           <span>{error}</span>
           {/* FIX-13-0B: small inline Retry next to the error.
               The Continue button below already retries on click, but
               an explicit "Retry" wording is clearer when the failure
               was network-class and the input is unchanged.
-              gpt-batch4: styling moved to a .locker-error-retry CSS
+              gpt-batch4: styling moved to a BEM retry class
               class so disabled/hover states are themeable. */}
           <button
             type="button"
             onClick={handleImport}
             disabled={loading || !isValidLockerCode()}
-            className="locker-error-retry"
+            className="service-selection-screen__locker-retry"
           >
             Retry
           </button>
         </div>
       )}
       
-      <div className="locker-actions">
+      <div className="service-selection-screen__locker-actions">
         <button
+          type="button"
           onClick={handleImport}
           disabled={loading || !isValidLockerCode()}
-          className="service-button qmail"
+          className="service-selection-screen__button service-selection-screen__button--qmail"
         >
-          <div className="service-button-content">
+          <div className="service-selection-screen__button-content">
             {loading ? (
               <>
-                <Loader2 className="service-button-icon spinning" size={24} />
+                <Loader2
+                  className="service-selection-screen__button-icon spinning"
+                  size={24}
+                />
                 <span>Importing...</span>
               </>
             ) : (
               <>
-                <ArrowRight className="service-button-icon" size={24} />
+                <ArrowRight
+                  className="service-selection-screen__button-icon"
+                  size={24}
+                />
                 <span>Continue</span>
               </>
             )}
           </div>
         </button>
         
-        <button onClick={() => { setCurrentStep('initial'); setLockerCode(''); setError(''); }} className="btn btn--secondary service-button secondary" disabled={loading}>
+        <button
+          type="button"
+          onClick={() => {
+            setCurrentStep('initial');
+            setLockerCode('');
+            setError('');
+          }}
+          className="service-selection-screen__button service-selection-screen__button--secondary"
+          disabled={loading}
+        >
           Back
         </button>
       </div>
       {/* FIX-35-0B: relaxed help text — the locker_key field accepts
           any non-empty string per the v4 plan / MVP-20. The old
           "Standard format: ABC-1234" contradicted the relaxed mask. */}
-      <div className="locker-help-text">
+      <div className="service-selection-screen__locker-help">
         ABC-1234 standard; longer keys from other tools also accepted.
       </div>
     </div>
@@ -406,24 +437,32 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
 
   return (
     <div className="service-selection-screen">
-      <div className="service-selection-container">
-        <div className="service-icon-header">
-          <Mail className="main-service-icon" size={64} />
+      <div className="service-selection-screen__card">
+        <div className="service-selection-screen__icon-header">
+          <Mail className="service-selection-screen__icon" size={64} />
         </div>
-        <h1>Welcome to QMail</h1>
-        <p>Experience the next generation of secure communication. Quantum-resistant encryption protecting your digital legacy.</p>
+        <h1 className="service-selection-screen__title">Welcome to QMail</h1>
+        <p className="service-selection-screen__description">
+          Experience the next generation of secure communication. Quantum-resistant encryption protecting your digital legacy.
+        </p>
         {currentStep === 'initial' && renderInitialScreen()}
         {currentStep === 'locker-input' && renderLockerInput()}
       </div>
 
-      <div className="encrypted-envelopes">
+      <div className="service-selection-screen__envelope-cluster">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="envelope-3d">
-            <div className="envelope-body"></div>
-            <div className="envelope-flap"></div>
-            <Lock className="envelope-lock" size={28} />
-            <div className="encryption-badge"><ShieldCheck size={18} /></div>
-            <div className="encryption-particles">{[...Array(5)].map((_, j) => <div key={j} className="particle"></div>)}</div>
+          <div key={i} className="service-selection-screen__envelope">
+            <div className="service-selection-screen__envelope-body"></div>
+            <div className="service-selection-screen__envelope-flap"></div>
+            <Lock className="service-selection-screen__envelope-lock" size={28} />
+            <div className="service-selection-screen__envelope-badge">
+              <ShieldCheck size={18} />
+            </div>
+            <div className="service-selection-screen__envelope-particles">
+              {[...Array(5)].map((_, j) => (
+                <div key={j} className="service-selection-screen__particle"></div>
+              ))}
+            </div>
           </div>
         ))}
       </div>

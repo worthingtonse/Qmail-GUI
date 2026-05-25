@@ -174,11 +174,11 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
   }
 
   return (
-    <div className="tab-content transactions-tab">
-      <div className="transactions-header-container">
-        <div className="back-section">
+    <div className="tab-content main-dashboard__transactions-panel">
+      <div className="main-dashboard__transactions-header-panel">
+        <div className="main-dashboard__back-section">
           <button 
-            className="back-btn"
+            className="main-dashboard__back-button"
             onClick={onBack}
             title="Back to wallet list"
           >
@@ -187,17 +187,17 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
           </button>
         </div>
 
-        <div className="transactions-header">
-          <div className="header-info">
-            <h3>Transactions - {wallet.name}</h3>
-            <p className="wallet-info">
+        <div className="main-dashboard__transactions-header">
+          <div className="main-dashboard__transactions-heading">
+            <h3 className="main-dashboard__transactions-title">Transactions - {wallet.name}</h3>
+            <p className="main-dashboard__wallet-summary">
               <strong>Balance: {wallet.balance.toLocaleString()} CC</strong>
               {transactionCount > 0 && (
                 <span> • {transactionCount} transaction{transactionCount !== 1 ? 's' : ''}</span>
               )}
             </p>
             {wallet.path && (
-              <p className="wallet-path">{wallet.path}</p>
+              <p className="main-dashboard__transactions-wallet-path">{wallet.path}</p>
             )}
           </div>
           <button 
@@ -212,13 +212,13 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
         </div>
       </div>
 
-      <div className="transactions-content-container">
+      <div className="main-dashboard__transactions-content">
         {/* Error State */}
         {error && (
-          <div className="transactions-error">
+          <div className="main-dashboard__transactions-error">
             <h5>Error loading transactions</h5>
             <pre>{error}</pre>
-            <button className="retry-btn" onClick={loadTransactions}>
+            <button className="main-dashboard__retry-button" onClick={loadTransactions}>
               Try Again
             </button>
           </div>
@@ -226,7 +226,7 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
 
         {/* Loading State */}
         {isLoading && !error && transactions.length === 0 && (
-          <div className="transactions-loading">
+          <div className="main-dashboard__transactions-loading">
             <div className="loading-spinner"></div>
             <p>Loading transactions...</p>
           </div>
@@ -234,8 +234,8 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
 
         {/* Empty State */}
         {!isLoading && !error && transactions.length === 0 && (
-          <div className="transactions-empty">
-            <ClipboardList size={48} className="empty-icon" />
+          <div className="main-dashboard__transactions-empty">
+            <ClipboardList size={48} className="main-dashboard__transactions-empty-icon" />
             <h4>No Transactions Yet</h4>
             <p>Transaction history for <strong>{wallet.name}</strong> will appear here.</p>
           </div>
@@ -243,8 +243,8 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
 
         {/* Transactions Table */}
         {!error && transactions.length > 0 && (
-          <div className="transactions-table-container">
-            <table className="transactions-table">
+          <div className="main-dashboard__transactions-table-container">
+            <table className="main-dashboard__transactions-table">
               <thead>
                 <tr>
                   <th>Date & Time</th>
@@ -268,31 +268,31 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
                   const statusColor = getStatusColor(transaction.remarks);
                   
                   return (
-                    <tr key={index} className="transaction-row">
-                      <td className="date-time">
-                        <div className="date">{date}</div>
-                        <div className="time">{time}</div>
+                    <tr key={index} className="main-dashboard__transaction-row">
+                      <td className="main-dashboard__date-time">
+                        <div className="main-dashboard__date">{date}</div>
+                        <div className="main-dashboard__time">{time}</div>
                       </td>
-                      <td className="type-cell">
-                        <div className="type-badge">
-                          <span className="type-icon">{typeInfo.icon}</span>
-                          <span className="type-text">{typeInfo.label}</span>
+                      <td className="main-dashboard__type-cell">
+                        <div className="main-dashboard__type-badge">
+                          <span className="main-dashboard__type-icon">{typeInfo.icon}</span>
+                          <span className="main-dashboard__type-text">{typeInfo.label}</span>
                         </div>
                       </td>
-                      <td className="task-id-cell">
-                        <code className="task-id">{formatTaskId(transaction.task_id)}</code>
+                      <td className="main-dashboard__task-id-cell">
+                        <code className="main-dashboard__task-id">{formatTaskId(transaction.task_id)}</code>
                       </td>
-                      <td className="description-cell">
+                      <td className="main-dashboard__description-cell">
                         {transaction.description || '-'}
                       </td>
-                      <td className={`amount-cell ${amount.className}`}>
+                      <td className={`main-dashboard__amount-cell main-dashboard__amount-cell--${amount.className}`}>
                         {amount.value}
                       </td>
-                      <td className="balance-cell">
+                      <td className="main-dashboard__transactions-balance-cell">
                         {balance}
                       </td>
-                      <td className="status-cell">
-                        <span className={`status-badge ${statusColor}`}>
+                      <td className="main-dashboard__status-cell">
+                        <span className={`main-dashboard__status-badge main-dashboard__status-badge--${statusColor}`}>
                           {transaction.remarks || 'Unknown'}
                         </span>
                       </td>
@@ -320,7 +320,7 @@ const TransactionsTab = ({ wallet, walletPath, onBack }) => {
 
         {/* Transaction Count Footer */}
         {!error && transactions.length > 0 && (
-          <div className="transactions-footer">
+          <div className="main-dashboard__transactions-footer">
             <p>Showing {transactions.length} of {transactionCount} transaction{transactionCount !== 1 ? 's' : ''}</p>
             {transactions.length < transactionCount && (
               <button className="load-more-btn" onClick={() => loadTransactions(100)}>
