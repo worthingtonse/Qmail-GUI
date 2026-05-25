@@ -1,0 +1,78 @@
+E9 EMAILLISTPANE HANDOFF FOR OPUS
+Date: 2026-05-25
+Author: GPT
+
+Scope of this pass
+- Complete the deferred Phase 4 E9 cleanup for `EmailListPane`.
+- This pass finishes the missing marker reconstruction and renames the remaining generic `loading-state` / `empty-state` surface to block-local names.
+
+Files changed
+1. src/qmail/screens/EmailListPane.css
+   - Added `/* was: ... */` markers across the selectors whose pre-BEM names could be recovered from the older pre-refactor `EmailListPane.css` history.
+   - Reconstructed markers for the older list/search/avatar/detail/tag surface, including examples such as:
+     - `.search-bar-container -> .email-list-pane__search-container`
+     - `.search-input -> .email-list-pane__search-input`
+     - `.email-list -> .email-list-pane__list`
+     - `.email-list-item -> .email-list-pane__item`
+     - `.avatar-with-coins -> .email-list-pane__avatar`
+     - `.sender-avatar-circle -> .email-list-pane__avatar-circle`
+     - `.coin-badge -> .email-list-pane__coin-badge`
+     - `.email-details -> .email-list-pane__details`
+     - `.email-sender -> .email-list-pane__sender`
+     - `.email-subject -> .email-list-pane__subject`
+     - `.email-preview -> .email-list-pane__preview`
+     - `.email-tags -> .email-list-pane__tags`
+     - `.tag -> .email-list-pane__tag`
+   - Replaced the last generic descendant selectors:
+     - `.email-list .loading-state`
+     - `.email-list .empty-state`
+     with:
+     - `.email-list-pane__loading-state`
+     - `.email-list-pane__empty-state`
+   - Added local loading/empty-state styling so the pane no longer depends on the generic shared state classes.
+   - Preserved the earlier tiny-badge token fix (`--font-size-2xs`) as part of the now-complete E9 surface.
+
+2. src/qmail/screens/EmailListPane.jsx
+   - Updated the empty/loading render branches to the new block-local classes:
+     - `email-list-pane__loading-state`
+     - `email-list-pane__empty-state`
+
+3. docs/theme.status.txt
+   - Moved E9 to `IN REVIEW` and updated the tracker stamp.
+
+What I explicitly verified
+- `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/qmail/screens/EmailListPane.css`
+  - Expected and observed: no matches
+- `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/qmail/screens/EmailListPane.css`
+  - Expected and observed: no matches
+- `rg 'style=\{\{|style=\{|className="loading-state"|className="empty-state"' src/qmail/screens/EmailListPane.jsx`
+  - Expected and observed: no matches
+- `npm run lint`
+- `npm run test`
+- `npm run build`
+
+What Opus should review
+1. Re-run the Phase 4 CSS gates
+   - `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/qmail/screens/EmailListPane.css`
+   - `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/qmail/screens/EmailListPane.css`
+   - Expected: no matches
+
+2. Re-check the JSX inline-style / generic-state gate
+   - `rg 'style=\{\{|style=\{|className="loading-state"|className="empty-state"' src/qmail/screens/EmailListPane.jsx`
+   - Expected: no matches
+
+3. Re-check the reconstructed marker pass
+   - `rg 'search-bar-container|search-input|search-icon|email-list-item|avatar-with-coins|sender-avatar-circle|coin-badge|email-details|email-sender-row|email-sender|star-icon|annoyance-icon|email-subject|email-preview|email-tags|email-timestamp|tag-important|tag-work|email-list \.loading-state|email-list \.empty-state' src/qmail/screens/EmailListPane.css`
+   - Expected: matches only inside `/* was: ... */` comments
+
+4. Re-check tracker state
+   - Review `docs/theme.status.txt` around E8-E11
+   - Expected:
+     - E8 is `REVIEWED`
+     - E9 is `IN REVIEW`
+     - E10 remains `OPEN`
+
+Notes
+- `EmailListItem.jsx` was already consuming the `email-list-pane__*` surface and did not require edits in this pass.
+- The old selector names used for marker reconstruction were recovered from the pre-BEM `EmailListPane.css` history in git, rather than guessed from the current file.
+- Visual smoke is still pending for this track.

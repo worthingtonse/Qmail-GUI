@@ -6,14 +6,19 @@ docs/opu.theme.plan.txt §12.
 How to use this file:
   * Claim a track by editing its line: set Owner and Status, optionally
     add a branch name in Notes.
-  * Status values: OPEN | IN PROGRESS | BLOCKED | IN REVIEW | DONE.
+  * Status values: OPEN | IN PROGRESS | BLOCKED | IN REVIEW | REVIEWED | DONE.
+    REVIEWED = Opu's mechanical gates (G1/G2/G3 + JSX) passed; visual smoke
+    in docs/theme.smoke-test.md is the remaining gate before DONE.
   * One track per agent at a time. Finish or release before claiming a
     second.
   * Phase 4 (E1–E22) and the dependent runtime tracks (P1, P2, P3, P5)
     are BLOCKED until P0 lands.
+  * For Phase 4, do not move a track to IN REVIEW on rename work alone:
+    the BEM rename, literal/token sweep, and JSX cleanup all need to be
+    complete first.
   * Update the "Last updated" line below when you edit.
 
-Last updated: 2026-05-23 by gpt (Track F doc shipped; E8-E22 ready for visual smoke)
+Last updated: 2026-05-25 by opu (E22 independently gate-checked: G1/G2 pass, G3/JSX n/a for global stylesheet, all 21 token refs resolve; full Phase 4 batch E1-E22 now REVIEWED, visual smoke is the only remaining Phase 4 gate)
 
 Visual smoke-test checklist: docs/theme.smoke-test.md (PENDING per step until verified in the running app).
 
@@ -131,28 +136,28 @@ PHASE 4 TRACKS — open after P0 merges (one file per agent, biggest first)
 
 Track  Status   Owner   File                                                Lines
 -----  ------   -----   --------------------------------------------------- -----
-E1     OPEN     -       wallet/components/MainDashboard.css                  2296
-E2     OPEN     -       wallet/components/tabs/ExportTab.css                 1023
-E3     OPEN     -       wallet/components/tabs/AuthenticateTab.css            987
-E4     OPEN     -       wallet/components/tabs/LockerTab.css                  971
-E5     OPEN     -       qmail/screens/AccountPane.css                         935
-E6     OPEN     -       App.css (incl. update-modal extract to its own file)  803
-E7     OPEN     -       screens/ServiceSelectionScreen.css                    679
-E8     IN REVIEW   gpt     qmail/screens/ComposeModal.css                        662
-E9     IN REVIEW   gpt     qmail/screens/EmailListPane.css                       654
-E10    IN REVIEW   gpt     wallet/components/DicewarePasswordCreator.css         654
-E11    IN REVIEW   gpt     qmail/screens/ContactsPane.css                        582
-E12    IN REVIEW   gpt     qmail/screens/QMailDashboard.css                      565
-E13    IN REVIEW   gpt     qmail/screens/ReadingPane.css                         516
-E14    IN REVIEW   gpt     qmail/screens/NavigationPane.css                      368
-E15    IN REVIEW   gpt     wallet/components/PasswordScreen.css                  369
-E16    IN REVIEW   gpt     components/common/notifications/NotificationContainer.css 334
-E17    IN REVIEW   gpt     wallet/components/USBCheckScreen.css                  310
-E18    IN REVIEW   gpt     qmail/screens/AddContactModal.css                     299
-E19    IN REVIEW   gpt     wallet/components/tabs/ReceiptModal.css               248
-E20    IN REVIEW   gpt     wallet/components/WelcomeScreen.css                   204
-E21    IN REVIEW   gpt     qmail/screens/WalletSetupScreen.css                    77
-E22    IN REVIEW opu    index.css cleanup pass (token swaps complete; visual smoke pending)  208
+E1     REVIEWED    gpt     wallet/components/MainDashboard.css (opu 2026-05-24; visual smoke pending)  1947
+E2     REVIEWED    gpt     wallet/components/tabs/ExportTab.css (opu 2026-05-24; visual smoke pending)  1031
+E3     REVIEWED    gpt     wallet/components/tabs/AuthenticateTab.css (opu 2026-05-25; visual smoke pending)  834
+E4     REVIEWED    gpt     wallet/components/tabs/LockerTab.css (opu 2026-05-25; visual smoke pending)  858
+E5     REVIEWED    gpt     qmail/screens/AccountPane.css (opu 2026-05-25; visual smoke pending)  915
+E6     REVIEWED    gpt     App.css + UpdateModal.css extracted (opu 2026-05-25; visual smoke pending)  243+188
+E7     REVIEWED    gpt     screens/ServiceSelectionScreen.css (opu 2026-05-25; visual smoke pending)  728
+E8     REVIEWED    gpt     qmail/screens/ComposeModal.css + shared base rewired in AddContactModal.jsx (opu 2026-05-25; visual smoke pending)  789
+E9     REVIEWED    gpt     qmail/screens/EmailListPane.css (marker pass completed; loading/empty states localized) (opu 2026-05-25; visual smoke pending)  741
+E10    REVIEWED    gpt     wallet/components/DicewarePasswordCreator.css (BEM rename + local button/input modifiers; 654→567 from btn-* consolidation) (opu 2026-05-25; visual smoke pending)  567
+E11    REVIEWED    gpt     qmail/screens/ContactsPane.css (full BEM rename + localized states + 12-tone avatar classes; inline-style eliminated) (opu 2026-05-25; visual smoke pending)  826
+E12    REVIEWED    gpt     qmail/screens/QMailDashboard.css (utility surface localized; stale button-variant rules retired; 565→281 lines) (opu 2026-05-25; visual smoke pending)  281
+E13    REVIEWED    gpt     qmail/screens/ReadingPane.css (opu 2026-05-25; visual smoke pending)  424
+E14    REVIEWED    gpt     qmail/screens/NavigationPane.css (opu 2026-05-25; visual smoke pending)  277
+E15    REVIEWED    gpt     wallet/components/PasswordScreen.css (opu 2026-05-25; visual smoke pending)  409
+E16    REVIEWED    gpt     components/common/notifications/NotificationContainer.css (opu 2026-05-25; visual smoke pending)  214
+E17    REVIEWED    gpt     wallet/components/USBCheckScreen.css (opu 2026-05-25; visual smoke pending)  260
+E18    REVIEWED    gpt     qmail/screens/AddContactModal.css (opu 2026-05-25; visual smoke pending)  174
+E19    REVIEWED    gpt     wallet/components/tabs/ReceiptModal.css (opu 2026-05-25; visual smoke pending)  257
+E20    REVIEWED    gpt     wallet/components/WelcomeScreen.css (opu 2026-05-25; visual smoke pending)  211
+E21    REVIEWED    gpt     qmail/screens/WalletSetupScreen.css (opu 2026-05-25; visual smoke pending)  192
+E22    REVIEWED    opu     index.css cleanup pass (opu 2026-05-25; visual smoke pending)  152
 
 ================================================================================
 ACCEPTANCE CRITERIA REMINDERS

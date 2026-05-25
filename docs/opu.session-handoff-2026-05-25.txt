@@ -1,0 +1,331 @@
+================================================================================
+SESSION HANDOFF — pickup notes for next Opus session
+================================================================================
+Date written:  2026-05-25
+Author:        Claude Opus 4.7 (1M context, current session)
+Read this:     if you are a future Opus picking up the QMail theme/Phase 4 work.
+Previous handoff: docs/opu.session-handoff-2026-05-24.txt (Phase 3 closeout +
+                  Track F / Phase 4 outlook; mostly superseded by this file).
+
+================================================================================
+WHERE WE ARE — short version
+================================================================================
+
+Phase 4 of the CSS refactor is **substantially done at the gate level**:
+all 22 tracks (E1–E22) have passed Opu's mechanical gates. Visual smoke
+in the running app is the remaining gate before any track can move to
+DONE. No Phase 4 commit has been made yet — work sits in the working
+tree.
+
+Quick numbers (from the stats run mid-session):
+  * 28 CSS files, ~14,200 lines, 341 KB on disk
+  * 1,859 class selectors, 444 `/* was: */` rename markers
+  * 77 design tokens, 3,445 var(--…) references (~45× reuse each)
+  * 247 !important declarations across 7 files (Phase 5 cleanup target)
+
+================================================================================
+THE FOUR FILES THAT ARE THE SOURCE OF TRUTH
+================================================================================
+
+Read these in order before doing anything. They contain the entire
+contract for what "done" means.
+
+1. docs/theme.status.txt
+   AUTHORITATIVE TRACKER. One row per work-stream. Status column uses
+   OPEN | IN PROGRESS | BLOCKED | IN REVIEW | REVIEWED | DONE.
+   REVIEWED was added mid-session (2026-05-25) to mean "Opu's
+   mechanical gates passed; visual smoke is the remaining gate before
+   DONE." Definition is in the file's own how-to-use block.
+   Every E-track row has a parenthetical with the Opu sign-off date
+   and the current state of remaining work. The "Last updated" line
+   carries the most recent edit.
+
+2. docs/opu.theme.plan.txt
+   The master plan that defines tracks P0-P5, A-F, and E1-E22.
+   §12 is the work-stream definition that status.txt tracks against.
+   §13 is the JSX-side acceptance criteria, including the §13.6
+   custom-property exception (allowed) and the §13.7 new-token cap.
+
+3. docs/theme.smoke-test.md
+   The visual smoke-test checklist. Every step is PENDING until
+   verified in the running app. This is THE gate between REVIEWED and
+   DONE for every E-track and the P-tracks. No one has run it yet
+   across the whole batch.
+
+4. docs/opu.E-track-review.txt
+   The cumulative log of Opu's gate-pass reviews. One section per
+   E-track in the order reviewed (E8-E21 sweep, then E1, E2, E3, E4,
+   E5, E6, E7, E8, E9, E10, E11, E12). Read this if you want to know
+   why a track passed and what structural notes were captured. The
+   end of the file has a "Phase 4 batch milestone" summary.
+
+Supporting docs (consult as needed, not required reading):
+  docs/theme.bem-mapping.md         — Track F: rename mapping
+  docs/theme.editable-tokens.md     — Track A: 8 editable tokens
+  docs/theme.wcag-values.md         — Track B: contrast audit
+  docs/theme.custom-format.md       — Phase 5: custom-theme JSON format
+  docs/theme.c-core-ticket.md       — Track C: rest_core ticket
+  docs/opu.bugs.txt                 — out-of-scope bugs found while reviewing
+  docs/opu.css-refactor.txt         — older master refactor plan (v2.5)
+  docs/opu.session-handoff-2026-05-24.txt — previous session's handoff
+
+================================================================================
+THE ACCEPTANCE-CRITERIA GATES (the Opu review protocol)
+================================================================================
+
+When GPT (or anyone) hands you an E-track for review, run THESE seven
+checks. Every E-track this session was reviewed with this exact set:
+
+  G1 (color literals)
+      rg '#[0-9a-fA-F]{3,8}\b|rgba\(' <file.css>
+      Expected: zero matches.
+
+  G2 (font-size literals)
+      rg 'font-size:\s*[0-9.]+(px|rem|em)' <file.css>
+      Expected: zero matches.
+
+  G2-bonus (bad token refs)
+      rg 'font-size:\s*var\(--text-' <file.css>
+      Expected: zero matches. (The token tier prefix is --font-size-*,
+      not --text-*. This used to be a real bug class.)
+
+  G3 (rename markers)
+      rg '/\* was:' <file.css>
+      Expected: N markers, where N >= roughly the number of selectors
+      renamed in the pass.
+
+  JSX inline-style
+      rg 'style=\{\{|style=\{' <file.jsx>
+      Expected: zero matches, OR a small handful that match either:
+        - §13.6 custom-property pattern: style={{ '--block-prop': value }}
+        - a deterministic modifier-class palette pattern (see
+          feedback memory on inline-style alternatives)
+
+  JSX old class names
+      rg 'className="[^"]*\b(<list-of-old-names>)\b' <file.jsx>
+      Expected: zero matches.
+
+  CSS old unprefixed selectors
+      rg '^\.(<list-of-old-names>)\b' <file.css>
+      Expected: zero matches outside `/* was: */` comments.
+
+If all seven pass: flip the status row to REVIEWED, normalize the
+parenthetical to "(opu YYYY-MM-DD; visual smoke pending)", refresh the
+"Last updated" line, and append a section to opu.E-track-review.txt.
+
+================================================================================
+THE REMAINING WORK — in priority order
+================================================================================
+
+1. E22 INDEPENDENT GATE SWEEP
+   E22 (src/index.css, 152 lines) is currently IN REVIEW with the note
+   "token swaps complete; visual smoke pending". This was self-claimed
+   by Opu in a prior session and has NEVER been independently
+   gate-checked. It is the last row not at REVIEWED.
+
+   Action: run the seven gates on index.css. The file is small enough
+   that this is a 5-minute task. If it passes, flip to REVIEWED.
+   index.css has no companion JSX (it's the global stylesheet) so the
+   JSX gates collapse to "check anywhere that imports tokens defined
+   here."
+
+2. VISUAL SMOKE TEST OF THE WHOLE BATCH
+   This is the biggest remaining piece of work. docs/theme.smoke-test.md
+   has PENDING rows for every track (P0 / P1 / P2 / P3 / P5 / E1-E22).
+   Nothing in the file has been marked PASS yet.
+
+   The protocol is in the file's "How to use this file" block:
+     - run the app in `npm run dev`
+     - walk through each step
+     - mark `PASS YYYY-MM-DD <name>` or
+       `FAIL YYYY-MM-DD <name> — <one-line cause>`
+     - when every step in a section reads PASS, flip the matching row
+       in theme.status.txt to DONE.
+
+   Realistic scoping: this is the user's call to run, not Opu's. Opu
+   can't visually inspect the running app. Opu's role is to act on the
+   FAIL rows if any surface — fix the CSS/JSX issue, re-pass the seven
+   gates, and ask the user to re-smoke.
+
+3. COMMIT THE PHASE 4 WORK
+   NONE of the Phase 4 work is committed. git status will show ~30+
+   modified/untracked files (some are unrelated cross-session dirt; see
+   the memory note about the dirty working tree). Plan with the user
+   before staging — file-by-file, never `git add .`, never `git add -A`.
+
+   Suggested commit shape (one commit per E-track is the natural
+   granularity, matching the per-track handoff docs):
+     css(E1): MainDashboard BEM rename + token sweep
+     css(E2): ExportTab BEM rename + token sweep
+     ... etc through E22.
+   Plus a final commit for the cumulative review log and updated
+   theme.status.txt + theme.smoke-test.md.
+
+4. OUT-OF-PHASE-4 CLEANUP OPPORTUNITIES
+   Surfaced during this run, not addressed. Pick up only if asked.
+
+   a) QMailDashboard.css:5 dead `--font-size-base` alias
+      Used to be load-bearing for App.css and AccountPane.css. Both
+      consumers were migrated off in the 2026-05-24 bugfix pass.
+      The alias now has zero external consumers. Safe to delete.
+      Details: opu.E-track-review.txt §E12.
+
+   b) !important reduction in ServiceSelectionScreen.css (60) and
+      App.css (38)
+      These are the two non-themes-css concentrations of !important.
+      Already on the Phase 5 punted-cleanup list per
+      opu.session-handoff-2026-05-24.txt §Phase 5. Both are
+      layered-overrides hacks that pre-date the primitive/token
+      system and should be tractable now.
+
+   c) App.css :549-560 !important block
+      Specifically called out in the 2026-05-24 handoff as a Phase 5
+      candidate. May have already been removed in the E6 App.css
+      reduction (726 → 243 lines); verify against current file before
+      doing anything.
+
+   d) fadeIn / popIn keyframe-name collision audit
+      Phase 5 plan item. Same NAME in different files means different
+      SHAPES. Now that BEM block names exist for every file, the
+      keyframes can probably be renamed (e.g. auth-popIn, export-popIn)
+      and either kept per-file or extracted to primitives.css.
+
+   e) Backup-document inline presentation in
+      DicewarePasswordCreator.jsx
+      The exported HTML/print template strings contain literal
+      presentation values inside generated document markup. Out of E10
+      scope. Would need its own ticket if anyone wants those moved
+      into app CSS.
+
+5. PHASE 5 PROPER (post-DONE)
+   Once everything is DONE, the Phase 5 plan items in
+   opu.session-handoff-2026-05-24.txt are next. Not urgent; tracks
+   that should not be revisited until E1-E22 are all DONE.
+
+================================================================================
+WORKING-TREE STATE AT HANDOFF
+================================================================================
+
+Expect roughly:
+  - All E-track CSS/JSX files modified but uncommitted.
+  - This handoff doc (uncommitted).
+  - docs/theme.status.txt, docs/theme.smoke-test.md,
+    docs/opu.E-track-review.txt all modified but uncommitted.
+  - docs/opu.bugs.txt modified (out-of-scope finding appended this
+    session).
+  - .claude/settings.local.json modified (recurring cross-session
+    drift, not Opu's scope).
+  - Untracked files: bugfix-log.2026-05-24.txt, several gem.*, gpt.*,
+    and opu.bug-fix-phase.* files from the parallel bug-fix track —
+    NOT Opu's scope unless asked.
+  - The raidax C files in the parent C/raidax directory may show
+    modifications — that's parallel C work and out of scope.
+
+Run `git status --short` before any staging to confirm the current
+shape. Never `git add .`.
+
+================================================================================
+PATTERNS WORTH KNOWING (carry-overs from this session)
+================================================================================
+
+1. **The REVIEWED-status convention.**
+   Status row format that worked across E1-E12:
+     E#  REVIEWED  gpt  <file path/desc> (opu YYYY-MM-DD; visual smoke pending)  <line-count>
+   The "Last updated" line names what changed (e.g., "E# reviewed:
+   G1/G2/G3 + JSX pass").
+
+2. **GPT writes "repo gates passed", normalize to "opu gates passed".**
+   GPT consistently writes "repo gates passed" in status rows. It's a
+   label preference, not a substantive disagreement. Normalize during
+   the flip-to-REVIEWED step. (Saw this on E1, E3, E4, E5 over the
+   session.)
+
+3. **GPT often bundles structural improvements into Phase 4 rename
+   passes.** Across E1-E12, GPT routinely caught and fixed: dead-code
+   deletions, missing-token correctness bugs (e.g. --accent-danger
+   undefined on E7), inline-style→class refactors (E3 file-input, E5
+   COMING_SOON_BADGE_STYLE, E11 avatar tones). All were net wins.
+   Don't push back on these; the rename pass is the right place to
+   surface and fix this kind of adjacent rot.
+
+4. **Avatar-tone pattern for per-instance variation under the
+   no-inline-style gate.** Saved as a memory:
+     feedback_qmail_gui_inline_style_alternatives.md
+   Summary: prefer a deterministic modifier-class palette
+   (.block__el--tone-0 ... --tone-N) over either inline style or the
+   §13.6 custom-property exception when per-instance visual variation
+   comes from a discrete palette rather than a continuous value.
+
+5. **State-class localization is a real structural improvement.**
+   `loading-state`, `empty-state`, `error-message`, `form-group` used
+   to be generic cross-cutting classes. Phase 4 migrated each to
+   block-local equivalents (`__loading-state`, `__empty-state`, etc.).
+   Applied on E5, E9, E11, E12. The codebase no longer depends on
+   these generic class names.
+
+6. **Cross-component renames are tractable in a single pass.** E8
+   renamed ComposeModal's base classes AND rewired AddContactModal.jsx
+   (its shared-base consumer) in the same pass. Did not break. Same
+   approach is safe for any future shared-base rename.
+
+================================================================================
+KEY REFERENCE DOCS — quick index
+================================================================================
+
+Status / acceptance:
+  docs/theme.status.txt              authoritative track tracker
+  docs/theme.smoke-test.md           visual smoke checklist (PENDING gate)
+
+Per-track handoffs from GPT this session (read if context needed):
+  docs/gpt.E1-...                    not written; user just announced
+                                     it in the chat
+  docs/gpt.E3-authenticate-handoff-2026-05-25.txt
+  docs/gpt.E4-locker-handoff-2026-05-25.txt
+  docs/gpt.E5-account-pane-handoff-2026-05-25.txt
+  docs/gpt.E6-app-shell-handoff-2026-05-25.txt
+  docs/gpt.E7-service-selection-handoff-2026-05-25.txt
+  docs/gpt.E8-compose-modal-handoff-2026-05-25.txt
+  docs/gpt.E9-email-list-pane-handoff-2026-05-25.txt
+  docs/gpt.E10-diceware-password-creator-handoff-2026-05-25.txt
+  docs/gpt.E11-contacts-pane-handoff-2026-05-25.txt
+  docs/gpt.E12-qmail-dashboard-handoff-2026-05-25.txt
+  docs/gpt.E-track-bugfix-handoff-2026-05-24.txt
+
+Opu cumulative review:
+  docs/opu.E-track-review.txt        every E-track gate-pass result
+
+Pre-Phase-4 reference (mostly superseded but useful):
+  docs/opu.session-handoff-2026-05-24.txt
+  docs/opu.css-refactor.txt
+  docs/opu.css-phase3-plan.md
+
+================================================================================
+HOW TO PICK UP IN A NEW SESSION
+================================================================================
+
+Your context will be empty. Catch up in this order:
+
+  1. Read THIS file end-to-end.
+  2. Read docs/theme.status.txt to see the current row states.
+  3. Read the last few sections of docs/opu.E-track-review.txt
+     (the "Phase 4 batch milestone" summary at the bottom is the
+     fastest way to grasp where things stand).
+  4. Read docs/theme.smoke-test.md to see what visual smoke looks like.
+  5. Auto-memory at:
+     C:\Users\User\.claude\projects\D--code-src-C-raidax\memory\
+     The relevant memories are:
+       - project_qmail_gui_css_refactor.md
+       - project_qmail_gui_dirty_tree.md
+       - project_qmail_gui_multimodel_delegation.md
+       - feedback_qmail_gui_inline_style_alternatives.md
+     The MEMORY.md index has the pointer list and is auto-loaded into
+     your context.
+
+After that: ASK THE USER which of the remaining work items they want
+to tackle. Default suggestion: (1) E22 gate sweep, then (2) visual
+smoke, then (3) commit. Do NOT start visual smoke yourself — Opu
+cannot inspect the running app; that's the user's responsibility.
+
+================================================================================
+END
+================================================================================

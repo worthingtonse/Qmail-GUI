@@ -1,0 +1,68 @@
+E6 APP SHELL HANDOFF FOR OPUS
+Date: 2026-05-25
+Author: GPT
+
+Scope of this pass
+- Complete the full Phase 4 E6 pass for the app shell surface.
+- This includes the app-shell BEM migration, the literal/token sweep, the JSX inline-style cleanup, and the planned extraction of the update modal into its own stylesheet.
+
+Files changed
+1. src/App.css
+   - Replaced the `.App` surface with `.app-shell` and added `app-shell__loading*` classes for the loading state that previously used inline styles.
+   - Kept the still-live shared utility blocks (`glass-container`, `glass-ripple`, `glass-sound-btn`) and removed stale shell drift from the old file.
+   - Left only the app-shell/shared-utility surface in this file after moving the update modal styles out.
+
+2. src/UpdateModal.css
+   - Extracted the update-modal surface into its own stylesheet as planned for E6.
+   - Renamed the modal subtree to `update-modal__*` with `/* was: ... */` markers across the renamed selectors.
+   - Removed raw `rgba(...)` literals and raw `font-size: <literal>` declarations from the extracted modal surface.
+
+3. src/App.jsx
+   - Imported `./UpdateModal.css`.
+   - Updated the app shell wrapper from `App` to `app-shell`.
+   - Replaced the loading-screen inline styles with `app-shell__loading*` classes.
+   - Renamed the update modal JSX wiring to the new `update-modal__*` classes.
+
+4. docs/theme.status.txt
+   - Moved E6 to `IN REVIEW` and updated the tracker stamp.
+
+What I explicitly verified
+- `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/App.css src/UpdateModal.css`
+  - Expected and observed: no matches
+- `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/App.css src/UpdateModal.css`
+  - Expected and observed: no matches
+- `rg 'style=\{\{|style=\{' src/App.jsx`
+  - Expected and observed: no matches
+- `npm run lint`
+- `npm run test`
+- `npm run build`
+
+What Opus should review
+1. Re-run the Phase 4 CSS gates
+   - `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/App.css src/UpdateModal.css`
+   - `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/App.css src/UpdateModal.css`
+   - Expected: no matches
+
+2. Re-check the JSX inline-style gate
+   - `rg 'style=\{\{|style=\{' src/App.jsx`
+   - Expected: no matches
+
+3. Re-check the rename wiring
+   - `rg 'className="App"|className="update-modal-overlay"|className="update-modal-header"|className="update-icon"|className="update-modal-close"|className="update-modal-content"|className="update-message"|className="update-version-info"|className="version-row"|className="version-label"|className="version-value"|className="update-description"|className="update-modal-actions"|className="update-download-btn"|className="update-later-btn"' src/App.jsx`
+   - Expected: no matches
+   - `rg '^\.(App|update-modal-overlay|update-modal-header|update-icon|update-modal-close|update-modal-content|update-message|update-version-info|version-row|version-label|version-value|update-description|update-modal-actions|update-download-btn|update-later-btn)\b' src/App.css src/UpdateModal.css`
+   - Expected: no matches
+   - `rg '^\.(app-shell|app-shell__loading|app-shell__loading-icon|app-shell__loading-message|update-modal|update-modal__overlay|update-modal__header|update-modal__icon|update-modal__close|update-modal__content|update-modal__message|update-modal__version-info|update-modal__version-row|update-modal__version-label|update-modal__version-value|update-modal__version-value--highlight|update-modal__description|update-modal__actions|update-modal__download-button|update-modal__later-button)\b' src/App.css src/UpdateModal.css`
+   - Expected: matches on the renamed selectors
+
+4. Re-check tracker state
+   - Review `docs/theme.status.txt` around E4-E7
+   - Expected:
+     - E1-E5 are `REVIEWED`
+     - E6 is `IN REVIEW`
+     - E7 remains `OPEN`
+
+Notes
+- The update modal is now split into `src/UpdateModal.css`, but the JSX still lives in `App.jsx`; this pass only extracted the stylesheet, not the component.
+- The live shared utility blocks stayed in `App.css` because they still have active consumers outside the app shell surface.
+- Visual smoke is still pending for this track.

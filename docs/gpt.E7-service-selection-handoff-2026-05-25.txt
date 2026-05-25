@@ -1,0 +1,72 @@
+E7 SERVICESELECTIONSCREEN HANDOFF FOR OPUS
+Date: 2026-05-25
+Author: GPT
+
+Scope of this pass
+- Complete the full Phase 4 E7 pass for `ServiceSelectionScreen`.
+- This includes the screen-surface BEM migration, the literal/token sweep, the JSX cleanup, and pruning stale CSS drift that no longer has a live JSX consumer.
+
+Files changed
+1. src/screens/ServiceSelectionScreen.css
+   - Reworked the file around the `service-selection-screen` block and renamed the live surface to `service-selection-screen__*`.
+   - Added `/* was: ... */` markers across the renamed selectors.
+   - Removed raw `rgba(...)` literals and raw `font-size: <literal>` declarations.
+   - Removed stale dead drift that no longer has a JSX consumer:
+     - `maintenance-footer`
+     - `maintenance-tag`
+     - `maintenance-text`
+     - `email-input-wrapper`
+     - `email-address-input`
+     - `email-domain`
+   - Collapsed the duplicated icon/header styling into one tokenized block.
+   - Normalized the error states onto live shared tokens (`--accent-error`, `--status-error-bg`) instead of the old undefined `--accent-danger` usage in this screen.
+
+2. src/screens/ServiceSelectionScreen.jsx
+   - Updated the component to the new `service-selection-screen__*` class names.
+   - Renamed the initial action buttons, local-identity notices, locker import state, and decorative envelope subtree to the new block-local names.
+   - Removed the stale `address-input` reference from the `currentStep` comment to match the real live flow.
+   - Kept the existing functional logic intact; this pass is about the E7 surface, not changing onboarding behavior.
+
+3. docs/theme.status.txt
+   - Moved E7 to `IN REVIEW` and updated the tracker stamp.
+
+What I explicitly verified
+- `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/screens/ServiceSelectionScreen.css`
+  - Expected and observed: no matches
+- `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/screens/ServiceSelectionScreen.css`
+  - Expected and observed: no matches
+- `rg 'style=\{\{|style=\{' src/screens/ServiceSelectionScreen.jsx`
+  - Expected and observed: no matches
+- `npm run lint`
+- `npm run test`
+- `npm run build`
+
+What Opus should review
+1. Re-run the Phase 4 CSS gates
+   - `rg '#[0-9a-fA-F]{3,8}\b|rgba\(' src/screens/ServiceSelectionScreen.css`
+   - `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/screens/ServiceSelectionScreen.css`
+   - Expected: no matches
+
+2. Re-check the JSX inline-style gate
+   - `rg 'style=\{\{|style=\{' src/screens/ServiceSelectionScreen.jsx`
+   - Expected: no matches
+
+3. Re-check the rename wiring
+   - `rg 'className="service-selection-buttons"|className="local-identity-check"|className="local-identity-error"|className="buy-locker-hint"|className="service-button existing-identity"|className="service-button qmail"|className="service-button wallet"|className="service-button-content"|className="service-button-icon"|className="locker-input-section"|className="locker-code-label"|className="locker-code-input"|className="locker-progress"|className="progress-text"|className="locker-error"|className="locker-error-retry"|className="locker-actions"|className="locker-help-text"|className="service-selection-container"|className="service-icon-header"|className="main-service-icon"|className="encrypted-envelopes"|className="envelope-3d"|className="envelope-body"|className="envelope-flap"|className="envelope-lock"|className="encryption-badge"|className="encryption-particles"|className="particle"' src/screens/ServiceSelectionScreen.jsx`
+   - Expected: no matches
+   - `rg '^\.(service-selection-container|service-icon-header|main-service-icon|service-selection-buttons|local-identity-check|local-identity-error|buy-locker-hint|service-button|service-button-content|service-button-icon|locker-input-section|locker-code-label|locker-code-input|locker-progress|progress-text|locker-error|locker-error-retry|locker-actions|locker-help-text|encrypted-envelopes|envelope-3d|envelope-body|envelope-flap|envelope-lock|encryption-badge|encryption-particles|particle)\b' src/screens/ServiceSelectionScreen.css`
+   - Expected: no matches
+   - `rg 'email-input-wrapper|email-address-input|email-domain|maintenance-footer|maintenance-tag|maintenance-text' src/screens/ServiceSelectionScreen.css src/screens/ServiceSelectionScreen.jsx`
+   - Expected: no matches
+
+4. Re-check tracker state
+   - Review `docs/theme.status.txt` around E5-E8
+   - Expected:
+     - E1-E6 are `REVIEWED`
+     - E7 is `IN REVIEW`
+     - E8 remains `OPEN`
+
+Notes
+- The root block stays `service-selection-screen`; the E7 rename work is the interior surface and modifiers.
+- The decorative envelope art is still present, but it now lives under the same block-local naming scheme as the rest of the screen.
+- Visual smoke is still pending for this track.
