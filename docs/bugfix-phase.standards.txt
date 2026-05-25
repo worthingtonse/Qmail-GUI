@@ -1,0 +1,364 @@
+QMail-GUI bug-fix phase — shared operating standards
+=====================================================
+Author:  Claude Opus 4.7 (reconciling opu/gpt/gemini handoffs)
+Date:    2026-05-24
+Audience: Any model (Claude, GPT, Gemini, or other) doing
+          bug-fix work during the manual GUI testing phase.
+
+Why this file exists
+--------------------
+Three parallel handoffs (opu.bug-fix-phase.handoff.txt,
+gpt.manual-bugfix-testing.handoff.txt, gemini.bug-fix-handoff.txt)
+each prescribed slightly different operational details — fix-log
+filenames, commit cadence, pre-commit gates, bug-numbering schemes,
+rebuild flow, triage thresholds. Different models following
+different rules produces an inconsistent repo and makes review
+harder for Sean.
+
+This document is the SINGLE source of truth for those operational
+details. Where it conflicts with any individual handoff, this
+document wins. The model-specific handoffs remain useful for
+their own context, rationale, and rig state — but for the items
+listed below, follow this file.
+
+If you (a model) think one of these standards is wrong, propose
+the change to Sean — don't silently deviate.
+
+
+==========================================================
+STANDARD 1 — Fix log: one shared file, all models write here
+==========================================================
+
+File: docs/bugfix-log.2026-05-24.txt
+
+All models append to the SAME file. No more per-model fix logs.
+This eliminates the situation where three logs each tell part of
+the story and a reviewer has to merge them mentally.
+
+If the file does not yet exist when you arrive, the first model
+to fix a bug creates it with the header below. Subsequent models
+append.
+
+File header (first creator writes this once):
+
+----8<----
+QMail-GUI manual bug-fix log — 2026-05-24 session
+==================================================
+Shared log. All models (Claude, GPT, Gemini, …) append here.
+
+Format per entry — see docs/bugfix-phase.standards.txt for the
+authoritative spec. Each entry is append-only; do not edit prior
+entries. If a fix is later reverted, add a follow-up entry.
+
+---
+----8<----
+
+Per-entry format (REQUIRED fields in this order):
+
+  ## BUG-NN — one-line summary
+  Fixed by:       <model name + version, e.g. "Claude Opus 4.7", "GPT-5", "Gemini 2.5 Pro">
+  Reported by:    Sean (manual GUI testing)
+  Severity:       HIGH / MEDIUM / LOW
+  Commit:         <git short SHA, or "uncommitted — batch pending">
+
+  **Symptom**: what Sean saw / reported.
+
+  **Root cause**: what was actually wrong. Include file:line.
+
+  **Fix**: what changed and why this is right. List touched files.
+
+  **Verification**: concrete steps a reviewer can re-run to confirm.
+
+  **Notes** (optional): related bugs, follow-ups, scope decisions,
+  anything a reviewer should know.
+
+  ---
+
+Existing per-model logs (docs/gpt.manual-bugfix-fixes.md,
+docs/opu.bug-fixes.2026-05-24.txt if created, etc.) are
+DEPRECATED for new entries. Don't write new fixes there.
+Leave any existing entries in place; don't migrate them.
+
+
+==========================================================
+STANDARD 2 — Bug numbering: continue the BUG-NN series
+==========================================================
+
+Use the existing BUG-NN sequence from docs/cla.bugs.txt. As of
+2026-05-24 the high-water mark is BUG-50, so the next bug Sean
+reports is BUG-51, then BUG-52, etc.
+
+Do NOT use BUGFIX-YYYYMMDD-NN or any other scheme. One unified
+counter across all models means cross-references in commits,
+logs, and conversation always resolve to one entity.
+
+Before assigning a number:
+  grep -E "^BUG-[0-9]+|^## BUG-" docs/cla.bugs.txt docs/bugfix-log.2026-05-24.txt 2>/dev/null
+
+Use (highest existing) + 1.
+
+If two models race and pick the same number, the second one to
+commit renumbers their entry. Detect via the grep above
+immediately before committing.
+
+
+==========================================================
+STANDARD 3 — Pre-commit gates
+==========================================================
+
+Before EVERY commit, run these from the repo root
+(D:\code\src\JavaScript\Qmail-GUI). All must pass:
+
+  1. npm run lint       # eslint --max-warnings 0
+  2. npm run build      # vite build
+  3. node --check electron.cjs
+  4. node --check preload.cjs
+
+If the touched code is covered by tests, also run:
+
+  5. npm test           # vitest run
+
+Do NOT bypass any gate. If a gate fails, fix the underlying issue.
+Never commit with --no-verify, never disable eslint rules to make
+lint pass, never skip tests by deleting them.
+
+`git diff --check` (whitespace) is recommended but not required —
+the editor and eslint catch most whitespace issues already.
+
+
+==========================================================
+STANDARD 4 — Commit cadence
+==========================================================
+
+Default: one commit per bug fix.
+
+Exception: if Sean explicitly says "batch these," group the
+related fixes into one commit. Listen for "batch", "group",
+"hold off", "wait until I've reviewed a few" — those words mean
+defer the commit.
+
+If you queue uncommitted fixes:
+  - Mark the fix's Commit: field in the log as
+    "uncommitted — batch pending"
+  - When you eventually commit the batch, edit each affected log
+    entry to fill in the real SHA (this is the ONE allowed edit
+    to past log entries — filling in a previously-pending SHA).
+
+Never commit unrelated dirty files. Before commit:
+
+  git status --short
+  git diff --stat
+
+If there are dirty files outside your fix's scope, stage only
+your fix's files (`git add <specific paths>`), never `git add -A`
+or `git add .`. If you're unsure whether a dirty file belongs in
+your commit, ASK Sean.
+
+
+==========================================================
+STANDARD 5 — Commit message shape
+==========================================================
+
+  fix(BUG-NN): one-line summary (<= 70 chars)
+
+  2-3 sentence body: what was wrong, what changed, why this is
+  the right fix. Reference file:line if localized.
+
+  Co-Authored-By: <Model Name + Version> <noreply@anthropic.com>
+
+Examples:
+  Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+  Co-Authored-By: GPT-5 <noreply@openai.com>
+  Co-Authored-By: Gemini 2.5 Pro <noreply@google.com>
+
+For a batched commit covering multiple bugs:
+
+  fix(BUG-NN, BUG-MM): short combined summary
+
+  - BUG-NN: <one-line>
+  - BUG-MM: <one-line>
+
+  <optional shared rationale paragraph if they fixed a common root cause>
+
+  Co-Authored-By: …
+
+
+==========================================================
+STANDARD 6 — Triage threshold (when to ask first)
+==========================================================
+
+Fix immediately, no confirmation needed:
+  - Typos, wrong className, missing aria-label
+  - Off-by-one in copy / labels
+  - Obvious one-line correctness fix (null check, missing await,
+    wrong variable name) that touches one file and doesn't change
+    behavior beyond the bug
+
+Post a ONE-LINE plan and wait for Sean's "go":
+  - Touches state or effects
+  - Touches multiple files
+  - Changes user-visible behavior beyond fixing the reported bug
+  - Alters an API call (signature, payload, endpoint)
+  - Touches src/services/qmailApiServices.js
+  - Touches electron.cjs / preload.cjs (IPC surface)
+  - Any change you would want a code reviewer to think hard about
+
+Plan format:
+  "Plan: <what>, touches <files>. OK?"
+
+When in doubt, ask. The cost of a one-line confirmation is
+~5 seconds. The cost of fixing the wrong thing is a revert plus
+Sean's time.
+
+
+==========================================================
+STANDARD 7 — Backend-blocked bugs (CORE-* tickets)
+==========================================================
+
+When a bug Sean reports has its root cause in the rest_core
+backend (not the GUI), DO NOT hack around it in the GUI. Tell
+Sean explicitly: "This is CORE-X, blocked on backend ticket
+docs/opu.fix<NN>.core-<x>.ticket.txt."
+
+Known backend-blocked surfaces as of 2026-05-24:
+
+  CORE-A  Sent folder persistence (no ticket file)
+  CORE-E  Detailed send-progress stages — docs/opu.fix26.core-e.ticket.txt
+  CORE-H  Drafts source cleanup + deleteDraft — docs/opu.fix23.core-h.ticket.txt
+  CORE-J  Starred filter — docs/opu.fix18.core-j.ticket.txt
+  CORE-K  Search has_more / pagination beyond cap — docs/opu.fix25-bug46.core-k.ticket.txt
+  CORE-L  Draft recipient detail (no ticket yet)
+  CORE-M  Attachment paths with ',' or ';' rejected (no ticket yet)
+  CORE-N  Draft attachment persistence (no ticket yet)
+
+If a bug Sean reports turns out to need a new CORE-* ticket,
+append a note to docs/opu.note-to-backend.txt rather than
+creating a parallel ticket file. Only create a new ticket file
+if Sean asks for one.
+
+
+==========================================================
+STANDARD 8 — Test rig (where the GUI is being exercised)
+==========================================================
+
+Sean's rig: E:\Client1\ and E:\Client2\ (the existing folders).
+Do NOT create fresh dated rigs under E:\QMail-Smoke\<date>\.
+That was proposed by two of the handoffs but Sean has already
+chosen to reuse the funded rig — see opu.smoke-test.checklist.txt
+PART 0 for the topology.
+
+If a rebuild changes the rig setup (e.g. core.exe version), say
+so explicitly when reporting back to Sean so he knows to relaunch.
+
+
+==========================================================
+STANDARD 9 — Rebuilding QMail.exe (when, how, what to record)
+==========================================================
+
+You do NOT need to rebuild QMail.exe after every GUI fix. Most
+GUI fixes can be verified in dev mode (npm run dev / dev2).
+
+Rebuild ONLY when:
+  - Sean asks for a retest build, OR
+  - A fix unblocks testing of other bugs (e.g. fixed a crash that
+    prevented reaching downstream screens), OR
+  - The fix touched packaged-only code (electron.cjs main process,
+    preload, electron-builder config, bundled resources)
+
+When you rebuild:
+
+  1. Confirm the latest core.exe source. Default is E:\core.exe
+     after rest_core CMake build. If multiple candidates exist
+     (E:\Client2\core.exe, E:\opu\core.exe, E:\gem\core.exe,
+     E:\gpt\core.exe, …) ASK Sean which is authoritative.
+  2. Copy it into the bundle:
+       Copy-Item -LiteralPath '<confirmed-path>' `
+                 -Destination 'backend\core.exe' -Force
+  3. Run all gates from STANDARD 3.
+  4. Build:
+       npm run build-portable
+  5. Confirm release\QMail.exe was produced. Record:
+       - source core.exe path + size + LastWriteTime
+       - new QMail.exe size + LastWriteTime
+     in the fix log entry under **Verification**.
+  6. If Sean wants the rig refreshed, copy QMail.exe into
+     E:\Client1\ and E:\Client2\ (or whatever path Sean specifies).
+     Do NOT overwrite Client_Data folders.
+
+If a fix changes rest_core source, compile rest_core FIRST,
+let it produce the new core.exe at E:\core.exe (per CMake
+post-build), then proceed with step 1.
+
+
+==========================================================
+STANDARD 10 — Out-of-scope findings
+==========================================================
+
+If while tracing a bug you notice something else wrong, DON'T
+bundle it into the current fix. Two options:
+
+  a. If it's clearly a bug: tell Sean ("Also noticed: <one-line>.
+     File a separate BUG?") and let him decide whether to add it
+     to the queue.
+  b. If it's a code-quality nit (not a bug): mention it briefly
+     but don't act. The bug-fix phase is not a refactor phase.
+
+For findings Sean confirms as bugs but doesn't want fixed right
+now, append to docs/cla.bugs.txt with the next BUG-NN and
+"Status: deferred."
+
+
+==========================================================
+STANDARD 11 — Don't touch parallel workstreams
+==========================================================
+
+These are owned by other models / phases. Don't modify their
+files unless Sean explicitly asks:
+
+  - CSS refactor: BEM-style renames, palette tokenization,
+    anything under src/styles/ that looks like a systematic
+    rename. See docs/opu.css-refactor.txt and the
+    docs/opu.gpt-handoff-css-phase*.txt series.
+  - Theme work: docs/theme.*.md and docs/*.theme.*.txt.
+  - rest_core source (D:\code\src\C\rest_core or wherever): NOT
+    your scope. Route to a CORE-* ticket instead.
+
+If a bug fix legitimately requires touching CSS, do the minimum
+needed — don't refactor surrounding styles to match a different
+naming convention.
+
+
+==========================================================
+STANDARD 12 — Communication style with Sean
+==========================================================
+
+Per Sean's stated preference:
+  - Terse output. No trailing summaries of "what I just did."
+  - State decisions directly. Don't narrate deliberation.
+  - When asking for confirmation, ONE line. Not three.
+  - When reporting a fix done, name the BUG-NN and the commit
+    SHA. Sean reads the log for details.
+
+
+==========================================================
+What this document does NOT govern
+==========================================================
+
+  - Each model's own session strategy, task-tracking, internal
+    note-taking. Use your own tools/skills as you prefer.
+  - Conversation tone within a session beyond Sean's stated
+    preferences (STANDARD 12).
+  - Anything in the smoke-test checklist itself
+    (docs/opu.smoke-test.checklist.txt) — that document remains
+    the source of truth for what's being tested and the
+    PART 0 / PART 1 / PART 2 split.
+  - Rig topology, port assignments, identity SNs — those live
+    in docs/opu.smoke-test.handoff.txt.
+
+If Sean updates a standard verbally during a session, update
+this file at the end of that session (or before exit handoff)
+so the next model inherits the new standard. Bump the date at
+the top when you edit.
+
+
+End of standards.

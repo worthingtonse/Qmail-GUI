@@ -1,0 +1,225 @@
+QMail-GUI manual bug-fix log — 2026-05-24 session
+==================================================
+Shared log. All models (Claude, GPT, Gemini, …) append here.
+
+Format per entry — see docs/bugfix-phase.standards.txt for the
+authoritative spec. Each entry is append-only; do not edit prior
+entries. If a fix is later reverted, add a follow-up entry.
+
+---
+
+## BUG-51 — QMail.exe single-file launch + CLI flags
+Fixed by:    Claude Opus 4.7 (1M context)
+Reported by: Sean (manual GUI testing)
+Severity:    HIGH
+Commit:      uncommitted — pending Sean approval
+
+**Symptom**: Sean launched E:\Client3\QMail.exe (5/22/2026 build)
+and the expected Client_Data folder structure never appeared next
+to QMail.exe. Suspected a stale build but also wanted a real
+single-file distribution where you don't have to drop core.exe
+next to QMail.exe, plus CLI control over the backend port,
+core debug logging, and the dev-only RAIDA-11 LAN override.
+
+**Root cause**: Two issues stacked:
+
+  1. The 5/22 E:\Client3\QMail.exe predates current main and
+     was definitely stale.
+  2. Even on current main, electron.cjs only recognized `--dev`.
+     There was no way to ask for a specific port, no way to
+     forward core.exe's `-debug` or `-r11ip` flags, and no
+     `--help`. core.exe (rest_core/api_src/main_rest.c:437-456)
+     accepts all three; QMail.exe just never passed them.
+
+  Note: core.exe is already bundled inside QMail.exe via
+  electron-builder's extraResources (electron-builder.config.cjs:
+  45-48), and core's cwd is set to PORTABLE_EXECUTABLE_DIR
+  (electron.cjs:62-64) so Client_Data lands next to QMail.exe.
+  Those mechanisms were correct on current main; the stale build
+  was the entire reason Sean couldn't see the folder.
+
+**Fix**: Three changes across two repos.
+
+  1. D:\code\src\C\rest_core\CMakeLists.txt
+     - Added kill-by-name (QMail, core) to kill_test_ports.cmake
+       PRE_LINK so the post-build mirror can overwrite locked
+       binaries when a client is running.
+     - Added one more post-build mirror destination:
+         D:/code/src/JavaScript/Qmail-GUI/backend/core.exe
+       So a `cmake --build build` against rest_core now keeps the
+       GUI's bundled core.exe automatically in sync.
+
+  2. D:\code\src\JavaScript\Qmail-GUI\electron.cjs
+     - Added parseQMailArgs() with GNU-style long options:
+         --port <N>      pin backend HTTP port (1..65535)
+         --debug         forward -debug to core.exe
+         --r11ip         forward -r11ip to core.exe (dev only)
+         --dev           (existing) Vite dev-server mode
+         --help, -h      print usage + examples, exit 0
+         --version, -V   print app version, exit 0
+     - Unknown options print "QMail: unrecognized option …" +
+       usage on stderr, exit 2.
+     - Malformed --port value prints "QMail: invalid port …" +
+       usage on stderr, exit 2 (no silent fallback — if you
+       specified a port, you wanted THAT port).
+     - boot() uses qmailArgs.port when present, else
+       findFreePort() (unchanged default).
+     - startBackend() builds core's argv from qmailArgs and
+       logs the resolved vector for debuggability.
+     - DevTools left at Electron's default behavior — F12 /
+       Ctrl+Shift+I work as usual; --debug does NOT auto-open
+       DevTools (per Sean A5).
+
+  3. D:\code\src\JavaScript\Qmail-GUI\backend\core.exe
+     - Refreshed to today's 5/24 build via CMake post-build
+       mirror. Size 3023975, LastWriteTime 2026-05-24 14:39:06.
+
+**Verification**:
+  Build chain executed in order:
+    a. cmake -B build -S . in rest_core            — OK
+    b. cmake --build build --config Release        — OK (killed
+       stale QMail PIDs 12892/21092/31484/31852/33368 and core
+       PID 15548; mirrored to all 6 destinations including
+       Qmail-GUI/backend)
+    c. npm run lint                                 — OK (0 warns)
+    d. npm run build                                — OK (vite)
+    e. node --check electron.cjs / preload.cjs      — OK
+    f. npm run build-portable                       — OK
+       release/QMail.exe = 60939592 B, 2026-05-24 14:41:28
+    g. Copied release/QMail.exe → E:\Client3\QMail.exe — OK
+
+  Manual smoke (Sean to run):
+    1. Launch E:\Client3\QMail.exe with no args. Confirm
+       Client_Data\ folder appears next to QMail.exe and GUI
+       reaches the first usable screen.
+    2. Launch with `--help` → usage prints, app exits 0.
+    3. Launch with `--port 8081`. Confirm electron log says
+       "Using explicit port: 8081" and the GUI URL contains
+       backendPort=8081.
+    4. Launch with `--debug --r11ip`. Confirm electron log says
+       "Backend args: -port <N> -debug -r11ip" and that
+       core.exe prints "Debug mode: ENABLED" + a RAIDA-11
+       override line.
+    5. Launch with `--foo` → "QMail: unrecognized option '--foo'"
+       on stderr, app exits 2.
+    6. Launch with `--port 99999` → "invalid port" error, exit 2.
+
+**Notes**:
+  - Sean asked whether the `-r11ip` flag is still needed since
+    RAIDA 11 was moved to a different network. I cannot test
+    network connectivity from here; the flag is kept (zero cost
+    to retain, real cost to re-add later). Sean's manual smoke
+    will reveal whether unflagged launches reach RAIDA 11 — if
+    yes, the flag becomes a no-op convenience.
+  - Self-extracting core.exe as a visible sibling of QMail.exe
+    (Gemini's proposed approach) was explicitly rejected by
+    Sean — core.exe stays inside the portable extraction.
+  - Companion docs: docs/opu.bug.fix.ideas.txt has the deeper
+    rationale and the cross-model review of Gemini's and GPT's
+    proposals for this bug. docs/gem.bug.fix.ideas.txt and
+    docs/gpt.bug.fix.ideas.txt have the other models' takes.
+  - This commit touches the GUI repo only. The rest_core
+    CMakeLists.txt change is in a separate repo and ships as a
+    separate commit per STANDARD 4.
+
+---
+
+## BUG-52 — Client_Data created in temp dir, not next to QMail.exe
+Fixed by:    Claude Opus 4.7 (1M context)
+Reported by: Sean (manual GUI testing, follow-up to BUG-51)
+Severity:    HIGH
+Commit:      uncommitted — pending Sean approval
+
+**Symptom**: After BUG-51 fix, launching QMail.exe still did not
+produce a Client_Data folder next to QMail.exe. Each launch
+started fresh — no persistence of wallets, mail, or settings
+across QMail.exe restarts.
+
+**Root cause**: core.exe uses GetModuleFileNameA(NULL) at
+rest_core/api_src/config.c:794-808 to find its own binary
+location, then synthesizes <exe-dir>/Client_Data from that.
+
+In an electron-builder portable bundle, the bundled core.exe is
+extracted to a per-launch temp directory like
+C:\Users\<u>\AppData\Local\Temp\<guid>\resources\backend\core.exe.
+core.exe was creating Client_Data NEXT TO ITS RUNTIME BINARY —
+i.e. inside that temp dir — and electron-builder's portable
+wrapper deletes the entire temp extraction on app quit, taking
+the Client_Data with it. Sean's data was being created and
+silently destroyed each session.
+
+electron.cjs was setting cwd to PORTABLE_EXECUTABLE_DIR (the
+visible folder next to QMail.exe), but core.exe doesn't use cwd
+for Client_Data placement — only the binary's path. So the cwd
+hint was ignored.
+
+GPT independently diagnosed this from the GetModuleFileNameA
+call site while reviewing BUG-51. Credit to them.
+
+**Fix**: Add a `-data-dir <path>` flag to core.exe and have
+QMail.exe pass the visible portable folder through it. core.exe
+already had the override mechanism (config.c:805 only synthesizes
+the default when client_data_path is empty); just needed a CLI
+flag to set it.
+
+  1. rest_core/api_src/main_rest.c
+     - Added `-data-dir <path>` / `--data-dir <path>` to
+       parse_arguments(). Pre-populates g_config.client_data_path
+       with "<path>/Client_Data" so config.c:805 sees a non-empty
+       value and skips the GetModuleFileNameA-derived default.
+     - Added line to print_usage() and the --help output.
+     - Removed the now-incorrect "Client_Data directory is always
+       created next to the executable" note from print_usage().
+
+  2. rest_core/api_src/config.c — NO change needed.
+     bootstrap_create_client_data_directories() already calls
+     create_directory_recursive() which does mkdir -p. If the
+     parent path doesn't exist (rare but possible if user passed
+     a fresh portable path), it gets created. Good.
+
+  3. Qmail-GUI/electron.cjs
+     - startBackend() builds coreArgs with '-data-dir', dataDir
+       inserted after -port. dataDir is the same value already
+       used for cwd (PORTABLE_EXECUTABLE_DIR with fallback to
+       dirname(app.getPath('exe'))). One line added; cwd left
+       in place as defense-in-depth.
+
+**Verification**:
+  Build chain executed:
+    a. cmake --build build --config Release (rest_core)   PASS
+       - Mirrored new core.exe to all 6 destinations
+    b. npm run lint                                         PASS
+    c. node --check electron.cjs / preload.cjs              PASS
+    d. npm run build-portable                               PASS
+       release/QMail.exe = 60,938,666 B, 2026-05-24 23:45:08
+    e. Copy release/QMail.exe → E:\Client3\QMail.exe        PASS
+
+  Manual smoke (Sean to run):
+    1. Delete E:\Client3\Client_Data\ if present (clean slate).
+    2. Launch E:\Client3\QMail.exe.
+    3. Confirm E:\Client3\Client_Data\ now EXISTS with
+       subfolders (Wallets, Tasks, etc.) and main.log.
+    4. Launch the app a second time. Confirm Client_Data
+       persists between launches (no data loss).
+    5. Confirm electron startup log shows
+       "Backend args: -port <N> -data-dir E:\Client3" (or
+       equivalent).
+
+**Notes**:
+  - Standalone core.exe usage is UNCHANGED. Without -data-dir,
+    config.c:805 falls back to the historical
+    <exe-dir>/Client_Data behavior. Test scripts
+    (test_qmail_e2e.py, test_qmail_phases_e2e.py) and direct
+    rest_core launches are unaffected.
+  - This bug was a latent design flaw masked until BUG-51 made
+    portable distribution viable. Pre-BUG-51, users had to put
+    core.exe manually next to QMail.exe, so the binary location
+    coincided with the visible folder and the bug never
+    surfaced.
+  - Companion doc: docs/opu.bug.fix.ideas.txt has my analysis
+    of GPT's diagnosis and the design discussion.
+  - Two commits per STANDARD 4: one for rest_core
+    (main_rest.c), one for Qmail-GUI (electron.cjs +
+    backend/core.exe refresh + log entry).
+
+---

@@ -1,0 +1,381 @@
+BUG-51 review package
+=====================
+Author:   Claude Opus 4.7
+Date:     2026-05-24
+For:      GPT (independent code review)
+Purpose:  Single document covering every change I made to fix BUG-51,
+          so GPT can review without having to piece things together
+          from the bugfix log + multiple repos.
+
+Reviewer brief
+--------------
+Sean reported BUG-51 with the goal: ship just QMail.exe (no separate
+core.exe to copy around), with CLI flags to control backend port,
+core debug logging, and the dev-only RAIDA-11 LAN IP override.
+Investigation showed core.exe was already bundled correctly via
+electron-builder's extraResources — the actual gap was that QMail.exe
+only parsed `--dev` and silently ignored any other flag. I also found
+the rest_core CMake post-build mirror was copying core.exe into the
+two test rigs (E:/Client1, E:/Client2) but NOT into the GUI repo's
+backend/ folder, so a fresh rest_core build did not propagate to the
+next QMail.exe build automatically.
+
+Scope of changes
+----------------
+TWO repos touched. ONE behavioral change each. No unrelated cleanup.
+
+  Repo 1: D:\code\src\C\rest_core (CMake build system)
+  Repo 2: D:\code\src\JavaScript\Qmail-GUI (Electron + React)
+
+Plus one refreshed binary committed alongside the GUI change:
+  backend/core.exe (now today's build via the new mirror destination)
+
+What I did NOT do (explicit non-goals for this bug)
+---------------------------------------------------
+- Did NOT implement self-extraction of core.exe next to QMail.exe.
+  Gemini proposed this; Sean explicitly rejected (core.exe stays
+  inside the portable extraction — more secure, less stale-binary
+  surface).
+- Did NOT change core.exe's CLI surface. core.exe already accepts
+  -port / -debug / -r11ip. I only made QMail.exe forward them.
+- Did NOT add `--core-debug` / `--raida11-fix` style renamed
+  aliases (GPT's proposal). Used the literal core.exe flag names
+  for 1:1 mapping — anyone who knows core.exe's CLI knows
+  QMail.exe's CLI.
+- Did NOT auto-open DevTools on --debug. Electron's default F12 /
+  Ctrl+Shift+I works without it.
+- Did NOT add `--clean` (Gemini's proposal) — meaningless without
+  self-extract.
+- Did NOT add a kill-by-name feature to QMail.exe at runtime. The
+  kill-by-name lives only in CMake pre-link, where it belongs.
+
+Decision context Sean locked in before I coded
+----------------------------------------------
+A1. The QMail.exe Sean tested (E:\Client3\, 5/22/2026) was
+    confirmed stale, so a fresh build was already needed.
+A3. core.exe does NOT need to be a visible sibling of QMail.exe.
+A4. Use GNU long-option style; add --help with examples; show
+    usage + exit on unknown flag.
+A5. No DevTools auto-open since F12 already works.
+A6. Random port when no --port given; explicit port when given.
+Q-NEW-1 (kill scope): kill ALL QMail/core processes machine-wide
+    when CMake rebuilds rest_core. Sean chose "simpler".
+Q-NEW-2 (staging): refresh only E:\Client3\QMail.exe after build.
+Q-NEW-3 (commits): two commits, one per repo, both labeled
+    fix(BUG-51).
+
+
+==========================================================
+Change 1 of 2 — D:\code\src\C\rest_core\CMakeLists.txt
+==========================================================
+Diff stats: +30 -1 (one hunk modified, one hunk extended)
+
+Two additions, both in the WIN32 branch only:
+
+Addition 1A: kill-by-name at PRE_LINK (inside kill_test_ports.cmake)
+--------------------------------------------------------------------
+The existing kill_test_ports.cmake killed processes BY PORT
+(8080/8081/8082). That misses any QMail/core launched from
+E:\Client3\ or anywhere else with a random port. I added a
+kill-by-NAME block AHEAD of the port loop:
+
+    execute_process(
+        COMMAND powershell -NoProfile -Command
+            "foreach ($n in @('QMail','core')) {
+               Get-Process -Name $n -ErrorAction SilentlyContinue |
+                 ForEach-Object {
+                   try {
+                     Stop-Process -Id $_.Id -Force -ErrorAction Stop;
+                     Write-Host \"killed $n PID $($_.Id)\"
+                   } catch { }
+                 }
+             }"
+        OUTPUT_VARIABLE _name_out
+        ERROR_QUIET
+    )
+    if(_name_out)
+        message(STATUS "${_name_out}")
+    endif()
+
+What it does: enumerates every process named QMail or core
+(extension-insensitive on Windows), force-kills them, prints
+"killed <name> PID <pid>" for each.
+
+Why machine-wide is OK: Sean explicitly chose the simpler version.
+Trade-off: if Sean has two QMail.exe builds open and rebuilds
+rest_core, both die. Acceptable per his answer to Q-NEW-1.
+
+Why try/catch around Stop-Process: handles the race where a
+process exits between the Get-Process snapshot and the Stop-Process
+call. Silent on failure (just skips).
+
+Why -ErrorAction SilentlyContinue on Get-Process but Stop:
+Get-Process emits a non-terminating error if zero matches — that's
+expected (most of the time nothing is running). Stop-Process needs
+the explicit -ErrorAction Stop to make the catch fire.
+
+PowerShell quoting: nested triple-escape because CMake's file(WRITE)
+embeds it in a here-string that's itself inside a CMake script.
+The `\$n` / `\$_.Id` escapes the outer level; the `\\\"` escapes
+both levels. I verified by running the build: output included
+"killed QMail PID 12892" etc.
+
+Addition 1B: mirror destination for the GUI backend
+---------------------------------------------------
+The existing post-build mirror copied core.exe to:
+  E:/Client1/core.exe
+  E:/Client2/core.exe
+  E:/gem/core.exe
+  E:/gpt/core.exe
+  E:/opu/core.exe
+
+I added one more:
+  D:/code/src/JavaScript/Qmail-GUI/backend/core.exe
+
+So now `cmake --build build` in rest_core automatically refreshes
+the bundled core.exe the GUI ships, eliminating one manual copy step.
+
+The existing mirror_core.cmake script handles file locks gracefully
+(WARNING + continue on lock), so no change to it was needed.
+
+GPT review questions for Change 1
+---------------------------------
+Q1.1: Is machine-wide kill safe enough? Specifically, will it kill
+      Sean's editor, a debugger session, or other unrelated tools
+      that happen to be named "core" something? Get-Process matches
+      exact base name (no extension, no path), so this only catches
+      *.exe whose base name IS exactly "QMail" or "core" — not
+      "vscode-server-core" etc. I think that's fine, but you might
+      double-check that PowerShell's Get-Process -Name semantics
+      match what I claim.
+
+Q1.2: The PowerShell quoting is hairy. I verified by observation
+      (the build output showed correct kills) but it'd be easy to
+      regress. Worth pulling the script into a real .ps1 file
+      instead of inlining via file(WRITE)? My take: leave it,
+      since it lives next to similar inlined PowerShell that's
+      been stable.
+
+Q1.3: The new mirror destination is HARDCODED to
+      D:/code/src/JavaScript/Qmail-GUI/backend/core.exe. If
+      another developer clones rest_core to a different path,
+      their build will silently fail to update the GUI bundle
+      (just emits a WARNING via mirror_core.cmake). Acceptable
+      for Sean's single-machine setup. Should we make it
+      conditional on the directory existing? My take: no, the
+      mirror_core.cmake WARNING is enough signal.
+
+
+==========================================================
+Change 2 of 2 — D:\code\src\JavaScript\Qmail-GUI\electron.cjs
+==========================================================
+Diff stats: +92 -8 (three hunks)
+
+Three pieces:
+
+Piece 2A: new QMAIL_USAGE constant + parseQMailArgs() function
+--------------------------------------------------------------
+Inserted right after the log() helper, before findFreePort().
+Roughly 80 lines including the usage string. Pure addition.
+
+The parser:
+  - Slices argv past Electron's own args using
+    process.defaultApp ? 2 : 1. Standard Electron pattern.
+    (In a packaged build process.defaultApp is undefined/false,
+    so we start at index 1; in `electron .` dev mode it's true
+    and we start at index 2 to skip the script path.)
+  - Handles --help / -h and --version / -V first; both call
+    app.exit(0) and return null. The caller (`const qmailArgs =
+    parseQMailArgs(...) || {...}`) substitutes a default object
+    so subsequent code doesn't crash before exit completes.
+  - Three boolean flags: --dev, --debug, --r11ip.
+  - --port accepts both `--port 8081` (next arg) and
+    `--port=8081` (attached). Validates Number.isInteger and
+    range 1..65535. Bad value → "QMail: invalid port '...'" on
+    stderr + usage + app.exit(2).
+  - Unknown arg → "QMail: unrecognized option '...'" + usage +
+    app.exit(2).
+  - app.exit(2) (not process.exit) because app.exit allows
+    Electron to clean up before terminating.
+
+Piece 2B: replace `const isDev = process.argv.includes('--dev')`
+----------------------------------------------------------------
+Old code did its own scan. New code reads from the parsed result:
+  const qmailArgs = parseQMailArgs(process.argv) || { ... };
+  const isDev = qmailArgs.dev;
+
+This centralizes arg parsing in one place. The downstream `isDev`
+checks (in startBackend, createMainWindow, read-file IPC) work
+unchanged.
+
+Piece 2C: thread args into startBackend() and boot()
+----------------------------------------------------
+startBackend(port) — replaced the hardcoded args array with a
+built one:
+  const coreArgs = ['-port', String(port)];
+  if (qmailArgs.debug) coreArgs.push('-debug');
+  if (qmailArgs.r11ip) coreArgs.push('-r11ip');
+  log('Backend args: ' + coreArgs.join(' '));
+  ...spawn(backendPath, coreArgs, {...});
+
+boot() — replaced the unconditional findFreePort() call with a
+branch on qmailArgs.port:
+  if (qmailArgs.port !== null) {
+    backendPort = qmailArgs.port;
+    log('Using explicit port: ' + backendPort);
+  } else {
+    try { backendPort = await findFreePort(); ... }
+    catch (e) { ... backendPort = 8080; }
+  }
+
+When --port is set, no free-port probe — we trust Sean. If the
+port is already in use, core.exe will fail to bind and exit;
+electron.cjs logs the exit code via the existing
+backendProcess.on('exit', ...) handler. Per my plan there's no
+special "port already taken" pre-flight — keeping it simple.
+
+GPT review questions for Change 2
+---------------------------------
+Q2.1: The slice(process.defaultApp ? 2 : 1) idiom — is that
+      right for all the modes QMail can launch in? Specifically:
+      `electron .` (defaultApp=true → slice 2), packaged
+      QMail.exe (defaultApp=undefined → slice 1), and dev via
+      `electron-dev` npm script (uses `electron .` so same as
+      first). I think yes. Worth a second eye since the wrong
+      slice would either eat a real arg or process the script
+      path as a flag.
+
+Q2.2: app.exit(0) on --help/--version: any case where Electron
+      buffers stdout in a way that the usage string doesn't
+      reach the terminal before exit? On Windows this has
+      historically been a hazard. Worth changing to
+      process.exit(0) after a flush? My take: leave it; the
+      writes are sync (process.stdout.write returns true for
+      small payloads, no callback needed) and app.exit waits
+      for the current tick.
+
+Q2.3: When `--port N` is provided AND N is unavailable, core.exe
+      exits within ~1s. The Electron splash stays up, the main
+      window loads with backendPort=N in the URL, and the React
+      app tries to fetch from it — eventually times out / errors.
+      User experience is "splash → main window → broken." Not
+      great but not in scope for BUG-51. Would you file a
+      follow-up bug or add a 2-second post-spawn health check
+      now? I lean toward follow-up bug to keep BUG-51 small.
+
+Q2.4: My handling of the `out` return value when help/version
+      exits — the parser returns null, the caller does
+      `|| { port: null, debug: false, ... }`. After app.exit(0)
+      the rest of electron.cjs still runs synchronously for a
+      tick (boot() being async, the queued tasks run). Is this
+      a problem? In practice startBackend won't fire because
+      app.whenReady() resolves after the exit completes. I
+      believe this is safe but it'd be cleaner to early-return
+      before app.whenReady().then(boot). Want me to add that?
+
+
+==========================================================
+Change 3 (binary, no diff) — backend/core.exe refreshed
+==========================================================
+Path:   D:\code\src\JavaScript\Qmail-GUI\backend\core.exe
+Before: 3,023,420 bytes, LastWriteTime 2026-05-21 14:27:30
+After:  3,023,975 bytes, LastWriteTime 2026-05-24 14:39:06
+        SHA-256 not computed; same byte count + LastWriteTime
+        as E:\core.exe and E:\Client1\core.exe and
+        E:\Client2\core.exe (all written by the same CMake
+        post-build mirror in one pass).
+
+This is the binary the new mirror destination produces. It will
+ship inside the next QMail.exe build via electron-builder's
+extraResources. Source: rest_core current HEAD with my
+CMakeLists.txt change applied.
+
+
+==========================================================
+Verification I ran
+==========================================================
+All STANDARD 3 gates (docs/bugfix-phase.standards.txt):
+  npm run lint                  PASS (0 warnings)
+  npm run build                 PASS (vite, 1763 modules)
+  node --check electron.cjs     PASS
+  node --check preload.cjs      PASS
+  (npm test not run — no logic changes covered by vitest)
+
+Build chain:
+  cmake -B build -S . (rest_core)           PASS
+  cmake --build build --config Release      PASS
+    - killed 5 stale QMail PIDs and 1 stale core PID
+    - mirrored to all 6 destinations
+  npm run build-portable (Qmail-GUI)        PASS
+    - release/QMail.exe = 60,939,592 B, 14:41:28
+  Copy-Item to E:\Client3\QMail.exe         PASS
+
+Behavioral verification PENDING — Sean has not yet run the
+manual smoke. The 6 steps live in
+docs/bugfix-log.2026-05-24.txt under BUG-51 "Verification".
+
+After Sean's CSS rebuild request:
+  Lint failed once with a parse error in
+  src/wallet/components/tabs/SettingsTab.jsx (duplicated JSX
+  lines from a parallel-workstream merge). NOT my code. Sean
+  deduplicated by hand; lint, build, build-portable then passed
+  cleanly. Fresh release/QMail.exe restaged to E:\Client3\
+  (60,939,870 B, 15:54:40). CSS bundle grew ~2.4 KB,
+  JS bundle ~2.5 KB — consistent with the wallet CSS workstream
+  changes being picked up.
+
+
+==========================================================
+Files cross-reference
+==========================================================
+Hands-on changes:
+  D:\code\src\C\rest_core\CMakeLists.txt
+  D:\code\src\JavaScript\Qmail-GUI\electron.cjs
+  D:\code\src\JavaScript\Qmail-GUI\backend\core.exe  (binary, via CMake mirror)
+
+New / changed docs in this session (mine):
+  docs\bugfix-phase.standards.txt              (cross-model standards)
+  docs\bugfix-log.2026-05-24.txt               (shared log, BUG-51 entry)
+  docs\opu.bug.fix.ideas.txt                   (planning + ideas doc)
+  docs\opu.bug-51.review-package.txt           (this file)
+
+Other docs I touched (added the standards-pointer banner only,
+no other content changes):
+  docs\opu.bug-fix-phase.handoff.txt
+  docs\gpt.manual-bugfix-testing.handoff.txt
+  docs\gemini.bug-fix-handoff.txt
+
+Test rig artifact (output, not committed):
+  E:\Client3\QMail.exe (60,939,870 B, 2026-05-24 15:54:40)
+  D:\code\src\JavaScript\Qmail-GUI\release\QMail.exe (same)
+
+
+==========================================================
+What GPT should specifically look for
+==========================================================
+1. The arg parser's defaultApp logic (Q2.1). If wrong, --help
+   in a packaged build will be treated as an unknown flag.
+
+2. The PowerShell quote escaping in the CMake file(WRITE) string
+   (Q1.2). Particularly that `\$n` survives all three escape
+   layers correctly.
+
+3. Whether silently ignoring an in-use --port (Q2.3) is
+   acceptable or worth a pre-flight check now.
+
+4. The kill-by-name machine-wide scope (Q1.1) — am I missing a
+   case where it kills something legitimate?
+
+5. Anything I marked OUT OF SCOPE that you think should actually
+   be IN scope for BUG-51 specifically (not future bugs).
+
+6. Whether the bundled core.exe being refreshed automatically via
+   CMake mirror is the right design, or whether the GUI repo
+   should treat backend/core.exe as a checked-in artifact that
+   only updates on intentional `cmake install` style steps.
+
+Please flag anything substantive; I'd rather catch it before
+Sean smoke-tests than after.
+
+
+End of review package.

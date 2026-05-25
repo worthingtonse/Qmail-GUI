@@ -10,11 +10,85 @@ let mainWindow;
 let splashWindow = null;
 let backendProcess = null;
 let backendPort = 0; // resolved before the backend is spawned
-const isDev = process.argv.includes('--dev');
 
 function log(msg) {
   process.stdout.write(`[ELECTRON] ${msg}\n`);
 }
+
+// BUG-51: CLI surface for QMail.exe. Parses our own flags; everything
+// not recognized triggers usage + exit. Long-options are GNU style.
+// All flags map 1:1 to core.exe flags of the same name (defined in
+// rest_core/api_src/main_rest.c) — keep the names aligned.
+const QMAIL_USAGE =
+`Usage: QMail.exe [options]
+
+Options:
+  --port <N>      Pin backend (core) HTTP port to N (1..65535).
+                  Default: random free port.
+  --debug         Enable core.exe debug logging (forwarded as -debug).
+                  DevTools are reachable from the renderer via F12.
+  --r11ip         Forward -r11ip to core.exe — overrides RAIDA 11 to
+                  its LAN IP. Dev-only fallback for in-network testing.
+  --dev           Run against the Vite dev server at localhost:5173
+                  instead of the bundled renderer.
+  --version, -V   Print version and exit.
+  --help, -h      Print this message and exit.
+
+Examples:
+  QMail.exe                          Normal launch, random backend port.
+  QMail.exe --port 8081              Pin backend to port 8081.
+  QMail.exe --port 8082 --debug      Pin port 8082, verbose core logging.
+  QMail.exe --debug --r11ip          Debug logging + RAIDA-11 LAN override.
+
+Two instances launched without --port each get their own random port,
+so they will not conflict.`;
+
+function parseQMailArgs(argv) {
+  const out = { port: null, debug: false, r11ip: false, dev: false };
+  // argv[0] is the electron binary, argv[1] is the script path in dev.
+  // In a packaged build there's no script path arg, but slice(2) is the
+  // standard Electron convention for "args after our own".
+  // electron-builder portable also injects PORTABLE_EXECUTABLE_DIR but
+  // no extra positional args we need to skip.
+  const args = argv.slice(process.defaultApp ? 2 : 1);
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--help' || a === '-h') {
+      process.stdout.write(QMAIL_USAGE + '\n');
+      app.exit(0);
+      return null;
+    }
+    if (a === '--version' || a === '-V') {
+      process.stdout.write(`QMail ${app.getVersion()}\n`);
+      app.exit(0);
+      return null;
+    }
+    if (a === '--dev')   { out.dev   = true; continue; }
+    if (a === '--debug') { out.debug = true; continue; }
+    if (a === '--r11ip') { out.r11ip = true; continue; }
+    if (a === '--port' || a.startsWith('--port=')) {
+      const v = a.startsWith('--port=') ? a.slice(7) : args[++i];
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) {
+        process.stderr.write(`QMail: invalid port '${v}' (expected 1..65535)\n`);
+        process.stderr.write(QMAIL_USAGE + '\n');
+        app.exit(2);
+        return null;
+      }
+      out.port = n;
+      continue;
+    }
+    process.stderr.write(`QMail: unrecognized option '${a}'\n`);
+    process.stderr.write(QMAIL_USAGE + '\n');
+    app.exit(2);
+    return null;
+  }
+  return out;
+}
+
+const qmailArgs = parseQMailArgs(process.argv) || { port: null, debug: false, r11ip: false, dev: false };
+const isDev = qmailArgs.dev;
+log(`Args: port=${qmailArgs.port ?? 'random'} debug=${qmailArgs.debug} r11ip=${qmailArgs.r11ip} dev=${qmailArgs.dev}`);
 
 // Multi-instance support: ask the OS for a free TCP port. We bind a
 // throwaway server to port 0, read the port the OS assigned, then
@@ -87,8 +161,16 @@ function startBackend(port) {
     return;
   }
 
+  // BUG-52: core.exe uses GetModuleFileNameA() to locate Client_Data,
+  // which in portable mode points at Electron's temp extraction dir.
+  // Pass -data-dir explicitly so user data lands next to QMail.exe.
+  const coreArgs = ['-port', String(port), '-data-dir', dataDir];
+  if (qmailArgs.debug) coreArgs.push('-debug');
+  if (qmailArgs.r11ip) coreArgs.push('-r11ip');
+  log('Backend args: ' + coreArgs.join(' '));
+
   try {
-    backendProcess = spawn(backendPath, ['-port', String(port)], {
+    backendProcess = spawn(backendPath, coreArgs, {
       cwd: dataDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
@@ -375,12 +457,17 @@ ipcMain.handle('compose:pickFiles', async () => {
 //   4. Load the main renderer with the port in the URL.
 //   5. Splash closes when the main window's first paint fires.
 async function boot() {
-  try {
-    backendPort = await findFreePort();
-    log('Reserved port: ' + backendPort);
-  } catch (e) {
-    log('ERROR: Could not reserve a free port: ' + e.message);
-    backendPort = 8080; // fallback to historical default
+  if (qmailArgs.port !== null) {
+    backendPort = qmailArgs.port;
+    log('Using explicit port: ' + backendPort);
+  } else {
+    try {
+      backendPort = await findFreePort();
+      log('Reserved random port: ' + backendPort);
+    } catch (e) {
+      log('ERROR: Could not reserve a free port: ' + e.message);
+      backendPort = 8080; // fallback to historical default
+    }
   }
 
   createSplashWindow();

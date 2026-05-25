@@ -5,6 +5,13 @@ Date: 2026-05-24
 For:  Next Claude session that will fix bugs Sean reports from
       manual GUI testing.
 
+>>> READ FIRST: docs/bugfix-phase.standards.txt <<<
+That file is the SHARED standard for fix-log location, bug
+numbering, commit cadence, pre-commit gates, rebuild flow, and
+triage thresholds — and supersedes anything in this handoff that
+conflicts. The rest of this document remains valid for context,
+rationale, and rig state.
+
 What just happened
 ------------------
 Previous session built a hybrid smoke-test checklist
