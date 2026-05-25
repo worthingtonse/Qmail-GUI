@@ -2,7 +2,8 @@
 
 /* ==================== COMPOSE MODAL ==================== */
 
-.compose-modal-overlay {
+/* was: .compose-modal-overlay */
+.compose-modal__overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -42,7 +43,8 @@
 
 /* ==================== HEADER ==================== */
 
-.compose-modal-header {
+/* was: .compose-modal-header */
+.compose-modal__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -52,14 +54,16 @@
   background: var(--glass-bg);
 }
 
-.compose-modal-header h3 {
+/* was: .compose-modal-header h3 */
+.compose-modal__title {
   margin: 0;
   color: var(--text-primary);
   font-size: var(--font-size-xl);
   font-weight: 600;
 }
 
-.close-modal-btn {
+/* was: .close-modal-btn */
+.compose-modal__close-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -75,20 +79,21 @@
     color calc(250ms * var(--motion-scale)) ease;
 }
 
-.close-modal-btn:hover:not(:disabled) {
+.compose-modal__close-button:hover:not(:disabled) {
   border-color: var(--border-medium);
   background: var(--card-hover);
   color: var(--text-primary);
 }
 
-.close-modal-btn svg {
+.compose-modal__close-button svg {
   width: 1.25rem;
   height: 1.25rem;
 }
 
 /* ==================== BODY ==================== */
 
-.compose-modal-body {
+/* was: .compose-modal-body */
+.compose-modal__body {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -100,29 +105,30 @@
 
 /* ==================== FORM FIELDS ==================== */
 
-.form-group {
+/* was: .form-group */
+.compose-modal__field {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
 }
 
-.form-group label {
+.compose-modal__field label {
   position: relative;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: 500;
 }
 
-.form-group label[for="to"]::after,
-.form-group label[for="subject"]::after,
-.form-group label[for="body"]::after {
+.compose-modal__field label[for="to"]::after,
+.compose-modal__field label[for="subject"]::after,
+.compose-modal__field label[for="body"]::after {
   content: " *";
   color: var(--status-error);
   font-weight: 700;
 }
 
-.form-group input,
-.form-group textarea {
+.compose-modal__field input,
+.compose-modal__field textarea {
   width: 100%;
   padding: var(--space-md);
   border: 1px solid var(--border-medium);
@@ -137,38 +143,39 @@
     box-shadow calc(250ms * var(--motion-scale)) ease;
 }
 
-.form-group input:focus,
-.form-group textarea:focus {
+.compose-modal__field input:focus,
+.compose-modal__field textarea:focus {
   outline: none;
   border-color: var(--accent-primary);
   background: var(--card-hover);
   box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
 }
 
-.form-group input::placeholder,
-.form-group textarea::placeholder {
+.compose-modal__field input::placeholder,
+.compose-modal__field textarea::placeholder {
   color: var(--text-muted);
 }
 
-.form-group input:disabled,
-.form-group textarea:disabled {
+.compose-modal__field input:disabled,
+.compose-modal__field textarea:disabled {
   background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
   opacity: 0.7;
   cursor: not-allowed;
 }
 
-.form-group input[type="number"] {
+.compose-modal__field input[type="number"] {
   max-width: 12.5rem;
 }
 
-.form-group-textarea {
+/* was: .form-group-textarea */
+.compose-modal__field--message {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 12.5rem;
 }
 
-.form-group-textarea textarea {
+.compose-modal__field--message textarea {
   flex: 1;
   min-height: 12.5rem;
   resize: vertical;
@@ -177,31 +184,35 @@
 
 /* ==================== CONTACT SUGGESTIONS ==================== */
 
-.recipient-field-group {
+/* was: .recipient-field-group */
+.compose-modal__field--recipient {
   gap: 0;
 }
 
-.recipient-field {
+/* was: .recipient-field */
+.compose-modal__recipient-row {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
 }
 
-.recipient-field label {
+.compose-modal__recipient-row label {
   flex: none;
   margin: 0;
 }
 
-.recipient-input-container {
+/* was: .recipient-input-container */
+.compose-modal__recipient-input {
   position: relative;
   flex: 1;
 }
 
-.recipient-input-container input {
+.compose-modal__recipient-input input {
   padding-right: calc(var(--space-xl) + var(--space-sm));
 }
 
-.add-contacts-btn {
+/* was: .add-contacts-btn */
+.compose-modal__add-contacts-button {
   position: absolute;
   top: 50%;
   right: var(--space-sm);
@@ -221,18 +232,19 @@
     color calc(250ms * var(--motion-scale)) ease;
 }
 
-.add-contacts-btn:hover:not(:disabled) {
+.compose-modal__add-contacts-button:hover:not(:disabled) {
   border-color: var(--border-medium);
   background: var(--card-hover);
   color: var(--text-primary);
 }
 
-.add-contacts-btn:disabled {
+.compose-modal__add-contacts-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.contact-suggestions {
+/* was: .contact-suggestions */
+.compose-modal__contact-suggestions {
   position: absolute;
   top: calc(100% + var(--space-xs));
   left: 0;
@@ -248,7 +260,8 @@
   box-shadow: var(--shadow-lg);
 }
 
-.contact-suggestion {
+/* was: .contact-suggestion */
+.compose-modal__contact-suggestion {
   display: flex;
   width: 100%;
   flex-direction: column;
@@ -263,33 +276,37 @@
   transition: background-color calc(250ms * var(--motion-scale)) ease;
 }
 
-.contact-suggestion:last-child {
+.compose-modal__contact-suggestion:last-child {
   border-bottom: 0;
 }
 
-.contact-suggestion:hover,
-.contact-suggestion:focus-visible {
+.compose-modal__contact-suggestion:hover,
+.compose-modal__contact-suggestion:focus-visible {
   background: var(--card-hover);
 }
 
-.contact-name {
+/* was: .contact-name */
+.compose-modal__contact-name {
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
-.contact-address {
+/* was: .contact-address */
+.compose-modal__contact-address {
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
 }
 
 /* ==================== ADVANCED TOGGLE ==================== */
 
-.advanced-toggle {
+/* was: .advanced-toggle */
+.compose-modal__advanced-toggle {
   margin: calc(var(--space-xs) * -1) 0;
 }
 
-.toggle-advanced-btn {
+/* was: .toggle-advanced-btn */
+.compose-modal__advanced-toggle-button {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -303,20 +320,21 @@
   transition: color calc(250ms * var(--motion-scale)) ease;
 }
 
-.toggle-advanced-btn:hover:not(:disabled) {
+.compose-modal__advanced-toggle-button:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
-.toggle-advanced-btn:disabled {
+.compose-modal__advanced-toggle-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
 /* ==================== STATUS PANELS ==================== */
 
-.send-progress,
-.error-message,
-.network-warning,
+/* was: .send-progress, .error-message, .network-warning */
+.compose-modal__send-progress,
+.compose-modal__error,
+.compose-modal__network-warning,
 .compose-modal__attachment-note {
   display: flex;
   align-items: flex-start;
@@ -328,13 +346,13 @@
   line-height: 1.6;
 }
 
-.send-progress {
+.compose-modal__send-progress {
   align-items: center;
   background: var(--card-bg);
   color: var(--text-secondary);
 }
 
-.send-progress span {
+.compose-modal__send-progress span {
   color: var(--text-secondary);
 }
 
@@ -351,25 +369,26 @@
   color: var(--status-error);
 }
 
-.error-message {
+.compose-modal__error {
   border-color: var(--status-error);
   background: var(--status-error-bg);
   color: var(--status-error);
 }
 
-.network-warning {
+.compose-modal__network-warning {
   color: var(--accent-warning);
   border-color: color-mix(in srgb, var(--accent-warning) 45%, var(--border-medium));
   background: color-mix(in srgb, var(--accent-warning) 10%, transparent);
 }
 
-.network-warning > svg,
+.compose-modal__network-warning > svg,
 .compose-modal__attachment-note-icon {
   flex: none;
   margin-top: 0.125rem;
 }
 
-.network-warning-copy {
+/* was: .network-warning-copy */
+.compose-modal__network-warning-copy {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -377,12 +396,13 @@
   min-width: 0;
 }
 
-.network-warning-copy span,
+.compose-modal__network-warning-copy span,
 .compose-modal__attachment-note {
   color: var(--text-secondary);
 }
 
-.network-retry-btn {
+/* was: .network-retry-btn */
+.compose-modal__network-retry-button {
   flex: none;
   padding: calc(var(--space-xs) / 1.5) var(--space-sm);
   border: 1px solid color-mix(in srgb, var(--accent-warning) 45%, var(--border-medium));
@@ -398,26 +418,28 @@
     color calc(250ms * var(--motion-scale)) ease;
 }
 
-.network-retry-btn:hover:not(:disabled) {
+.compose-modal__network-retry-button:hover:not(:disabled) {
   border-color: var(--accent-warning);
   background: color-mix(in srgb, var(--accent-warning) 18%, transparent);
 }
 
-.network-retry-btn:disabled {
+.compose-modal__network-retry-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
 /* ==================== ATTACHMENTS ==================== */
 
-.attachments-row {
+/* was: .attachments-row */
+.compose-modal__attachments {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   margin-top: var(--space-md);
 }
 
-.attach-files-btn {
+/* was: .attach-files-btn */
+.compose-modal__attach-files-button {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
@@ -435,13 +457,13 @@
     color calc(250ms * var(--motion-scale)) ease;
 }
 
-.attach-files-btn:hover:not(:disabled) {
+.compose-modal__attach-files-button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--card-hover);
   color: var(--text-primary);
 }
 
-.attach-files-btn:disabled {
+.compose-modal__attach-files-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -451,7 +473,8 @@
   font-size: var(--font-size-sm);
 }
 
-.attachment-chips {
+/* was: .attachment-chips */
+.compose-modal__attachment-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-xs);
@@ -512,7 +535,8 @@
 
 /* ==================== DRAFT INFO ==================== */
 
-.draft-count {
+/* was: .draft-count */
+.compose-modal__draft-count {
   margin-top: var(--space-md);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border-subtle);
@@ -522,7 +546,8 @@
 
 /* ==================== FOOTER ==================== */
 
-.compose-modal-footer {
+/* was: .compose-modal-footer */
+.compose-modal__footer {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-md);
@@ -531,8 +556,9 @@
   background: var(--glass-bg);
 }
 
-.send-button,
-.attach-button {
+/* was: .send-button, .attach-button */
+.compose-modal__send-button,
+.compose-modal__draft-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -551,38 +577,38 @@
     transform calc(250ms * var(--motion-scale)) ease;
 }
 
-.send-button {
+.compose-modal__send-button {
   background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
   color: var(--text-primary);
   box-shadow: var(--shadow-md), var(--glow-primary);
 }
 
-.send-button:hover:not(:disabled) {
+.compose-modal__send-button:hover:not(:disabled) {
   box-shadow: var(--shadow-lg), var(--glow-primary);
 }
 
-.attach-button {
+.compose-modal__draft-button {
   border-color: var(--border-medium);
   background: var(--card-bg);
   color: var(--text-secondary);
 }
 
-.attach-button:hover:not(:disabled) {
+.compose-modal__draft-button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--card-hover);
   color: var(--text-primary);
 }
 
-.send-button:disabled,
-.attach-button:disabled {
+.compose-modal__send-button:disabled,
+.compose-modal__draft-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
-.send-button svg,
-.attach-button svg {
+.compose-modal__send-button svg,
+.compose-modal__draft-button svg {
   width: 1rem;
   height: 1rem;
 }
@@ -596,7 +622,7 @@
 /* ==================== RESPONSIVE ==================== */
 
 @media (max-width: 1024px) {
-  .compose-modal-overlay {
+  .compose-modal__overlay {
     padding: var(--space-md);
   }
 
@@ -604,34 +630,34 @@
     max-height: 95vh;
   }
 
-  .compose-modal-header,
-  .compose-modal-body,
-  .compose-modal-footer {
+  .compose-modal__header,
+  .compose-modal__body,
+  .compose-modal__footer {
     padding: var(--space-lg);
   }
 
-  .compose-modal-footer {
+  .compose-modal__footer {
     flex-direction: column;
   }
 
-  .send-button,
-  .attach-button {
+  .compose-modal__send-button,
+  .compose-modal__draft-button {
     width: 100%;
   }
 
-  .recipient-field {
+  .compose-modal__recipient-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .contact-suggestions {
+  .compose-modal__contact-suggestions {
     position: static;
     margin-top: var(--space-sm);
   }
 }
 
 @media (max-width: 768px) {
-  .compose-modal-overlay {
+  .compose-modal__overlay {
     align-items: flex-start;
     padding: var(--space-sm);
     padding-top: var(--space-lg);
@@ -641,39 +667,39 @@
     max-height: calc(100vh - var(--space-xl));
   }
 
-  .compose-modal-header,
-  .compose-modal-body,
-  .compose-modal-footer {
+  .compose-modal__header,
+  .compose-modal__body,
+  .compose-modal__footer {
     padding: var(--space-md);
   }
 
-  .compose-modal-header h3 {
+  .compose-modal__title {
     font-size: var(--font-size-lg);
   }
 
-  .form-group-textarea,
-  .form-group-textarea textarea {
+  .compose-modal__field--message,
+  .compose-modal__field--message textarea {
     min-height: 9.375rem;
   }
 
-  .form-group input[type="number"] {
+  .compose-modal__field input[type="number"] {
     max-width: 100%;
   }
 
-  .network-warning,
+  .compose-modal__network-warning,
   .compose-modal__attachment-note,
-  .compose-modal-footer {
+  .compose-modal__footer {
     flex-direction: column;
   }
 
-  .network-retry-btn,
-  .attach-files-btn {
+  .compose-modal__network-retry-button,
+  .compose-modal__attach-files-button {
     width: 100%;
   }
 }
 
 @media (max-width: 480px) {
-  .compose-modal-overlay {
+  .compose-modal__overlay {
     padding: 0;
   }
 
@@ -684,17 +710,17 @@
     border-radius: 0;
   }
 
-  .compose-modal-header,
-  .compose-modal-footer {
+  .compose-modal__header,
+  .compose-modal__footer {
     border-radius: 0;
   }
 
-  .form-group-textarea,
-  .form-group-textarea textarea {
+  .compose-modal__field--message,
+  .compose-modal__field--message textarea {
     min-height: 7.5rem;
   }
 
-  .contact-suggestions {
+  .compose-modal__contact-suggestions {
     max-height: 7.5rem;
   }
 }
@@ -706,38 +732,38 @@
     animation: none;
   }
 
-  .send-button,
-  .attach-button,
-  .close-modal-btn,
-  .toggle-advanced-btn,
-  .add-contacts-btn,
-  .contact-suggestion,
-  .attach-files-btn,
+  .compose-modal__send-button,
+  .compose-modal__draft-button,
+  .compose-modal__close-button,
+  .compose-modal__advanced-toggle-button,
+  .compose-modal__add-contacts-button,
+  .compose-modal__contact-suggestion,
+  .compose-modal__attach-files-button,
   .compose-modal__attachment-remove {
     transition: none;
     transform: none;
   }
 
-  .send-progress {
+  .compose-modal__send-progress {
     animation: none;
   }
 }
 
 
-.contact-suggestions {
+.compose-modal__contact-suggestions {
   scrollbar-width: thin;
   scrollbar-color: var(--border-medium) var(--card-bg);
 }
 
-.contact-suggestions::-webkit-scrollbar {
+.compose-modal__contact-suggestions::-webkit-scrollbar {
   width: 0.375rem;
 }
 
-.contact-suggestions::-webkit-scrollbar-track {
+.compose-modal__contact-suggestions::-webkit-scrollbar-track {
   background: var(--card-bg);
 }
 
-.contact-suggestions::-webkit-scrollbar-thumb {
+.compose-modal__contact-suggestions::-webkit-scrollbar-thumb {
   border-radius: var(--radius-sm);
   background: var(--border-medium);
 }
@@ -747,17 +773,17 @@
     border: 2px solid var(--text-primary);
   }
 
-  .send-button,
-  .attach-button,
-  .attach-files-btn {
+  .compose-modal__send-button,
+  .compose-modal__draft-button,
+  .compose-modal__attach-files-button {
     border: 2px solid currentColor;
   }
 
-  .form-group input:focus,
-  .form-group textarea:focus,
-  .contact-suggestions,
-  .contact-suggestion,
-  .error-message {
+  .compose-modal__field input:focus,
+  .compose-modal__field textarea:focus,
+  .compose-modal__contact-suggestions,
+  .compose-modal__contact-suggestion,
+  .compose-modal__error {
     border-width: 2px;
   }
 }

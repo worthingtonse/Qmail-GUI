@@ -24,6 +24,7 @@
    * TYPE SCALE — derives from --font-scale
    * Use these tokens; never raw px/rem font-sizes in components.
    * ============================================================ */
+  --font-size-2xs: calc(0.625rem * var(--font-scale));   /* 10px badge-only */
   --font-size-xs:  calc(0.75rem  * var(--font-scale));   /* 12px */
   --font-size-sm:  calc(0.875rem * var(--font-scale));   /* 14px */
   --font-size-md:  calc(1rem     * var(--font-scale));   /* 16px */

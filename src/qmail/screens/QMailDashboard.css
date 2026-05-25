@@ -2,7 +2,6 @@
 
 .qmail-dashboard {
   --font-family: var(--font-primary);
-  --font-size-base: var(--font-size-md);
   --surface-bg: color-mix(in srgb, var(--card-bg) 65%, var(--tertiary-bg) 35%);
   --accent-danger: var(--accent-error);
   --status-online: var(--status-success);
@@ -72,89 +71,10 @@
   animation: qmail-dashboard-spin 1s linear infinite;
 }
 
-.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  font-family: var(--font-primary);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  line-height: 1.4;
-  cursor: pointer;
-  transition:
-    background-color calc(250ms * var(--motion-scale)) ease,
-    color calc(250ms * var(--motion-scale)) ease,
-    border-color calc(250ms * var(--motion-scale)) ease,
-    box-shadow calc(250ms * var(--motion-scale)) ease;
-}
-
-.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost):disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.qmail-dashboard :where(button.primary, button.secondary, button.success, button.danger, button.ghost):focus-visible {
-  outline: none;
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
-}
-
-.qmail-dashboard button.primary {
-  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.qmail-dashboard button.primary:hover:not(:disabled) {
-  box-shadow: var(--shadow-md), var(--glow-primary);
-}
-
-.qmail-dashboard button.secondary {
-  background-color: var(--card-bg);
-  color: var(--text-secondary);
-  border-color: var(--border-medium);
-}
-
-.qmail-dashboard button.secondary:hover:not(:disabled) {
-  background-color: var(--card-hover);
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
-.qmail-dashboard button.success {
-  background: linear-gradient(135deg, var(--status-success) 0%, var(--accent-success) 100%);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.qmail-dashboard button.success:hover:not(:disabled) {
-  box-shadow: var(--shadow-md), var(--glow-success);
-}
-
-.qmail-dashboard button.danger {
-  background: linear-gradient(135deg, var(--status-error) 0%, var(--accent-error) 100%);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.qmail-dashboard button.danger:hover:not(:disabled) {
-  box-shadow: var(--shadow-md);
-}
-
-.qmail-dashboard button.ghost {
-  padding-inline: var(--space-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-}
-
-.qmail-dashboard button.ghost:hover:not(:disabled) {
-  background-color: var(--card-hover);
-  color: var(--text-primary);
-}
+/* Shared button styling in QMail uses the repository `.btn` /
+   `.btn--*` primitives from src/styles/primitives.css. The older
+   dashboard-era element-variant selectors are intentionally retired
+   here. */
 
 .qmail-dashboard :where(input, textarea, select) {
   width: 100%;
@@ -181,8 +101,10 @@
   color: var(--text-muted);
 }
 
-.qmail-dashboard .loading-state,
-.qmail-dashboard .empty-state {
+/* was: .loading-state */
+.qmail-dashboard__loading-state,
+/* was: .empty-state */
+.qmail-dashboard__empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -193,28 +115,29 @@
   text-align: center;
 }
 
-.qmail-dashboard .loading-state svg {
+.qmail-dashboard__loading-state svg {
   color: var(--accent-secondary);
 }
 
-.qmail-dashboard .empty-state svg {
+.qmail-dashboard__empty-state svg {
   color: var(--text-muted);
 }
 
-.qmail-dashboard .empty-state h3 {
+.qmail-dashboard__empty-state h3 {
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--font-size-lg);
 }
 
-.qmail-dashboard .empty-state p {
+.qmail-dashboard__empty-state p {
   max-width: 28rem;
   margin: 0;
   color: var(--text-tertiary);
   line-height: 1.7;
 }
 
-.qmail-dashboard .error-message {
+/* was: .error-message */
+.qmail-dashboard__error-message {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -227,14 +150,16 @@
   box-shadow: var(--shadow-sm);
 }
 
-.qmail-dashboard .form-group {
+/* was: .form-group */
+.qmail-dashboard__form-group {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
 }
 
-.qmail-dashboard .form-group label {
+/* was: .form-group label */
+.qmail-dashboard__form-group label {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -333,8 +258,8 @@
 }
 
 @media (max-width: 768px) {
-  .qmail-dashboard .loading-state,
-  .qmail-dashboard .empty-state {
+  .qmail-dashboard__loading-state,
+  .qmail-dashboard__empty-state {
     padding: var(--space-lg) var(--space-md);
   }
 

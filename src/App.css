@@ -1,13 +1,37 @@
-.App {
+/* was: .App */
+.app-shell {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--secondary-bg);
+  background: var(--secondary-bg);
   position: relative;
 }
 
-/* Modern Button Styles */
+/* was: App loading inline wrapper */
+.app-shell__loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 0 var(--space-xl);
+  text-align: center;
+}
+
+/* was: App loading icon inline color */
+.app-shell__loading-icon {
+  color: var(--accent-primary);
+}
+
+/* was: App loading message inline style */
+.app-shell__loading-message {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  max-width: 420px;
+}
+
 button {
   cursor: pointer;
   border: none;
@@ -30,7 +54,7 @@ button::before {
   width: 0;
   height: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
   transform: translate(-50%, -50%);
   transition: width var(--transition-smooth), height var(--transition-smooth);
 }
@@ -57,36 +81,10 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* Phase 3.2 button-rule reconciliation — COMPLETE in 3.2i.
-   Variant ownership lives in src/styles/primitives.css (.btn,
-   .btn--primary/--secondary/--success/--danger/--ghost). The bare-
-   element `button { ... }` rules above remain as the unstyled-button
-   fallback for non-.btn consumers (PasswordScreen, USBCheckScreen,
-   ThemePicker, NotificationContainer, etc.). */
-
-/* Diceware Button */
-.diceware-button {
-  background: linear-gradient(135deg, var(--accent-success) 0%, #10b981 100%);
-  color: white;
-  padding: 14px 24px;
-  border-radius: var(--radius-lg);
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  width: 100%;
-  box-shadow: var(--shadow-md), var(--glow-success);
-  transition: all var(--transition-base);
-}
-
-.diceware-button:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg), var(--glow-success);
-}
-
-/* Modern Input & Select Styles */
 input,
 select,
 textarea {
-  background-color: var(--card-bg);
+  background: var(--card-bg);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   border-radius: var(--radius-md);
@@ -102,23 +100,21 @@ input:hover,
 select:hover,
 textarea:hover {
   border-color: var(--border-medium);
-  background-color: var(--card-hover);
+  background: var(--card-hover);
 }
 
 input:focus,
 select:focus,
 textarea:focus {
-  outline: none;
   border-color: var(--accent-primary);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.1);
-  background-color: var(--card-hover);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  background: var(--card-hover);
 }
 
 input::placeholder {
   color: var(--text-muted);
 }
 
-/* Checkbox Styling */
 input[type="checkbox"] {
   width: 20px;
   height: 20px;
@@ -126,24 +122,6 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
-/* Card Styles */
-.card {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  border: var(--glass-border);
-  border-radius: var(--radius-xl);
-  padding: var(--space-xl);
-  box-shadow: var(--shadow-lg);
-  transition: all var(--transition-base);
-}
-
-.card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-xl);
-  border-color: var(--border-medium);
-}
-
-/* Glass Container */
 .glass-container {
   background: var(--glass-bg-strong);
   backdrop-filter: var(--glass-blur);
@@ -165,159 +143,21 @@ input[type="checkbox"] {
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.1) 50%,
+    color-mix(in srgb, var(--text-primary) 10%, transparent) 50%,
     transparent
   );
 }
-
-/* Fade In Animation */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes popIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-/* Loading Animation */
-@keyframes shimmer {
-  0% {
-    background-position: -1000px 0;
-  }
-  100% {
-    background-position: 1000px 0;
-  }
-}
-
-.loading {
-  background: linear-gradient(
-    90deg,
-    var(--card-bg) 0%,
-    var(--card-hover) 50%,
-    var(--card-bg) 100%
-  );
-  background-size: 1000px 100%;
-  animation: shimmer 2s infinite;
-}
-
-/* Divider */
-.divider {
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--border-medium) 50%,
-    transparent
-  );
-  margin: var(--space-lg) 0;
-}
-
-/* Utility Classes */
-.text-gradient {
-  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.glow {
-  box-shadow: var(--glow-primary);
-}
-
-/* Default glass cursor */
-/* * { */
-   /* cursor: initial; */
-  /* cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="coinGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="%23FFD700"/><stop offset="50%" stop-color="%23FFF"/><stop offset="100%" stop-color="%23FFD700"/></linearGradient></defs><ellipse cx="12" cy="12" rx="10" ry="8" fill="url(%23coinGrad)" stroke="%23DAA520" stroke-width="1.5"/><text x="12" y="15" text-anchor="middle" fill="%23B8860B" font-size="6" font-weight="bold">CC</text></svg>') 12 12, auto; */
-/* } */
-
-/* Interactive elements - glass pointer */
-/* button, 
-.nav-tab,
-.nav-tab svg,
-.nav-tab span,
-.tab,
-a,
-.service-button-content,
-.service-button-content svg,
-.service-button-content span,
-[role="button"],
-input[type="submit"],
-input[type="button"],
-input[type="checkbox"] {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="rgba(167,139,250,0.2)" stroke="rgba(167,139,250,0.5)" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="rgba(167,139,250,0.9)"/></svg>') 12 12, pointer !important;
-} */
-
-/* Input fields - glass text cursor */
-input[type="text"],
-input[type="password"],
-input[type="email"],
-input[type="number"],
-textarea,
-.input-field {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="11" y="4" width="2" height="16" fill="rgba(255,255,255,0.8)"/><rect x="8" y="4" width="8" height="2" fill="rgba(255,255,255,0.6)"/><rect x="8" y="18" width="8" height="2" fill="rgba(255,255,255,0.6)"/></svg>') 12 12, text !important;
-}
-
-/* Hover states - enhanced glass cursor */
-/* button:hover,
-.nav-tab:hover,
-a:hover {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12" fill="rgba(167,139,250,0.3)" stroke="rgba(167,139,250,0.7)" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="rgba(167,139,250,1)"/><circle cx="14" cy="14" r="8" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"/></svg>') 14 14, pointer !important;
-} */
-
-/* Disabled elements - glass disabled cursor */
-button:disabled,
-input:disabled,
-.disabled {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="rgba(100,100,100,0.1)" stroke="rgba(100,100,100,0.3)" stroke-width="1.5"/><line x1="8" y1="8" x2="16" y2="16" stroke="rgba(100,100,100,0.5)" stroke-width="2"/></svg>') 12 12, not-allowed !important;
-}
-
-/* Loading/wait states */
-.loading,
-.processing {
-  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" fill="rgba(251,191,36,0.2)" stroke="rgba(251,191,36,0.5)" stroke-width="2"/><path d="M12 4v4M12 16v4M4 12h4M16 12h4" stroke="rgba(251,191,36,0.8)" stroke-width="2"/></svg>') 12 12, wait !important;
-  animation: cursor-spin 1s linear infinite;
-}
-
-@keyframes cursor-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* ==================== GLASS RIPPLE ANIMATIONS ==================== */
 
 @keyframes glass-ripple {
   0% {
     transform: scale(0);
     opacity: 0.8;
   }
+
   50% {
     opacity: 0.4;
   }
+
   100% {
     transform: scale(2);
     opacity: 0;
@@ -327,15 +167,16 @@ input:disabled,
 .glass-ripple {
   position: absolute !important;
   border-radius: 50% !important;
-  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%) !important;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--text-primary) 30%, transparent) 0%,
+    transparent 70%
+  ) !important;
   pointer-events: none !important;
   animation: glass-ripple calc(600ms * var(--motion-scale)) ease-out !important;
   z-index: 1000 !important;
 }
 
-/* ==================== ENHANCED BUTTON STYLES ==================== */
-
-/* Add glass sound effect class */
 .glass-sound-btn {
   position: relative;
   overflow: hidden;
@@ -349,10 +190,16 @@ input:disabled,
   left: 50%;
   width: 0;
   height: 0;
-  background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--text-primary) 20%, transparent) 0%,
+    transparent 70%
+  );
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  transition: width calc(300ms * var(--motion-scale)) ease, height calc(300ms * var(--motion-scale)) ease;
+  transition:
+    width calc(300ms * var(--motion-scale)) ease,
+    height calc(300ms * var(--motion-scale)) ease;
   pointer-events: none;
 }
 
@@ -361,368 +208,37 @@ input:disabled,
   height: 200%;
 }
 
-/* ==================== TAB ENHANCEMENTS ==================== */
-
-.nav-tab {
-  transition: all var(--transition-base);
-  position: relative;
-  overflow: hidden;
-}
-
-.nav-tab::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(167, 139, 250, 0.1),
-    transparent
-  );
-  transition: left calc(500ms * var(--motion-scale)) ease;
-}
-
-.nav-tab:hover::before {
-  left: 100%;
-}
-
-.nav-tab.active {
-  box-shadow: 
-    0 0 20px rgba(167, 139, 250, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-/* ==================== INTERACTIVE FEEDBACK ==================== */
-
-/* Button press effect */
 .glass-sound-btn:active {
   transform: scale(0.98);
-  box-shadow: 
-    0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 2px 8px color-mix(in srgb, black 20%, transparent),
+    inset 0 2px 4px color-mix(in srgb, black 10%, transparent);
 }
 
-/* Hover glow enhancement */
-button:hover,
-.nav-tab:hover {
-  box-shadow: 
-    var(--shadow-lg),
-    0 0 25px rgba(167, 139, 250, 0.15);
-  transform: translateY(-2px);
-}
-
-/* ==================== SOUND CONTROL PANEL STYLES ==================== */
-
-.sound-controls {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: var(--glass-bg-strong);
-  backdrop-filter: var(--glass-blur);
-  border: var(--glass-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-md);
-  box-shadow: var(--shadow-lg);
-  z-index: 1000;
-  transition: all var(--transition-base);
-}
-
-.sound-controls.collapsed {
-  transform: translateX(calc(100% - 60px));
-}
-
-.sound-toggle {
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  font-size: var(--font-size-lg);
-  cursor: pointer;
-  padding: var(--space-sm);
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-base);
-}
-
-.sound-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
-  transform: none;
-  box-shadow: none;
-}
-
-.volume-slider {
-  width: 100px;
-  margin: var(--space-sm) 0;
-  accent-color: var(--accent-primary);
-}
-
-/* ==================== ACCESSIBILITY ENHANCEMENTS ==================== */
-
-/* Focus styles with glass effect */
-button:focus,
-.nav-tab:focus,
-input:focus {
-  outline: none;
-  box-shadow: 
-    0 0 0 3px rgba(167, 139, 250, 0.3),
-    var(--shadow-md);
-}
-
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  
-  .glass-ripple {
-    display: none !important;
-  }
-}
-
-/* ==================== RESPONSIVE CURSOR ADJUSTMENTS ==================== */
-
-/* Touch devices - remove custom cursors */
-@media (hover: none) and (pointer: coarse) {
-  * {
-    cursor: auto !important;
-  }
-  
-  button,
-  .nav-tab,
-  a {
-    cursor: auto !important;
-  }
-  
-  /* Enhanced touch feedback */
-  button:active,
-  .nav-tab:active {
-    background: rgba(167, 139, 250, 0.1);
-    transform: scale(0.95);
-  }
-}
-
-/* High contrast mode support */
-@media (prefers-contrast: high) {
-  button,
-  .nav-tab {
-    border: 2px solid var(--text-primary);
-  }
-  
-  button:focus,
-  .nav-tab:focus {
-    outline: 3px solid var(--accent-primary);
-    outline-offset: 2px;
-  }
-}
-
-/* Update Modal Styles */
-/* Update Modal Styles */
-.update-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 99999;
-  animation: fadeIn calc(300ms * var(--motion-scale)) ease;
-  padding: var(--space-lg);
-}
-
-.update-modal {
-  background-color: #1a1f2e;
-  border-radius: var(--radius-xl);
-  width: 100%;
-  max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  animation: slideIn calc(300ms * var(--motion-scale)) ease;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  position: relative;
-  z-index: 100000;
-}
-
-.update-modal-header {
-  padding: var(--space-2xl) var(--space-2xl) var(--space-lg);
-  text-align: center;
-  position: relative;
-}
-
-.update-icon {
-  color: #f59e0b;
-  margin-bottom: var(--space-md);
-  filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.4));
-}
-
-.update-modal-header h2 {
-  font-size: 1.75rem;
-  color: var(--text-primary);
-  margin: 0;
-  font-weight: 600;
-}
-
-.update-modal-close {
-  position: absolute;
-  top: var(--space-lg);
-  right: var(--space-lg);
-  background: rgba(255, 255, 255, 0.05);
-  border: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: var(--space-sm);
-  border-radius: var(--radius-md);
-  transition: all var(--transition-base);
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.update-modal-close:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-}
-
-.update-modal-content {
-  padding: 0 var(--space-2xl) var(--space-xl);
-}
-
-.update-message {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  color: #f59e0b;
-  margin-bottom: var(--space-xl);
-  text-align: center;
-}
-
-.update-version-info {
-  background-color: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg);
-  margin-bottom: var(--space-xl);
-}
-
-.version-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--space-sm) 0;
-}
-
-.version-row:not(:last-child) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  padding-bottom: var(--space-md);
-  margin-bottom: var(--space-md);
-}
-
-.version-label {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.version-value {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  font-family: 'Courier New', monospace;
-}
-
-.version-value.highlight {
-  color: #10b981;
-}
-
-.update-description {
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-  line-height: 1.6;
-  text-align: center;
-  margin: 0;
-}
-
-.update-modal-actions {
-  padding: var(--space-xl) var(--space-2xl) var(--space-2xl);
-  display: flex;
-  gap: var(--space-md);
-}
-
-.update-download-btn {
-  flex: 1;
-  padding: var(--space-md) var(--space-xl);
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  border: none;
-  border-radius: var(--radius-lg);
-  color: white;
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.update-download-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
-}
-
-.update-later-btn {
-  flex: 1;
-  padding: var(--space-md) var(--space-xl);
-  font-size: var(--font-size-base);
-  background-color: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-lg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all var(--transition-base);
-}
-
-.update-later-btn:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-}
-
-@keyframes fadeIn {
+@keyframes app-shell-fade-in {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
 }
 
-@keyframes slideIn {
+@keyframes app-shell-modal-in {
   from {
     opacity: 0;
-    transform: scale(0.95) translateY(-20px);
+    transform: scale(0.95) translateY(calc(-1 * var(--space-lg)));
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
 }
 
-@media (max-width: 640px) {
-  .update-modal {
-    max-width: 100%;
-    margin: var(--space-lg);
-  }
-  
-  .update-modal-actions {
-    flex-direction: column;
-  }
-
-  .update-modal-header h2 {
-    font-size: var(--font-size-xl);
+@media (prefers-reduced-motion: reduce) {
+  .glass-ripple {
+    display: none !important;
   }
 }
