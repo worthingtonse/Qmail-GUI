@@ -701,15 +701,12 @@ Structural notes (not findings):
     `.btn .btn--primary` etc. from primitives.css. Removal carries no
     behavioral risk; the active styling path is untouched.
 
-Small follow-up (NOT a finding):
-  - QMailDashboard.css:5 still defines `--font-size-base: var(--font-size-md)`
-    as a local alias on `.qmail-dashboard`. This alias was originally
-    load-bearing because App.css and AccountPane.css consumed it; both
-    of those consumers were removed in the earlier bugfix pass
-    (2026-05-24). The alias is now demonstrably dead code — safe to
-    delete whenever someone wants to. Not a Phase 4 acceptance failure
-    (the alias works correctly; no harm caused), just unambiguously
-    unnecessary now.
+Small follow-up (CLOSED 2026-05-25 in commit c1446b6):
+  - The `--font-size-base: var(--font-size-md)` local alias previously
+    declared on `.qmail-dashboard` was removed as part of the E12
+    cleanup that landed in the Phase 4 CSS commit. `rg --font-size-base
+    src/` now returns zero matches. The dead alias is gone; no further
+    Phase 5 action required for this item.
 
 Verdict: E12 meets the same bar as E1-E11 / E13-E21. Eligible for visual
 smoke alongside that group.
@@ -810,8 +807,9 @@ Remaining Phase 4 outstanding work:
   - Visual smoke for the entire E1-E22 group (docs/theme.smoke-test.md),
     which is the gate before DONE.
 
-Out-of-Phase-4 cleanups noted during this run but not addressed:
-  - QMailDashboard.css:5 dead --font-size-base alias (see E12 note above).
+Out-of-Phase-4 cleanups noted during this run:
+  - QMailDashboard.css dead --font-size-base alias: CLOSED in
+    commit c1446b6 (E12 cleanup landed in the Phase 4 CSS commit).
   - !important concentrations in ServiceSelectionScreen.css (60) and
     App.css (38) flagged in stats run; on Phase 5 punted-cleanup list.
 

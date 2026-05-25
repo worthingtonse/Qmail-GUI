@@ -165,10 +165,10 @@ THE REMAINING WORK — in priority order
    Surfaced during this run, not addressed. Pick up only if asked.
 
    a) QMailDashboard.css:5 dead `--font-size-base` alias
-      Used to be load-bearing for App.css and AccountPane.css. Both
-      consumers were migrated off in the 2026-05-24 bugfix pass.
-      The alias now has zero external consumers. Safe to delete.
-      Details: opu.E-track-review.txt §E12.
+      CLOSED 2026-05-25 in commit c1446b6. The alias was removed
+      as part of the E12 cleanup that landed in the Phase 4 CSS
+      commit. `rg --font-size-base src/` now returns zero matches.
+      No further action.
 
    b) !important reduction in ServiceSelectionScreen.css (60) and
       App.css (38)
