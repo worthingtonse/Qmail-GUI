@@ -1,0 +1,254 @@
+BUG-62 review — GPT's Refresh-button fix
+=========================================
+Reviewer:  Claude Opus 4.7
+Reviewing: GPT-5's uncommitted edits to
+           src/qmail/screens/QMailDashboard.jsx (+30 / -8)
+           src/qmail/screens/NavigationPane.jsx  (+27 / -8)
+Date:      2026-05-26
+Scope:     The Refresh-button bug Sean reported: spinner never
+           stops; dots should turn gray on refresh-start and
+           repopulate when echo completes.
+Note:      These edits were initially BUG-61 work-in-progress
+           that ended up covering BUG-62 as well. Reviewing
+           against BUG-62's reported symptoms specifically;
+           BUG-61's scope is broader and out of frame.
+
+Verdict in one line
+-------------------
+APPROVE with two non-blocking suggestions. The implementation
+correctly addresses both symptoms Sean reported. Tight, idiomatic
+React. No regressions visible in the diff.
+
+
+Summary of what the fix does
+============================
+
+QMailDashboard.jsx (the refresh orchestrator):
+  - New module-level constants: REFRESH_STEP_TIMEOUT_MS (30s
+    default), RAIDA_REFRESH_TIMEOUT_MS (20s for the echo step).
+  - New helper runWithRefreshTimeout(label, step, timeoutMs):
+    races a Promise.resolve().then(step) against a setTimeout
+    that rejects with a clear "label did not finish within Ns"
+    error. clearTimeout in finally to avoid leaking the timer
+    when the step finishes first.
+  - handleRefresh now wraps every step in
+    runWithRefreshTimeout via runRefreshStep, so a hung step
+    rejects after its budget instead of stalling forever.
+  - On refresh-start, setRaidaEchoSnapshot(null) immediately —
+    propagates to NavigationPane to trigger the gray reset.
+  - RAIDA echo reordered from step 2 to step 1 so dots come
+    back as soon as possible after the gray reset.
+
+NavigationPane.jsx (the dot grid):
+  - New showUnknownRaidaHealth() helper that nulls both
+    raidaHealth and healthSummary.
+  - applyRaidaEcho(null) now calls showUnknownRaidaHealth()
+    instead of returning early (was the old short-circuit).
+  - Per-RAIDA status mapping switched from positional
+    (data.raidas[i]) to index-keyed (statuses[raida.index]).
+    More robust against ordering quirks in the echo payload.
+  - New effect: when isRefreshing flips true →
+    showUnknownRaidaHealth(). All 25 dots immediately go gray.
+  - The 120s auto-echo interval now pauses while isRefreshing
+    is true. Avoids the local interval clobbering the manual
+    refresh's gray-reset.
+  - healthSummary now fills in missing totals from the local
+    status counts (?? fallback). Defensive — handles a backend
+    that ships partial totals.
+
+
+Mapping to BUG-62's reported symptoms
+=====================================
+
+Symptom 1: "spinner that starts spinning but it never stops"
+   Cause: handleRefresh's await chain has no per-step timeout,
+          so if one step hangs (e.g. beacon ping against a dead
+          RAIDA 11 with no client-side timeout), the finally
+          block that flips isRefreshing back never runs.
+   Fix:   runWithRefreshTimeout puts a 30s ceiling on each
+          step (20s on the echo step). At worst, the chain
+          completes in ~30s and the finally block fires.
+   Status: ADDRESSED. See "Suggestion 1" below for one
+           remaining UX concern about how long 30s feels.
+
+Symptom 2: "It should be that when I press the refresh button,
+            all the circles turn from red and green to gray"
+   Cause: NavigationPane's raidaHealth state held the
+          previous echo result until the next echo settled.
+          Old applyRaidaEcho returned early on null/missing
+          data instead of clearing.
+   Fix:   isRefreshing-driven effect calls
+          showUnknownRaidaHealth() which sets raidaHealth to
+          null. The render loop maps null → "unknown" class
+          → gray dot (NavigationPane.css:222).
+   Status: ADDRESSED.
+
+Symptom 3: "colors should repopulate after the program has
+            run the raida echo and the spinner should stop
+            spinning"
+   Cause: Already worked previously — applyRaidaEcho was
+          updating raidaHealth from the echo result.
+   Fix:   Echo step reordered to first means the gray-to-
+          colored transition is the first visible feedback,
+          which matches the "colors return when echo done"
+          intent. Spinner stops when handleRefresh's finally
+          fires.
+   Status: ADDRESSED.
+
+
+Code-quality review
+===================
+
+What I like
+-----------
+- runWithRefreshTimeout is small, single-purpose, and properly
+  cleans up the setTimeout. The Promise.resolve().then(step)
+  wrap is the correct way to guarantee the step runs
+  asynchronously even if it's secretly synchronous — handles
+  the edge case where step() returns a non-Promise.
+- Per-step timeouts (not one wall-clock for the whole chain)
+  means a slow-but-completing step doesn't get torpedoed by
+  later slow steps. Good granularity.
+- Reordering RAIDA echo to first is a UX win — most-likely-
+  to-fail step runs while user attention is on the dots,
+  and dots come back fast.
+- The isRefreshing prop drives the gray reset via a side
+  effect, NOT via direct state synchronization. Keeps
+  NavigationPane the owner of its own raidaHealth state.
+  Idiomatic React.
+- showUnknownRaidaHealth is wrapped in useCallback with a
+  stable empty deps array. Won't churn the effect that
+  depends on it.
+- The auto-refresh-pause-during-isRefreshing tweak is the
+  right defensiveness — without it, the 120s tick could fire
+  mid-manual-refresh and re-populate raidaHealth from a stale
+  result while the parent's RAIDA echo is still in flight.
+- statuses array switched from positional to index-keyed.
+  Strict improvement.
+
+What I'd push back on (or just note)
+------------------------------------
+
+Suggestion 1 (UX — non-blocking)
+   30s + 20s + 30s + 30s + 30s = 140s worst-case before the
+   spinner stops if every step hangs. Sean's bug report said
+   "the spinner never stops" — that implies he waited
+   substantially longer than 30s. After the fix it's "spinner
+   eventually stops, in up to 30s per stuck step." That's a
+   big improvement but still a long spinner for a UI button.
+   Consider:
+     - Halving the defaults: REFRESH_STEP_TIMEOUT_MS=10s,
+       RAIDA_REFRESH_TIMEOUT_MS=8s. The underlying core.exe
+       calls all have shorter timeouts than 30s; the wrapping
+       30s is mostly belt-and-suspenders.
+     - OR add a soft "this is taking longer than expected"
+       toast at 5s, then let the timeout finish quietly.
+   Filed as a suggestion only — current behavior is
+   correctness-correct.
+
+Suggestion 2 (correctness — non-blocking)
+   runWithRefreshTimeout rejects on timeout, which
+   runRefreshStep catches and logs to console.warn. Good. But
+   the underlying fetch INSIDE the step keeps running after
+   the timeout fires; it just becomes orphaned (its eventual
+   result is discarded). For an HTTP request that's
+   acceptable, but consider: if a step is doing
+   setRaidaEchoSnapshot(result.data) AFTER the timeout has
+   fired, that setState lands AFTER the gray-reset effect
+   triggered by the next isRefreshing cycle. Race-ish.
+   In practice the next handleRefresh sets snapshot null
+   again at line 789, which should win, but if the orphaned
+   fetch resolves between two refreshes the UI could show a
+   stale-but-correct-looking populated dot grid briefly.
+   To fix cleanly, an AbortController plumbed through the
+   fetch would actually cancel the request. Probably not
+   worth the diff size for this bug, but worth filing as a
+   future cleanup (BUG-NN candidate).
+
+Observation 1 (not a complaint)
+   The healthSummary "?? fallback" branch
+     available: data.totalAvailable ??
+                statuses.filter((s) => s === true).length
+   is a nice defense, but I'm not sure it's load-bearing.
+   The backend echo response always has these fields per the
+   live curl I did earlier this week (total_available,
+   total_timeout, total_error, array_usable). If the backend
+   ever stopped sending them, the fallback would compute the
+   right counts. So it's "principled defensiveness," not
+   actively required today. No change needed.
+
+Observation 2 (style)
+   showUnknownRaidaHealth name reads slightly awkwardly. It
+   doesn't "show" anything — it sets state that causes a
+   gray rerender. clearRaidaHealth or resetRaidaHealthToUnknown
+   might read better. Bikeshed; ignore unless you're touching
+   this file again.
+
+
+Things that could be wrong but aren't
+=====================================
+- I checked NavigationPane.css:222 — the
+  navigation-pane__raida-dot--unknown class exists and renders
+  with --border-medium background. Gray reset will visually
+  work.
+- I checked the .spinning animation — defined in
+  QMailDashboard.css:70 (now scaled by --motion-scale per a
+  separate CSS edit). Spinner CSS is intact.
+- The useEffect dependency arrays look right. Both new effects
+  are properly keyed.
+- No new console errors expected: applyRaidaEcho still guards
+  on data.raidas being an array; the null branch is explicit
+  and intentional.
+
+
+Compatibility / regression risk
+================================
+LOW. Changes are additive:
+  - Adding timeouts to steps that previously had none =
+    can't make a fast step slower.
+  - Adding gray-reset on refresh-start = visible-only change,
+    doesn't affect actual echo data flow.
+  - Reordering steps = changes the order things complete in
+    but not what completes. The handleRefresh outcomes
+    (success/warning notification) are unchanged.
+  - Auto-refresh pause while isRefreshing = pauses a fetch
+    that would have happened anyway, kicks off again on the
+    next non-refresh tick.
+
+I don't see a way this regresses BUG-58's fix or the previous
+working-day refresh behavior. Manual smoke after commit is
+still warranted (per STANDARD 3) but I'd be surprised by a
+failure.
+
+
+Recommended commit shape
+========================
+Per STANDARD 5, since BUG-61 and BUG-62 share the same diff:
+
+  fix(BUG-61, BUG-62): per-step refresh timeouts + gray
+  RAIDA dots during refresh
+
+  BUG-61: handleRefresh's await chain had no timeouts, so a
+  hung sub-step (most commonly a beacon ping against a dead
+  RAIDA) blocked the finally block that flips isRefreshing
+  back. Each step now races a 30s timer (20s for the RAIDA
+  echo) and rejects with a clear "step name did not finish
+  within Ns" error.
+
+  BUG-62: NavigationPane's RAIDA dot grid kept the previous
+  red/green state during refresh, then atomically replaced
+  it when the echo settled. Now the dots immediately go gray
+  ("unknown") on refresh-start and repopulate when echo
+  completes, making the in-flight state visible. RAIDA echo
+  is moved to the first refresh step so the gray-to-colored
+  feedback is as fast as possible.
+
+  Also: per-RAIDA status mapping now uses raida.index (was
+  positional), and the 120s auto-echo interval pauses while
+  isRefreshing is true so it can't clobber the manual
+  refresh's reset.
+
+  Co-Authored-By: GPT-5 <noreply@openai.com>
+
+
+End of review.

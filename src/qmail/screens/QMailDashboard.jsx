@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { ShieldAlert } from "lucide-react";
 import ComposeModal from "./ComposeModal";
+import WalletActionModal from "./WalletActionModal";
 import ContactsPane from "./ContactsPane";
 import AccountPane from "./AccountPane";
 import NavigationPane from "./NavigationPane";
@@ -26,10 +27,16 @@ import {
   getMailNotifications,
   downloadEmailContent,
   downloadMailAttachment,
+  sendEmail,
+  getQMailPaymentInfo,
+  markQMailPaymentRefunded,
   starEmail,
+  addContact,
+  setContactFavorite,
   convertSnToEmail,
   getIdentity,
   normalizeIdentityForUi,
+  SSE_URL,
 } from "../../api/qmailApiServices";
 import { formatTimestamp } from "./formatTimestamp";
 import {
@@ -43,6 +50,49 @@ import "./QMailDashboard.css";
 const PENDING_DUPLICATE_WINDOW_MS = 60000;
 const SEARCH_RESULT_LIMIT = 50;
 const EMPTY_BODY_PREVIEW = "(no message body)";
+const REFRESH_STEP_TIMEOUT_MS = 30000;
+const RAIDA_REFRESH_TIMEOUT_MS = 20000;
+const DECRYPT_REVEAL_MIN_MS = 2200;
+const PAYMENT_STATUS_UNCLAIMED = 0;
+const PAYMENT_STATUS_CLAIMED = 1;
+const PAYMENT_STATUS_REFUNDED = 3;
+const PAYMENT_REJECTION_MESSAGE =
+  "The payment you sent was rejected by the receiver. The inbox fee you included has been refunded. Your email may or may not have been read.";
+
+
+const normalizeMailIdentifier = (identifier) => {
+  if (!identifier) return "";
+  const value = String(identifier);
+  return value.startsWith("pending-") ? value.slice("pending-".length) : value;
+};
+
+const getEmailDownloadIdentifier = (email = {}) =>
+  normalizeMailIdentifier(email.guid || email.file_guid || email.email_id || email.id);
+
+const isEmailExplicitlyUndownloaded = (email = {}) =>
+  email.isPending ||
+  email.isDownloaded === false ||
+  email.isDownloaded === "false" ||
+  email.isDownloaded === 0;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const runWithRefreshTimeout = (label, step, timeoutMs) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(
+        new Error(
+          `${label} did not finish within ${Math.round(timeoutMs / 1000)} seconds`,
+        ),
+      );
+    }, timeoutMs);
+  });
+
+  return Promise.race([Promise.resolve().then(step), timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+};
 
 const getFirstNonBlankText = (...values) =>
   values.find(
@@ -83,13 +133,218 @@ const timestampToMs = (value) => {
   return num < 1e12 ? num * 1000 : num;
 };
 
+const QMAIL_DENOMINATION_CODE_TO_VALUE = {
+  0: 1,
+  1: 10,
+  2: 100,
+  3: 1000,
+  4: 10000,
+};
+
+const readNumericSenderField = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue)) return numberValue;
+  }
+  return null;
+};
+
+const readEmailReadFlag = (email = {}, fallback = false) => {
+  const values = [email.is_read, email.isRead, email.read];
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes"].includes(normalized)) return true;
+      if (["false", "0", "no"].includes(normalized)) return false;
+    }
+  }
+  return fallback;
+};
+
+const getEmailId = (email = {}) =>
+  email.id || email.email_id || email.EmailID || email.guid || email.file_guid || "";
+
+const getEmailInboxFee = (email = {}) => {
+  const inboxFee = readNumericSenderField(email.inboxFee, email.inbox_fee);
+  return inboxFee && inboxFee > 0 ? inboxFee : 0;
+};
+
+const getEmailPaymentStatus = (email = {}) =>
+  readNumericSenderField(email.paymentStatus, email.payment_status);
+
+const emailMayHaveRefundablePayment = (email = {}) => {
+  const status = getEmailPaymentStatus(email);
+  if (status === PAYMENT_STATUS_CLAIMED || status === PAYMENT_STATUS_REFUNDED) {
+    return false;
+  }
+  if (status === PAYMENT_STATUS_UNCLAIMED) return true;
+
+  const statusText = String(
+    email.paymentStatusText || email.payment_status_text || "",
+  ).toLowerCase();
+  if (statusText === "claimed" || statusText === "refunded") return false;
+  if (statusText === "unclaimed") return true;
+
+  return getEmailInboxFee(email) > 0;
+};
+
+const buildPaymentRejectionSubject = (email = {}) => {
+  const subject = String(email.subject || "QMail message").trim();
+  return `Payment rejected: ${subject || "QMail message"}`;
+};
+
+const buildPaymentRejectionBody = (lockerCode) =>
+  [
+    PAYMENT_REJECTION_MESSAGE,
+    "",
+    `Refund locker key: ${lockerCode}`,
+  ].join("\n");
+
+const isSerialNumberText = (value) =>
+  typeof value === "string" && /^\d+$/.test(value.trim());
+
+const getEmailSenderSn = (email = {}) => {
+  const sn = readNumericSenderField(email.sender_sn, email.senderSn);
+  return sn && sn > 0 ? sn : null;
+};
+
+const getEmailSenderDenominationCode = (email = {}) => {
+  const code = readNumericSenderField(
+    email.sender_denomination_code,
+    email.senderDenominationCode,
+  );
+  if (code !== null && code >= 0 && code <= 4) return code;
+
+  const denomination = readNumericSenderField(
+    email.sender_denomination,
+    email.senderDenomination,
+  );
+  const codeFromValue = Object.entries(QMAIL_DENOMINATION_CODE_TO_VALUE).find(
+    ([, value]) => value === denomination,
+  );
+  return codeFromValue ? Number(codeFromValue[0]) : null;
+};
+
+const getEmailSenderDenomination = (email = {}) => {
+  const denomination = readNumericSenderField(
+    email.sender_denomination,
+    email.senderDenomination,
+  );
+  if (denomination && denomination > 0) return denomination;
+
+  const code = getEmailSenderDenominationCode(email);
+  return code !== null ? QMAIL_DENOMINATION_CODE_TO_VALUE[code] : null;
+};
+
+const getEmailSenderAddress = (email = {}, fallback = "Unknown Sender") => {
+  const address = [
+    email.sender_address,
+    email.senderAddress,
+    email.senderEmail,
+    email.from,
+    email.sender,
+  ].find(
+    (value) =>
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      !isSerialNumberText(value) &&
+      !/^SN#/i.test(value.trim()) &&
+      !/^Unknown( Sender)?$/i.test(value.trim()),
+  );
+  if (address) return address.trim();
+
+  const senderSn = getEmailSenderSn(email);
+  if (senderSn) return String(senderSn);
+
+  const serialText = [email.senderEmail, email.from, email.sender].find(
+    (value) => typeof value === "string" && isSerialNumberText(value),
+  );
+  return serialText ? serialText.trim() : fallback;
+};
+
+const getEmailSenderFields = (email = {}, fallback = "Unknown Sender") => {
+  const senderSn = getEmailSenderSn(email);
+  const senderDenomination = getEmailSenderDenomination(email);
+  const senderDenominationCode = getEmailSenderDenominationCode(email);
+  const sender = getEmailSenderAddress(email, senderSn ? String(senderSn) : fallback);
+  const senderEmail = sender && (sender !== fallback || senderSn) ? sender : "";
+
+  return {
+    sender,
+    senderEmail,
+    from: senderEmail,
+    sender_address: senderEmail,
+    senderSn,
+    sender_sn: senderSn,
+    senderDenomination,
+    sender_denomination: senderDenomination,
+    senderDenominationCode,
+    sender_denomination_code: senderDenominationCode,
+  };
+};
+
+// Folders whose messages the user SENT — for these we display the recipient
+// ("To"), not the sender (which would be the user themselves).
+const OUTGOING_FOLDERS = new Set(["sent", "drafts"]);
+
+// Build the "sender_*" display fields that EmailListItem / ReadingPane /
+// SenderAvatar all read. For incoming mail these are the real sender; for
+// outgoing mail (Sent/Drafts) we map the primary RECIPIENT into the same
+// sender-shaped fields so the existing display components show the
+// recipient without any per-component folder branching.
+const getEmailDisplayIdentityFields = (email = {}, folder) => {
+  if (!OUTGOING_FOLDERS.has(folder)) {
+    return getEmailSenderFields(email);
+  }
+
+  const recipientSn =
+    readNumericSenderField(email.recipientSn, email.recipient_sn) || null;
+  const recipientCode = (() => {
+    const code = readNumericSenderField(
+      email.recipientDenominationCode,
+      email.recipient_denomination_code,
+    );
+    return code !== null && code >= 0 && code <= 4 ? code : null;
+  })();
+  const recipientAddress =
+    typeof email.recipientAddress === "string" && email.recipientAddress.trim()
+      ? email.recipientAddress.trim()
+      : typeof email.recipient_address === "string" && email.recipient_address.trim()
+      ? email.recipient_address.trim()
+      : recipientSn
+      ? String(recipientSn)
+      : "";
+  const extraCount =
+    (readNumericSenderField(email.recipientCount, email.recipient_count) || 0) - 1;
+  // When a message has multiple recipients, hint at it after the first.
+  const displayName =
+    recipientAddress && extraCount > 0
+      ? `${recipientAddress} +${extraCount}`
+      : recipientAddress || "Unknown Recipient";
+
+  return {
+    sender: displayName,
+    senderEmail: recipientAddress,
+    from: recipientAddress,
+    sender_address: recipientAddress,
+    senderSn: recipientSn,
+    sender_sn: recipientSn,
+    senderDenomination: null,
+    sender_denomination: null,
+    senderDenominationCode: recipientCode,
+    sender_denomination_code: recipientCode,
+  };
+};
+
 const getPendingSender = (notif) =>
-  notif.sender_address ||
-  notif.senderAddress ||
-  notif.sender_name ||
-  notif.senderName ||
-  (notif.sender_sn ? String(notif.sender_sn) : "") ||
-  "Unknown Sender";
+  getEmailSenderAddress(
+    notif,
+    notif.sender_name || notif.senderName || "Unknown Sender",
+  );
 
 // FIX-03: replace the dead `initValues` prop with `initialIdentity`
 // (threaded from App via QMail). May be null on the has_id fallback
@@ -122,12 +377,14 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const [walletBalance, setWalletBalance] = useState(null);
   const [folders, setFolders] = useState([]);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [walletActionMode, setWalletActionMode] = useState(null);
   const [composeContext, setComposeContext] = useState(null);
   const [raidaEchoSnapshot, setRaidaEchoSnapshot] = useState(null);
   const { addNotification, clearAllNotifications } = useNotification();
 
   const [pendingMails, setPendingMails] = useState([]);
-  const [isDownloadingItem, setIsDownloadingItem] = useState(null);
+  const [decryptingMailIds, setDecryptingMailIds] = useState(() => new Set());
+  const [refundingEmailIds, setRefundingEmailIds] = useState(() => new Set());
   const [emailAttachments, setEmailAttachments] = useState([]);
   const [pendingDangerousAttachment, setPendingDangerousAttachment] =
     useState(null);
@@ -145,6 +402,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   // completion can detect "user has moved on" without relying on a
   // stale closure of selectedEmail.
   const selectedEmailRef = useRef(null);
+  const currentFolderRef = useRef(currentFolder);
   // gpt-batch3 #2: monotonic request counter for draft hydration.
   // handleSelectEmail's isDraft branch captures the counter value
   // before awaiting; if a newer click bumps it (or a different folder
@@ -152,6 +410,20 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const draftHydrateRequestRef = useRef(0);
   const previousMailCountsRef = useRef({});
   const pendingMailsRef = useRef([]);
+  const mailDownloadPromisesRef = useRef(new Map());
+  // Serial queue for background tell downloads. The rest_core HTTP server is
+  // single-threaded, so a slow cmd-74 download (30s when a RAIDA times out)
+  // blocks every other request — including the inbox list query — until it
+  // finishes. Firing N pending-tell downloads at once therefore freezes the
+  // inbox behind them. We drain them ONE AT A TIME, and only after the inbox
+  // has had a chance to render, so the list paints immediately and pending
+  // rows fill in via SSE as each download completes.
+  const tellDownloadQueueRef = useRef([]);
+  const tellDownloadQueuedIdsRef = useRef(new Set());
+  const tellDownloadDrainingRef = useRef(false);
+  const interactiveDecryptIdsRef = useRef(new Set());
+  const decryptRevealDeadlineRef = useRef(new Map());
+  const seenNotificationIdsRef = useRef(new Set());
 
   // FIX-03: seed from App's normalized identity, or null if the
   // has_id fallback path skipped seeding. The mount-time useEffect
@@ -168,7 +440,11 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     const seenBySenderWindow = new Map();
 
     return pendingMails.map((notif) => {
-      const sender = getPendingSender(notif);
+      const guid = notif.guid || notif.file_guid;
+      const identifier = normalizeMailIdentifier(guid);
+      const isDecrypting = identifier ? decryptingMailIds.has(identifier) : false;
+      const senderFields = getEmailSenderFields(notif, getPendingSender(notif));
+      const sender = senderFields.sender;
       const rawTimestamp = getPendingTimestamp(notif);
       const timestampMs = timestampToMs(rawTimestamp);
       const duplicateKey = `${sender.toLowerCase()}::${
@@ -180,31 +456,83 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         formatTimestamp(rawTimestamp) || new Date().toLocaleTimeString();
 
       return {
-        id: `pending-${notif.guid}`,
-        guid: notif.guid,
-        sender,
-        senderEmail: sender,
-        from: sender,
-        subject: `🔒 Encrypted message${sequence > 1 ? ` #${sequence}` : ""}`,
-        preview: `Waiting to decrypt. Arrived ${formattedTime}.`,
+        id: `pending-${identifier || guid}`,
+        guid,
+        ...senderFields,
+        subject: `${isDecrypting ? "Decrypting" : "Encrypted"} message${sequence > 1 ? ` #${sequence}` : ""}`,
+        preview: isDecrypting
+          ? "Downloading stripes and decrypting in the background."
+          : `Queued for background decryption. Arrived ${formattedTime}.`,
         rawTimestamp: Number(rawTimestamp) || 0,
         timestamp: formattedTime,
         isPending: true,
+        isRead: false,
         isDownloaded: false,
+        isDecrypting,
         isPlaceholderSubject: true,
       };
     });
-  }, [pendingMails]);
+  }, [decryptingMailIds, pendingMails]);
 
   const displayEmails = useMemo(() => {
-    return currentFolder === "inbox"
+    const baseEmails = currentFolder === "inbox"
       ? [...formattedPendingMails, ...emails]
       : emails;
-  }, [currentFolder, formattedPendingMails, emails]);
+    return sortMode === "unread"
+      ? baseEmails.filter((email) => !email.isRead)
+      : baseEmails;
+  }, [currentFolder, formattedPendingMails, emails, sortMode]);
+  const qmailAddress = useMemo(() => (
+    userAccount?.prettyAddress ||
+    userAccount?.pretty_address ||
+    userAccount?.email_address ||
+    (userAccount?.address && userAccount?.domain
+      ? `${userAccount.address}@${userAccount.domain}`
+      : userAccount?.address) ||
+    ""
+  ), [userAccount]);
 
   useEffect(() => {
     pendingMailsRef.current = pendingMails;
   }, [pendingMails]);
+
+  useEffect(() => {
+    currentFolderRef.current = currentFolder;
+  }, [currentFolder]);
+
+  const setMailDecrypting = (identifier, isDecrypting) => {
+    const normalizedIdentifier = normalizeMailIdentifier(identifier);
+    if (!normalizedIdentifier) return;
+
+    setDecryptingMailIds((prev) => {
+      const next = new Set(prev);
+      if (isDecrypting) next.add(normalizedIdentifier);
+      else next.delete(normalizedIdentifier);
+      return next;
+    });
+  };
+
+  const setEmailRefunding = (emailId, isRefunding) => {
+    const normalizedEmailId = String(emailId || "").toLowerCase();
+    if (!normalizedEmailId) return;
+
+    setRefundingEmailIds((prev) => {
+      const next = new Set(prev);
+      if (isRefunding) next.add(normalizedEmailId);
+      else next.delete(normalizedEmailId);
+      return next;
+    });
+  };
+
+  const waitForDecryptReveal = async (identifier) => {
+    const normalizedIdentifier = normalizeMailIdentifier(identifier);
+    const deadline = decryptRevealDeadlineRef.current.get(normalizedIdentifier) || 0;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) {
+      await wait(remainingMs);
+    }
+    decryptRevealDeadlineRef.current.delete(normalizedIdentifier);
+  };
 
   const showDashboardNotification = (notification, fallbackType = "info") => {
     if (!notification) return null;
@@ -236,75 +564,186 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     });
   };
 
-  const mergePendingNotifications = (incoming, { showToasts = true } = {}) => {
+  // Enqueue a pending tell for background download. Idempotent per identifier.
+  const enqueueTellDownload = (identifier) => {
+    if (!identifier || tellDownloadQueuedIdsRef.current.has(identifier)) return;
+    tellDownloadQueuedIdsRef.current.add(identifier);
+    tellDownloadQueueRef.current.push(identifier);
+    drainTellDownloadQueue();
+  };
+
+  // Drain the tell-download queue one item at a time. Yields to the event loop
+  // before starting so any inbox list/counts fetch already in flight is served
+  // by the single-threaded backend first. Each download is awaited before the
+  // next begins, so downloads never pile up and block the server in parallel.
+  const drainTellDownloadQueue = async () => {
+    if (tellDownloadDrainingRef.current) return;
+    tellDownloadDrainingRef.current = true;
+    try {
+      // Let the inbox render before we tie up the single backend thread.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      while (tellDownloadQueueRef.current.length > 0) {
+        const identifier = tellDownloadQueueRef.current.shift();
+        tellDownloadQueuedIdsRef.current.delete(identifier);
+        try {
+          await handleDownloadMail(identifier, { silent: true });
+        } catch (error) {
+          console.warn("Background tell download failed:", error);
+        }
+      }
+    } finally {
+      tellDownloadDrainingRef.current = false;
+    }
+  };
+
+  const mergePendingNotifications = (incoming) => {
     const existing = pendingMailsRef.current;
-    const newNotifs = (incoming || []).filter(
-      (n) => !existing.some((p) => p.guid === n.guid),
+    const existingIds = new Set(
+      existing.map((p) => normalizeMailIdentifier(p.guid || p.file_guid)),
     );
+    const seenIds = seenNotificationIdsRef.current;
+
+    const newNotifs = (incoming || []).filter((n) => {
+      const incomingId = normalizeMailIdentifier(n.guid || n.file_guid);
+      if (!incomingId || existingIds.has(incomingId) || seenIds.has(incomingId)) {
+        return false;
+      }
+      return true;
+    });
 
     if (newNotifs.length === 0) return [];
 
+    newNotifs.forEach((notif) => {
+      const identifier = normalizeMailIdentifier(notif.guid || notif.file_guid);
+      if (identifier) seenIds.add(identifier);
+    });
+
     pendingMailsRef.current = [...existing, ...newNotifs];
     setPendingMails((prev) => {
-      const additions = newNotifs.filter(
-        (n) => !prev.some((p) => p.guid === n.guid),
-      );
+      const additions = newNotifs.filter((n) => {
+        const incomingId = normalizeMailIdentifier(n.guid || n.file_guid);
+        return !prev.some(
+          (p) => normalizeMailIdentifier(p.guid || p.file_guid) === incomingId,
+        );
+      });
       return additions.length > 0 ? [...prev, ...additions] : prev;
     });
 
-    if (showToasts) {
-      if (newNotifs.length > 1) {
-        showDashboardNotification({
-          message: `${newNotifs.length} new emails arrived!`,
-          variant: "success",
-        });
-      } else {
-        const [notif] = newNotifs;
-        showDashboardNotification({
-          message: `New mail from ${getPendingSender(notif)}`,
-          timestamp: formatTimestamp(getPendingTimestamp(notif)),
-          targetPendingGuid: notif.guid,
-          variant: "success",
-        });
-      }
-    }
+    newNotifs.forEach((notif) => {
+      const identifier = normalizeMailIdentifier(notif.guid || notif.file_guid);
+      // Queue rather than fire immediately: the single-threaded backend can
+      // only run one download at a time, and the inbox list must paint first.
+      if (identifier) enqueueTellDownload(identifier);
+    });
 
     return newNotifs;
   };
 
-  // Background Watcher
-  useEffect(() => {
-    // Don't toast on the very first poll — those notifications were
-    // already pending before the user opened the dashboard, so calling
-    // them "new mail" is a lie. Hydrate silently on first run; toast
-    // for arrivals discovered on subsequent polls.
-    let isFirstPoll = true;
+  // Background Watcher — adaptive cadence.
+  //
+  // /notifications/list is only for tells that still need downloading. The
+  // SSE "new-mail" event is emitted after rest_core has already downloaded
+  // and stored the message, so that path refreshes the local inbox directly.
+  const [isSseConnected, setIsSseConnected] = useState(false);
+  const fetchNotificationsRef = useRef(null);
+  const inboxRefreshPromiseRef = useRef(null);
+  const handleNewMailEventRef = useRef(null);
 
-    const fetchNotifications = async () => {
+  fetchNotificationsRef.current = async () => {
+    try {
+      const result = await getMailNotifications();
+      if (result.success && result.data.count > 0) {
+        mergePendingNotifications(result.data.notifications || []);
+      }
+    } catch (error) {
+      console.error("Watch error:", error);
+    }
+  };
+
+  handleNewMailEventRef.current = async (payload = {}) => {
+    const guid = normalizeMailIdentifier(
+      payload.guid || payload.file_guid || payload.email_id,
+    );
+
+    if (guid) {
+      seenNotificationIdsRef.current.add(guid);
+      setPendingMails((prev) => {
+        const next = prev.filter(
+          (mail) => normalizeMailIdentifier(mail.guid || mail.file_guid) !== guid,
+        );
+        pendingMailsRef.current = next;
+        return next;
+      });
+    }
+
+    if (inboxRefreshPromiseRef.current) {
+      return inboxRefreshPromiseRef.current;
+    }
+
+    const refreshPromise = (async () => {
       try {
-        const result = await getMailNotifications();
-        if (result.success && result.data.count > 0) {
-          const newNotifs = mergePendingNotifications(
-            result.data.notifications || [],
-            { showToasts: !isFirstPoll },
-          );
-
-          if (newNotifs.length === 0) {
-            isFirstPoll = false;
-            return;
-          }
+        await loadMailCounts({ refreshInboxOnIncrease: false });
+        if (currentFolderRef.current === "inbox") {
+          setCurrentPage(0);
+          await loadEmails("inbox", 0, { notifyOnError: false });
         }
       } catch (error) {
-        console.error("Watch error:", error);
-      } finally {
-        isFirstPoll = false;
+        console.error("SSE inbox refresh error:", error);
       }
-    };
+    })().finally(() => {
+      inboxRefreshPromiseRef.current = null;
+    });
 
-    const interval = setInterval(fetchNotifications, 10000);
-    fetchNotifications();
+    inboxRefreshPromiseRef.current = refreshPromise;
+    return refreshPromise;
+  };
+
+  useEffect(() => {
+    const tick = () => fetchNotificationsRef.current?.();
+    const cadenceMs = isSseConnected ? 60000 : 10000;
+    const interval = setInterval(tick, cadenceMs);
+    tick();
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSseConnected]);
+
+  useEffect(() => {
+    // EventSource is available in Electron's Chromium renderer; the SSE
+    // server runs on http_port + 100. Browser auto-reconnects on drop, so
+    // we don't manage retry timers — just track connected state for the
+    // adaptive cadence above and refresh the local inbox on events.
+    if (
+      !SSE_URL ||
+      typeof window === "undefined" ||
+      typeof EventSource === "undefined"
+    ) {
+      return undefined;
+    }
+
+    let es;
+    try {
+      es = new EventSource(SSE_URL);
+    } catch (err) {
+      console.warn("SSE: EventSource construction failed:", err);
+      return undefined;
+    }
+
+    es.onopen = () => setIsSseConnected(true);
+    es.onerror = () => setIsSseConnected(false);
+    es.addEventListener("new-mail", (event) => {
+      let payload = {};
+      if (event?.data) {
+        try {
+          payload = JSON.parse(event.data);
+        } catch (err) {
+          console.warn("SSE: invalid new-mail payload:", err);
+        }
+      }
+      handleNewMailEventRef.current?.(payload);
+    });
+
+    return () => {
+      try { es.close(); } catch { /* ignore */ }
+    };
   }, []);
 
   useEffect(() => {
@@ -387,10 +826,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   // BUG-25 FIX: Sync document.title with state via useEffect
   useEffect(() => {
     const unread = mailCounts[currentFolder]?.unread || 0;
-    document.title = unread > 0
+    const base = unread > 0
       ? `(${unread}) QMail - ${currentFolder}`
       : `QMail - ${currentFolder}`;
-  }, [currentFolder, mailCounts]);
+    // Append the user's own address once identity has resolved.
+    document.title = qmailAddress ? `${base} - ${qmailAddress}` : base;
+  }, [currentFolder, mailCounts, qmailAddress]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -409,6 +850,17 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
+  const handleOpenWalletAction = (mode) => {
+    setWalletActionMode(mode === "withdraw" ? "withdraw" : "add");
+  };
+
+  const handleCloseWalletAction = () => {
+    setWalletActionMode(null);
+  };
+
+  const handleWalletUpdated = async () => {
+    await loadWalletBalance();
+  };
   const loadWalletBalance = async () => {
     try {
       const result = await getQMailWalletBalance();
@@ -466,42 +918,20 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
-  const loadMailCounts = async () => {
+  const loadMailCounts = async (options = {}) => {
+    const { refreshInboxOnIncrease = true } = options;
     const result = await getMailCount();
     if (result.success) {
       const newCounts = result.data.counts;
       const previousMailCounts = previousMailCountsRef.current;
 
       if (
+        refreshInboxOnIncrease &&
         previousMailCounts.inbox &&
-        newCounts.inbox.total > previousMailCounts.inbox.total
+        newCounts.inbox.total > previousMailCounts.inbox.total &&
+        currentFolder === "inbox"
       ) {
-        const newMailCount =
-          newCounts.inbox.total - previousMailCounts.inbox.total;
-        if (newMailCount > 1) {
-          showDashboardNotification({
-            message: `${newMailCount} new emails arrived!`,
-            variant: "success",
-          });
-        } else if (pendingMailsRef.current.length === 0) {
-          const latest = await getMailList("inbox", 1, 0, "newest");
-          const latestEmail = latest.success ? latest.data.emails[0] : null;
-          const sender = latestEmail
-            ? latestEmail.sender ||
-              latestEmail.sender_address ||
-              latestEmail.from ||
-              "Unknown Sender"
-            : "Unknown Sender";
-          showDashboardNotification({
-            message: `New mail from ${sender}`,
-            targetEmailId: latestEmail?.id,
-            variant: "success",
-          });
-        }
-
-        if (currentFolder === "inbox") {
-          loadEmails("inbox");
-        }
+        loadEmails("inbox");
       }
 
       if (newCounts.drafts) newCounts.drafts.unread = 0;
@@ -575,12 +1005,11 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         const transformedEmails = result.data.emails.map((email) => {
           const body = email.body || "";
           const previewState = buildPreviewState(body, email.preview);
+          const senderFields = getEmailDisplayIdentityFields(email, folder);
 
           return {
             id: email.EmailID || email.id,
-            sender:
-              email.sender || email.sender_address || email.from || "Unknown",
-            senderEmail: email.senderEmail || email.sender_address || "",
+            ...senderFields,
             subject: email.Subject || email.subject || "No Subject",
             body,
             ...previewState,
@@ -594,17 +1023,15 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
               email.receivedTimestamp ||
               email.timestamp
             ),
-            // FIX: Force read status in trash to prevent "new email" bolding
-            isRead: folder === 'trash' ? true : (email.is_read || email.isRead || false),
-            // FIX: Force downloaded status in trash to bypass the download button UI
-            isDownloaded: folder === 'trash' ? true : (
-              email.downloaded === true ||
-              email.downloaded === "true" ||
-              email.downloaded === 1 ||
-              email.isDownloaded === true
-            ),
+            isRead: readEmailReadFlag(email, folder !== "inbox"),
+            // /messages/list returns local DB rows; only synthetic pending rows need decrypt UI.
+            isDownloaded: true,
             tags: email.tags || [],
             starred: email.isStarred || email.starred || false,
+            inboxFee: email.inboxFee || email.inbox_fee || 0,
+            inbox_fee: email.inbox_fee || email.inboxFee || 0,
+            paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
+            paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
             senderStatus: "none",
             // FIX: Attach the folder identity so ReadingPane knows to use "Delete Permanently"
             folder: folder,
@@ -667,21 +1094,24 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
           const transformedEmails = result.data.emails.map((email) => {
             const body = email.body || "";
             const previewState = buildPreviewState(body, email.preview);
+            const senderFields = getEmailDisplayIdentityFields(email, currentFolder);
 
             return {
               id: email.EmailID || email.id,
-              sender: email.sender || email.sender_address || email.from || "Unknown",
-              senderEmail: email.senderEmail || email.sender_address || "",
+              ...senderFields,
               subject: email.Subject || email.subject || "No Subject",
               body,
               ...previewState,
               rawTimestamp: Number(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp) || 0,
               timestamp: formatTimestamp(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp),
-              isRead: currentFolder === 'trash' ? true : (email.is_read || email.isRead || false),
-              isDownloaded: currentFolder === 'trash' ? true : (email.downloaded === true || email.downloaded === "true" || email.downloaded === 1 || email.isDownloaded === true),
+              isRead: readEmailReadFlag(email, currentFolder !== "inbox"),
+              isDownloaded: true,
               tags: email.tags || [],
               starred: email.isStarred || email.starred || false,
-              inboxFee: email.inboxFee || 0,
+              inboxFee: email.inboxFee || email.inbox_fee || 0,
+              inbox_fee: email.inbox_fee || email.inboxFee || 0,
+              paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
+              paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
               senderStatus: "none",
               folder: currentFolder,
               isTrashed: currentFolder === 'trash',
@@ -724,29 +1154,33 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             email.body_preview,
             email.snippet,
           );
+          const resultFolder =
+            email.folder != null
+              ? (typeof email.folder === "number"
+                  ? ["inbox", "sent", "drafts", "trash", "starred", "archive"][email.folder] || "inbox"
+                  : email.folder)
+              : currentFolder;
+          const senderFields = getEmailDisplayIdentityFields(email, resultFolder);
 
           return {
             id: email.email_id || email.id || Date.now() + Math.random(),
-            sender:
-              email.sender || email.sender_address || String(email.sender_sn || "Unknown"),
-            senderEmail: email.senderEmail || email.sender_address || String(email.sender_sn || ""),
+            ...senderFields,
             subject: email.subject || "No Subject",
             body,
             ...previewState,
             timestamp: formatTimestamp(
               email.received_timestamp || email.timestamp || email.date
             ),
-            isRead: email.is_read || email.isRead || email.read || false,
-            isDownloaded:
-              email.downloaded === true ||
-              email.downloaded === "true" ||
-              email.downloaded === 1 ||
-              email.isDownloaded === true,
+            isRead: readEmailReadFlag(email, false),
+            isDownloaded: true,
             tags: email.tags || [],
             starred: email.is_starred || email.starred || false,
             inboxFee: email.inbox_fee || email.inboxFee || 0,
+            inbox_fee: email.inbox_fee || email.inboxFee || 0,
+            paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
+            paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
             senderStatus: "none",
-            folder: email.folder != null ? (typeof email.folder === "number" ? ["inbox","sent","drafts","trash","starred","archive"][email.folder] || "inbox" : email.folder) : currentFolder,
+            folder: resultFolder,
           };
         });
         setEmails(transformedEmails);
@@ -767,11 +1201,16 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleRefresh = async () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
+    setRaidaEchoSnapshot(null);
     let hadFailure = false;
 
-    const runRefreshStep = async (label, step) => {
+    const runRefreshStep = async (
+      label,
+      step,
+      timeoutMs = REFRESH_STEP_TIMEOUT_MS,
+    ) => {
       try {
-        return await step();
+        return await runWithRefreshTimeout(label, step, timeoutMs);
       } catch (error) {
         hadFailure = true;
         console.warn(`${label} refresh step failed:`, error);
@@ -780,18 +1219,18 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     };
 
     try {
+      await runRefreshStep("RAIDA echo", async () => {
+        const result = await echoRaida();
+        if (!result.success) throw new Error(result.error || "RAIDA echo failed");
+        setRaidaEchoSnapshot(result.data);
+        return result;
+      }, RAIDA_REFRESH_TIMEOUT_MS);
+
       await runRefreshStep("Beacon ping", async () => {
         const result = await checkMailNow();
         if (!result.success) {
           throw new Error(result.error || "Beacon ping failed");
         }
-        return result;
-      });
-
-      await runRefreshStep("RAIDA echo", async () => {
-        const result = await echoRaida();
-        if (!result.success) throw new Error(result.error || "RAIDA echo failed");
-        setRaidaEchoSnapshot(result.data);
         return result;
       });
 
@@ -836,9 +1275,28 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleSelectEmail = async (email) => {
     if (!email) return;
 
-    if (email.isPending || email.isDownloaded === false) {
-      setSelectedEmail(email);
+    const emailFolder = email.folder || currentFolder;
+    const shouldShowDecryptAnimation =
+      emailFolder === "inbox" &&
+      !email.isRead &&
+      isEmailExplicitlyUndownloaded(email);
+
+    if (shouldShowDecryptAnimation) {
+      const identifier = getEmailDownloadIdentifier(email);
+      const pendingSelection = { ...email, isDecrypting: true };
+      setSelectedEmail(pendingSelection);
+      selectedEmailRef.current = pendingSelection;
       setEmailAttachments([]);
+      if (identifier) {
+        const revealDeadline = Date.now() + DECRYPT_REVEAL_MIN_MS;
+        const existingDeadline = decryptRevealDeadlineRef.current.get(identifier) || 0;
+        decryptRevealDeadlineRef.current.set(
+          identifier,
+          Math.max(existingDeadline, revealDeadline),
+        );
+        interactiveDecryptIdsRef.current.add(identifier);
+        handleDownloadMail(identifier, { silent: false });
+      }
       return;
     }
 
@@ -911,7 +1369,13 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       handleMarkAsRead(email.id, true);
     }
 
-    if (email.id && !email.isDraft && email.isDownloaded) {
+    const canLoadStoredEmail =
+      email.id &&
+      !email.isDraft &&
+      !email.isPending &&
+      !String(email.id).startsWith("pending-");
+
+    if (canLoadStoredEmail) {
       // FIX: Removed setLoading(true) so the list doesn't disappear and jump!
       try {
         const [attRes, bodyRes] = await Promise.allSettled([
@@ -932,9 +1396,17 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             fetchedBody,
             fetchedData.preview,
           );
+          const fetchedSenderFields = getEmailDisplayIdentityFields(
+            {
+              ...email,
+              ...fetchedData,
+            },
+            emailFolder,
+          );
           setSelectedEmail((prev) => ({
             ...prev,
             ...fetchedData,
+            ...fetchedSenderFields,
             ...previewState,
             isRead: true,
             isDownloaded: true,
@@ -945,9 +1417,22 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
               String(e.id).toLowerCase() === String(email.id).toLowerCase()
                 ? {
                     ...e,
+                    ...fetchedSenderFields,
                     // FIX: Ab yahan subject aur preview dono backend ke fresh data se update honge
                     subject: fetchedData.Subject || fetchedData.subject || e.subject,
                     ...previewState,
+                    inboxFee: fetchedData.inboxFee || fetchedData.inbox_fee || e.inboxFee || 0,
+                    inbox_fee: fetchedData.inbox_fee || fetchedData.inboxFee || e.inbox_fee || 0,
+                    paymentStatus:
+                      fetchedData.paymentStatus ??
+                      fetchedData.payment_status ??
+                      e.paymentStatus ??
+                      null,
+                    paymentStatusText:
+                      fetchedData.paymentStatusText ||
+                      fetchedData.payment_status_text ||
+                      e.paymentStatusText ||
+                      "",
                     body: fetchedBody || e.body,
                   }
                 : e,
@@ -972,17 +1457,33 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     setIsComposeOpen(true);
   };
 
-  const handleReply = async (email) => {
-    // Resolve sender's full email address from serial number if needed
-    let replyEmail = { ...email };
-    const senderEmail = email.senderEmail || email.from || "";
-    // If senderEmail looks like just a serial number, resolve it
-    if (senderEmail && /^\d+$/.test(senderEmail)) {
-      const result = await convertSnToEmail(parseInt(senderEmail, 10));
+  const resolveReplySender = async (email) => {
+    const replyEmail = { ...email };
+    const senderEmail = getEmailSenderAddress(email, "");
+
+    if (senderEmail) {
+      replyEmail.senderEmail = senderEmail;
+      replyEmail.from = senderEmail;
+      replyEmail.sender = senderEmail;
+    }
+
+    if (senderEmail && isSerialNumberText(senderEmail)) {
+      const result = await convertSnToEmail(
+        parseInt(senderEmail, 10),
+        getEmailSenderDenomination(email),
+      );
       if (result.success) {
         replyEmail.senderEmail = result.email;
+        replyEmail.from = result.email;
+        replyEmail.sender = result.email;
       }
     }
+
+    return replyEmail;
+  };
+
+  const handleReply = async (email) => {
+    const replyEmail = await resolveReplySender(email);
     setComposeContext({
       mode: "reply",
       sourceEmail: replyEmail,
@@ -1014,14 +1515,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       return;
     }
 
-    let replyEmail = { ...email };
-    const senderEmail = email.senderEmail || email.from || "";
-    if (senderEmail && /^\d+$/.test(senderEmail)) {
-      const result = await convertSnToEmail(parseInt(senderEmail, 10));
-      if (result.success) {
-        replyEmail.senderEmail = result.email;
-      }
-    }
+    const replyEmail = await resolveReplySender(email);
     setComposeContext({
       mode: "replyAll",
       sourceEmail: replyEmail,
@@ -1056,8 +1550,8 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     showDashboardNotification("Email Sent!", "success");
     await loadWalletBalance();
     await loadDrafts();
-    if (currentFolder === "drafts") {
-      await loadEmails("drafts");
+    if (currentFolder === "drafts" || currentFolder === "sent") {
+      await loadEmails(currentFolder);
     }
     await loadMailCounts();
   };
@@ -1084,13 +1578,18 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     setMailCounts(INITIAL_MAIL_COUNTS);
     previousMailCountsRef.current = {};
     pendingMailsRef.current = [];
+    mailDownloadPromisesRef.current.clear();
+    interactiveDecryptIdsRef.current.clear();
+    decryptRevealDeadlineRef.current.clear();
+    seenNotificationIdsRef.current.clear();
+    setDecryptingMailIds(new Set());
+    setRefundingEmailIds(new Set());
     setWalletBalance(null);
     setFolders([]);
     setIsComposeOpen(false);
     setComposeContext(null);
     clearAllNotifications();
     setPendingMails([]);
-    setIsDownloadingItem(null);
     setEmailAttachments([]);
     setPendingDangerousAttachment(null);
     setLoadingDraftId(null);
@@ -1266,7 +1765,561 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     }
   };
 
-  // the code works
+  const markPaymentRefundedInState = (emailId, paymentData = {}) => {
+    const normalizedEmailId = String(emailId || "").toLowerCase();
+    if (!normalizedEmailId) return;
+
+    const paymentStatusText =
+      paymentData.paymentStatusText ||
+      paymentData.payment_status_text ||
+      "refunded";
+    const paymentPatch = {
+      paymentStatus: PAYMENT_STATUS_REFUNDED,
+      payment_status: PAYMENT_STATUS_REFUNDED,
+      paymentStatusText,
+      payment_status_text: paymentStatusText,
+    };
+
+    setEmails((prevEmails) =>
+      prevEmails.map((email) =>
+        String(getEmailId(email)).toLowerCase() === normalizedEmailId
+          ? { ...email, ...paymentPatch }
+          : email,
+      ),
+    );
+
+    setSelectedEmail((prev) =>
+      prev && String(getEmailId(prev)).toLowerCase() === normalizedEmailId
+        ? { ...prev, ...paymentPatch }
+        : prev,
+    );
+  };
+
+  const getRefundRecipientAddress = async (email) => {
+    const replyEmail = await resolveReplySender(email);
+    const recipient = getEmailSenderAddress(replyEmail, "");
+    return recipient && !isSerialNumberText(recipient) ? recipient : "";
+  };
+
+  const refundEmailPayment = async (email) => {
+    const emailId = getEmailId(email);
+    if (!emailId || String(emailId).startsWith("pending-")) {
+      return {
+        success: false,
+        message: "Message is not ready for refunding.",
+      };
+    }
+
+    setEmailRefunding(emailId, true);
+    try {
+      const paymentResult = await getQMailPaymentInfo(emailId);
+      if (!paymentResult.success) {
+        return {
+          success: false,
+          message: paymentResult.error || "Could not read payment details.",
+        };
+      }
+
+      const payment = paymentResult.data || {};
+      if (!payment.hasPayment) {
+        return {
+          success: true,
+          skipped: true,
+          noPayment: true,
+          message: "No payment is attached to this message.",
+        };
+      }
+
+      const paymentStatus = payment.paymentStatus;
+      const paymentStatusText = String(payment.paymentStatusText || "").toLowerCase();
+      if (paymentStatus === PAYMENT_STATUS_CLAIMED || paymentStatusText === "claimed") {
+        return {
+          success: false,
+          claimed: true,
+          message: "Payment has already been claimed and cannot be refunded.",
+        };
+      }
+
+      if (paymentStatus === PAYMENT_STATUS_REFUNDED || paymentStatusText === "refunded") {
+        markPaymentRefundedInState(emailId, payment);
+        return {
+          success: true,
+          skipped: true,
+          alreadyRefunded: true,
+          message: "Payment was already refunded.",
+        };
+      }
+
+      const lockerCode = String(payment.lockerCode || "").trim();
+      if (!lockerCode) {
+        return {
+          success: false,
+          message: "Payment locker key is missing from this message.",
+        };
+      }
+
+      const recipient = await getRefundRecipientAddress(email);
+      if (!recipient) {
+        return {
+          success: false,
+          message: "Could not derive the sender's QMail address for the refund.",
+        };
+      }
+
+      const sendResult = await sendEmail({
+        to: [recipient],
+        cc: [],
+        bcc: [],
+        subject: buildPaymentRejectionSubject(email),
+        body: buildPaymentRejectionBody(lockerCode),
+      });
+
+      if (!sendResult.success) {
+        return {
+          success: false,
+          message: sendResult.error || "Could not send the refund message.",
+        };
+      }
+
+      const markResult = await markQMailPaymentRefunded(emailId);
+      if (!markResult.success) {
+        return {
+          success: false,
+          message:
+            markResult.error ||
+            "Refund message was sent, but the local payment status could not be updated.",
+        };
+      }
+
+      markPaymentRefundedInState(emailId, markResult.data);
+      await Promise.all([loadWalletBalance(), loadMailCounts()]);
+      return {
+        success: true,
+        refunded: true,
+        message: "Payment rejected and locker key returned.",
+      };
+    } catch (error) {
+      console.error("Payment refund failed:", error);
+      return {
+        success: false,
+        message: error.message || "Payment refund failed.",
+      };
+    } finally {
+      setEmailRefunding(emailId, false);
+    }
+  };
+
+  const deleteMessages = async (messages, { permanent = false } = {}) => {
+    const ids = [...new Set(
+      (messages || [])
+        .map((email) => getEmailId(email))
+        .filter((id) => id && !String(id).startsWith("pending-")),
+    )];
+    if (ids.length === 0) return 0;
+
+    const deleteFn = permanent ? deleteEmailPermanent : deleteEmail;
+    const results = await Promise.all(
+      ids.map(async (id) => ({ id, result: await deleteFn(id) })),
+    );
+    const deletedIds = results
+      .filter(({ result }) => result.success)
+      .map(({ id }) => String(id).toLowerCase());
+    const deletedIdSet = new Set(deletedIds);
+
+    if (deletedIdSet.size > 0) {
+      setEmails((prevEmails) =>
+        prevEmails.filter(
+          (email) => !deletedIdSet.has(String(getEmailId(email)).toLowerCase()),
+        ),
+      );
+      setSelectedEmail((prev) =>
+        prev && deletedIdSet.has(String(getEmailId(prev)).toLowerCase())
+          ? null
+          : prev,
+      );
+    }
+
+    await loadMailCounts();
+    return deletedIdSet.size;
+  };
+
+  const softDeleteMessages = (messages) => deleteMessages(messages);
+
+
+  const handleRefundEmails = async (messages, { deleteAfter = false } = {}) => {
+    const selectedMessages = (messages || []).filter(
+      (email) => email && !email.isPending,
+    );
+    if (selectedMessages.length === 0) return;
+
+    let refundedCount = 0;
+    let alreadyRefundedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    const deleteCandidates = [];
+
+    for (const email of selectedMessages) {
+      if (!emailMayHaveRefundablePayment(email)) {
+        skippedCount += 1;
+        if (deleteAfter) deleteCandidates.push(email);
+        continue;
+      }
+
+      const result = await refundEmailPayment(email);
+      if (result.success) {
+        if (result.refunded) refundedCount += 1;
+        else if (result.alreadyRefunded) alreadyRefundedCount += 1;
+        else skippedCount += 1;
+        if (deleteAfter) deleteCandidates.push(email);
+      } else {
+        failedCount += 1;
+      }
+    }
+
+    let deletedCount = 0;
+    if (deleteAfter && deleteCandidates.length > 0) {
+      deletedCount = await softDeleteMessages(deleteCandidates);
+    }
+
+    const parts = [];
+    if (refundedCount > 0) {
+      parts.push(`${refundedCount} payment${refundedCount === 1 ? "" : "s"} refunded`);
+    }
+    if (alreadyRefundedCount > 0) {
+      parts.push(`${alreadyRefundedCount} already refunded`);
+    }
+    if (deletedCount > 0) {
+      parts.push(`${deletedCount} message${deletedCount === 1 ? "" : "s"} moved to trash`);
+    }
+    if (failedCount > 0) {
+      parts.push(`${failedCount} refund${failedCount === 1 ? "" : "s"} failed`);
+    }
+
+    if (parts.length === 0 && skippedCount > 0) {
+      parts.push("No refundable payments were selected");
+    }
+
+    if (parts.length > 0) {
+      showDashboardNotification(
+        `${parts.join(". ")}.`,
+        failedCount > 0 ? "warning" : "success",
+      );
+    }
+  };
+
+  const handleRejectPayment = async (email) => {
+    const result = await refundEmailPayment(email);
+    showDashboardNotification(
+      result.message ||
+        (result.success
+          ? "Payment rejected and locker key returned."
+          : "Could not reject this payment."),
+      result.success ? "success" : "error",
+    );
+  };
+
+  const getSenderActionKey = (email = {}) => {
+    const senderSn = getEmailSenderSn(email);
+    const denomination = getEmailSenderDenomination(email);
+    if (senderSn && denomination) return `sn:${denomination}:${senderSn}`;
+    if (senderSn) return `sn:${senderSn}`;
+
+    const address = getEmailSenderAddress(email, "");
+    return address ? `address:${address.toLowerCase()}` : "";
+  };
+
+  const getMessagesFromSameSender = async (sourceEmail) => {
+    const senderKey = getSenderActionKey(sourceEmail);
+    if (!senderKey) return [];
+    const folderMessages = await fetchFolderMessagesForCommand(currentFolder);
+    return folderMessages.filter(
+      (email) => !email.isPending && getSenderActionKey(email) === senderKey,
+    );
+  };
+
+  const buildSenderContactPayload = async (email) => {
+    const senderSn = getEmailSenderSn(email);
+    if (!senderSn) {
+      return { success: false, error: "Sender serial number is not available." };
+    }
+
+    const denomination = getEmailSenderDenomination(email);
+    const lookup = await convertSnToEmail(senderSn, denomination);
+    const senderAddress = lookup.success
+      ? lookup.email
+      : getEmailSenderAddress(email, "");
+    const nameSource = String(
+      email.sender && !isSerialNumberText(email.sender)
+        ? email.sender
+        : senderAddress || `Sender ${senderSn}`,
+    )
+      .replace(/^@/, "")
+      .split("@")[0]
+      .replace(/[._-]+/g, " ")
+      .trim();
+    const nameParts = nameSource.split(/\s+/).filter(Boolean);
+    const firstName = lookup.firstName || nameParts[0] || "QMail";
+    const lastName = lookup.lastName || nameParts.slice(1).join(" ") || "Sender";
+
+    return {
+      success: true,
+      data: {
+        serial_number: String(senderSn),
+        denomination: denomination ? String(denomination) : undefined,
+        first_name: firstName,
+        last_name: lastName,
+        description: senderAddress
+          ? `QMail sender ${senderAddress}`
+          : "QMail sender",
+      },
+    };
+  };
+
+  const addSenderContact = async (email, { favorite = false } = {}) => {
+    const payload = await buildSenderContactPayload(email);
+    if (!payload.success) return payload;
+
+    const contactResult = await addContact(payload.data);
+    const contactAlreadyExists =
+      !contactResult.success &&
+      /already|exist|duplicate/i.test(String(contactResult.error || ""));
+    if (!contactResult.success && !contactAlreadyExists) {
+      return { success: false, error: contactResult.error || "Could not add contact." };
+    }
+
+    if (favorite) {
+      const favoriteResult = await setContactFavorite(payload.data.serial_number, true);
+      if (!favoriteResult.success) {
+        return {
+          success: false,
+          error: favoriteResult.error || "Contact was added, but favorite could not be saved.",
+        };
+      }
+    }
+
+    return { success: true, alreadyExists: contactAlreadyExists };
+  };
+
+  const moveMessagesToFolder = async (messages, targetFolder) => {
+    const ids = [...new Set(
+      (messages || [])
+        .map((email) => getEmailId(email))
+        .filter((id) => id && !String(id).startsWith("pending-")),
+    )];
+    if (ids.length === 0) return 0;
+
+    const results = await Promise.all(
+      ids.map(async (id) => ({ id, result: await moveEmail(id, targetFolder) })),
+    );
+    const movedIds = results
+      .filter(({ result }) => result.success)
+      .map(({ id }) => String(id).toLowerCase());
+    const movedIdSet = new Set(movedIds);
+
+    if (movedIdSet.size > 0) {
+      setEmails((prevEmails) =>
+        prevEmails.filter(
+          (email) => !movedIdSet.has(String(getEmailId(email)).toLowerCase()),
+        ),
+      );
+      setSelectedEmail((prev) =>
+        prev && movedIdSet.has(String(getEmailId(prev)).toLowerCase())
+          ? null
+          : prev,
+      );
+    }
+
+    await loadMailCounts();
+    return movedIdSet.size;
+  };
+
+  const handleMessageRowAction = async (email, action) => {
+    if (!email || email.isPending) return;
+
+    try {
+      if (action === "add-contact" || action === "add-favorite") {
+        const result = await addSenderContact(email, {
+          favorite: action === "add-favorite",
+        });
+        showDashboardNotification(
+          result.success
+            ? action === "add-favorite"
+              ? "Sender added to favorites."
+              : "Sender added to contacts."
+            : result.error || "Could not add this sender.",
+          result.success ? "success" : "error",
+        );
+        return;
+      }
+
+      if (action === "refund") {
+        await handleRefundEmails([email], { deleteAfter: false });
+        return;
+      }
+
+      if (action === "refund-delete") {
+        await handleRefundEmails([email], { deleteAfter: true });
+        return;
+      }
+
+      if (action === "delete-from-sender") {
+        const messages = await getMessagesFromSameSender(email);
+        const deletedCount = await deleteMessages(messages, {
+          permanent: currentFolder === "trash",
+        });
+        showDashboardNotification(
+          deletedCount > 0
+            ? `${deletedCount} message${deletedCount === 1 ? "" : "s"} deleted.`
+            : "No matching messages were found.",
+          deletedCount > 0 ? "success" : "info",
+        );
+        return;
+      }
+
+      if (action === "archive-from-sender") {
+        const messages = await getMessagesFromSameSender(email);
+        const movedCount = await moveMessagesToFolder(messages, "archive");
+        showDashboardNotification(
+          movedCount > 0
+            ? `${movedCount} message${movedCount === 1 ? "" : "s"} archived.`
+            : "No matching messages were found.",
+          movedCount > 0 ? "success" : "info",
+        );
+      }
+    } catch (error) {
+      console.error("Message row action failed:", error);
+      showDashboardNotification("Could not complete that message action.", "error");
+    }
+  };
+  const fetchFolderMessagesForCommand = async (folder) => {
+    if (folder === "drafts") {
+      const result = await getDrafts();
+      if (!result.success) throw new Error(result.error || "Could not load drafts.");
+      return result.data?.drafts || [];
+    }
+
+    const pageSize = 200;
+    let offset = 0;
+    const allMessages = [];
+    for (let guard = 0; guard < 100; guard += 1) {
+      const result = await getMailList(folder, pageSize, offset, "newest");
+      if (!result.success) throw new Error(result.error || `Could not load ${folder}.`);
+      const pageMessages = result.data?.emails || [];
+      allMessages.push(...pageMessages);
+      const total = Number(result.data?.totalCount ?? allMessages.length);
+      if (pageMessages.length < pageSize || allMessages.length >= total) break;
+      offset += pageSize;
+    }
+    return allMessages;
+  };
+
+  const refreshFolderAfterMenuCommand = async (folder) => {
+    await loadMailCounts();
+    if (folder === "drafts") await loadDrafts();
+    if (currentFolder === folder) {
+      setCurrentPage(0);
+      await loadEmails(folder, 0, { notifyOnError: false });
+    }
+  };
+
+  const handleEmptyFolderCommand = async (folder) => {
+    const messages = await fetchFolderMessagesForCommand(folder);
+    const ids = messages.map((email) => getEmailId(email)).filter(Boolean);
+    if (ids.length === 0) {
+      showDashboardNotification(`${folder.charAt(0).toUpperCase() + folder.slice(1)} is already empty.`, "info");
+      return;
+    }
+
+    const deletedCount = await deleteMessages(messages, {
+      permanent: folder === "trash",
+    });
+    await refreshFolderAfterMenuCommand(folder);
+    showDashboardNotification(
+      deletedCount > 0
+        ? `${deletedCount} ${folder} message${deletedCount === 1 ? "" : "s"} deleted.`
+        : `No ${folder} messages were deleted.`,
+      deletedCount > 0 ? "success" : "warning",
+    );
+  };
+
+  const handleMarkAllAsReadCommand = async () => {
+    const folder = currentFolder || "inbox";
+    const messages = await fetchFolderMessagesForCommand(folder);
+    const unreadMessages = messages.filter(
+      (email) => !readEmailReadFlag(email, folder !== "inbox"),
+    );
+
+    if (unreadMessages.length === 0) {
+      showDashboardNotification("No unread messages found.", "info");
+      return;
+    }
+
+    const results = await Promise.all(
+      unreadMessages.map(async (email) => {
+        const id = getEmailId(email);
+        return { id, result: id ? await markEmailRead(id, true) : { success: false } };
+      }),
+    );
+    const updatedIds = results
+      .filter(({ result }) => result.success)
+      .map(({ id }) => String(id).toLowerCase());
+    const updatedIdSet = new Set(updatedIds);
+
+    if (updatedIdSet.size > 0) {
+      setEmails((prevEmails) =>
+        prevEmails.map((email) =>
+          updatedIdSet.has(String(getEmailId(email)).toLowerCase())
+            ? { ...email, isRead: true }
+            : email,
+        ),
+      );
+      setSelectedEmail((prev) =>
+        prev && updatedIdSet.has(String(getEmailId(prev)).toLowerCase())
+          ? { ...prev, isRead: true }
+          : prev,
+      );
+    }
+
+    await loadMailCounts();
+    showDashboardNotification(
+      `${updatedIdSet.size} message${updatedIdSet.size === 1 ? "" : "s"} marked as read.`,
+      updatedIdSet.size > 0 ? "success" : "warning",
+    );
+  };
+
+  const handleQmailMenuCommand = async (command) => {
+    try {
+      switch (command) {
+        case "empty-trash":
+          await handleEmptyFolderCommand("trash");
+          break;
+        case "empty-drafts":
+          await handleEmptyFolderCommand("drafts");
+          break;
+        case "empty-inbox":
+          await handleEmptyFolderCommand("inbox");
+          break;
+        case "mark-all-read":
+          await handleMarkAllAsReadCommand();
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error("QMail menu command failed:", error);
+      showDashboardNotification("Could not complete that menu command.", "error");
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const unsubscribe = window.electronAPI?.onQmailMenuCommand?.((command) => {
+      handleQmailMenuCommand(command);
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+    // Re-register when mailbox state changes so menu commands use fresh state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFolder, emails, selectedEmail]);
 
   // FIX-01: POST /api/qmail/net/messages/download returns metadata
   // (email_id, sender_sn, stripes_*), not the decrypted body. The body
@@ -1304,170 +2357,232 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     return null;
   };
 
-  const handleDownloadMail = async (identifier) => {
-    setIsDownloadingItem(identifier);
-    try {
-      const isLocalEmailId =
-        identifier && identifier.length === 32 && !identifier.startsWith("pending-");
+  const handleDownloadMail = async (identifier, options = {}) => {
+    const normalizedIdentifier = normalizeMailIdentifier(identifier);
+    if (!normalizedIdentifier) return null;
 
-      let hydrated;
+    const existingPromise = mailDownloadPromisesRef.current.get(normalizedIdentifier);
+    if (existingPromise) return existingPromise;
 
-      if (isLocalEmailId) {
-        // Already-downloaded path: read directly from local DB.
-        // Gem-batch1: wrap in try/catch to match the resilience of the
-        // pending path (DB read can transiently fail).
-        try {
-          hydrated = await hydrateDownloadedEmail(identifier);
-        } catch (e) {
-          console.warn("Local DB short-circuit failed; falling through to network:", e);
+    const { silent = false } = options;
+    const shouldNotifyFailure = () =>
+      !silent || interactiveDecryptIdsRef.current.has(normalizedIdentifier);
+
+    const downloadPromise = (async () => {
+      setMailDecrypting(normalizedIdentifier, true);
+      try {
+        const isLocalEmailId =
+          normalizedIdentifier.length === 32 &&
+          !String(identifier || "").startsWith("pending-");
+        const hasPendingTell = pendingMailsRef.current.some(
+          (mail) => getEmailDownloadIdentifier(mail) === normalizedIdentifier,
+        );
+
+        let hydrated;
+
+        if (isLocalEmailId && !hasPendingTell) {
+          try {
+            hydrated = await hydrateDownloadedEmail(normalizedIdentifier);
+          } catch (e) {
+            console.warn("Local DB short-circuit failed; falling through to network:", e);
+          }
         }
-      }
-
-      if (!hydrated) {
-        // Pending path (or local short-circuit miss): download from network,
-        // then hydrate body+attachments from the local DB using the returned
-        // email_id.
-        const downloadRes = await downloadEmailContent(identifier);
-        const downloadData = downloadRes.data || downloadRes;
-
-        const downloadOk =
-          downloadRes.success ||
-          downloadData.status === "success" ||
-          downloadData.email_id;
-
-        if (!downloadOk) {
-          showDashboardNotification("Failed to decrypt message.", "error");
-          return;
-        }
-
-        // The download response carries email_id; the body lives in /db/messages/get.
-        const emailId = downloadData.email_id || (isLocalEmailId ? identifier : null);
-
-        if (!emailId) {
-          showDashboardNotification("Failed to decrypt message.", "error");
-          return;
-        }
-
-        hydrated = await hydrateDownloadedEmail(emailId);
 
         if (!hydrated) {
-          // Download succeeded but DB hydration failed after retries.
-          // Leave the pending row in place so the user can retry.
-          showDashboardNotification(
-            "Service temporarily unavailable. Try opening the message again.",
-            "warning",
-          );
-          return;
+          // Background (silent) downloads use the async/202 path so the
+          // single-threaded backend doesn't block other requests for the
+          // whole download. Interactive opens stay synchronous so the body
+          // is ready to render immediately.
+          const downloadRes = await downloadEmailContent(normalizedIdentifier, {
+            background: silent,
+          });
+          const downloadData = downloadRes.data || downloadRes;
+
+          const downloadOk =
+            downloadRes.success ||
+            downloadData.status === "success" ||
+            downloadData.status === "accepted" ||
+            downloadData.email_id;
+
+          if (!downloadOk) {
+            if (shouldNotifyFailure()) {
+              showDashboardNotification("Failed to decrypt message.", "error");
+            }
+            return null;
+          }
+
+          // Async hand-off (202 Accepted): the backend is downloading on a
+          // worker thread and will emit an SSE "new-mail" event when the row
+          // is stored. Nothing to hydrate yet; leave the pending row in place
+          // and let the SSE handler refresh the inbox.
+          if (downloadData.status === "accepted" && !downloadData.email_id) {
+            return null;
+          }
+
+          const emailId = downloadData.email_id || (isLocalEmailId ? normalizedIdentifier : null);
+
+          if (!emailId) {
+            if (shouldNotifyFailure()) {
+              showDashboardNotification("Failed to decrypt message.", "error");
+            }
+            return null;
+          }
+
+          hydrated = await hydrateDownloadedEmail(emailId);
+
+          if (!hydrated) {
+            if (shouldNotifyFailure()) {
+              showDashboardNotification(
+                "Service temporarily unavailable. Try opening the message again.",
+                "warning",
+              );
+            }
+            return null;
+          }
         }
-      }
 
-      const decryptedBody = hydrated.body.body || "";
-      const decryptedSubject = hydrated.body.subject || hydrated.body.Subject || "";
-      const incomingAttachments = hydrated.attachments;
-      const hydratedId = hydrated.body.email_id || hydrated.body.EmailID || identifier;
-      const previewState = buildPreviewState(decryptedBody, hydrated.body.preview);
+        await waitForDecryptReveal(normalizedIdentifier);
 
-      // Build the row to insert synchronously so the list doesn't flicker
-      // between "pending row removed" and "loadEmails finished refreshing."
-      // loadEmails() below will replace this with the canonical server data.
-      // Gem-batch1 follow-up: prevent the visible gap.
-      const hydratedRow = {
-        id: hydratedId,
-        sender:
-          hydrated.body.sender ||
-          hydrated.body.sender_address ||
-          hydrated.body.from ||
-          "Unknown",
-        senderEmail:
-          hydrated.body.senderEmail || hydrated.body.sender_address || "",
-        subject: decryptedSubject || "No Subject",
-        body: decryptedBody,
-        ...previewState,
-        rawTimestamp: Number(
-          hydrated.body.ReceivedTimestamp ||
-            hydrated.body.receivedTimestamp ||
-            hydrated.body.timestamp,
-        ) || 0,
-        timestamp: formatTimestamp(
-          hydrated.body.ReceivedTimestamp ||
-            hydrated.body.receivedTimestamp ||
-            hydrated.body.timestamp,
-        ),
-        isRead: true,
-        isDownloaded: true,
-        tags: hydrated.body.tags || [],
-        starred: hydrated.body.isStarred || hydrated.body.starred || false,
-        senderStatus: "none",
-        folder: currentFolder,
-        isTrashed: currentFolder === "trash",
-      };
+        const decryptedBody = hydrated.body.body || "";
+        const decryptedSubject = hydrated.body.subject || hydrated.body.Subject || "";
+        const incomingAttachments = hydrated.attachments;
+        const hydratedId = hydrated.body.email_id || hydrated.body.EmailID || normalizedIdentifier;
+        const previewState = buildPreviewState(decryptedBody, hydrated.body.preview);
+        const hydratedSenderFields = getEmailSenderFields(hydrated.body);
+        const shouldMarkRead = interactiveDecryptIdsRef.current.has(normalizedIdentifier);
+        const hydratedIsRead =
+          shouldMarkRead ||
+          hydrated.body.isRead === true ||
+          hydrated.body.is_read === true ||
+          hydrated.body.isRead === 1 ||
+          hydrated.body.is_read === 1;
 
-      // Step 1: insert hydrated row into emails (or update if already present
-      // — happens when this was a local short-circuit on an existing row).
-      setEmails((prev) => {
-        const existingIdx = prev.findIndex(
-          (e) => e.id === identifier || e.guid === identifier || e.id === hydratedId,
-        );
-        if (existingIdx >= 0) {
-          const next = prev.slice();
-          next[existingIdx] = { ...prev[existingIdx], ...hydratedRow };
-          return next;
-        }
-        return [hydratedRow, ...prev];
-      });
-
-      // Step 2: drop the pending row only after emails has the replacement,
-      // so displayEmails never has a gap.
-      // Gem-batch1: removed the ineffective `m.guid !== hydrated.body.email_id`
-      // filter — guid (network) and email_id (local DB) are different ID
-      // namespaces, so that comparison never matched anything.
-      setPendingMails((prev) => prev.filter((m) => m.guid !== identifier));
-
-      // gpt-batch1: stale-selection guard. If the user clicked away
-      // mid-hydrate, do NOT overwrite selectedEmail/attachments — that
-      // would render this message's body on top of the new message's
-      // metadata.
-      const currentSel = selectedEmailRef.current;
-      const stillSelected =
-        currentSel &&
-        (currentSel.id === identifier ||
-          currentSel.guid === identifier ||
-          currentSel.id === hydratedId);
-
-      if (stillSelected) {
-        setSelectedEmail((prev) => ({
-          ...prev,
-          ...hydrated.body,
+        const hydratedRow = {
+          id: hydratedId,
+          ...hydratedSenderFields,
+          subject: decryptedSubject || "No Subject",
           body: decryptedBody,
-          subject: decryptedSubject || prev?.subject,
+          ...previewState,
+          rawTimestamp: Number(
+            hydrated.body.ReceivedTimestamp ||
+              hydrated.body.receivedTimestamp ||
+              hydrated.body.timestamp,
+          ) || 0,
+          timestamp: formatTimestamp(
+            hydrated.body.ReceivedTimestamp ||
+              hydrated.body.receivedTimestamp ||
+              hydrated.body.timestamp,
+          ),
+          isRead: hydratedIsRead,
           isDownloaded: true,
-          isPending: false,
-          isRead: true,
-        }));
-        setEmailAttachments(incomingAttachments);
-      }
+          tags: hydrated.body.tags || [],
+          starred: hydrated.body.isStarred || hydrated.body.starred || false,
+          inboxFee: hydrated.body.inboxFee || hydrated.body.inbox_fee || 0,
+          inbox_fee: hydrated.body.inbox_fee || hydrated.body.inboxFee || 0,
+          paymentStatus: hydrated.body.paymentStatus ?? hydrated.body.payment_status ?? null,
+          paymentStatusText: hydrated.body.paymentStatusText || hydrated.body.payment_status_text || "",
+          senderStatus: "none",
+          folder: "inbox",
+          isTrashed: false,
+        };
 
-      // gpt-batch1: persist read state to the backend, not just UI.
-      // handleSelectEmail's pending branch returns early before the
-      // normal markEmailRead path; do it here once the local email_id
-      // is known.
-      if (hydratedId) {
-        markEmailRead(hydratedId, true).catch((e) =>
-          console.warn("markEmailRead after hydrate failed:", e),
+        const viewingInbox = currentFolderRef.current === "inbox";
+
+        if (viewingInbox) {
+          setEmails((prev) => {
+            const existingIdx = prev.findIndex(
+              (e) =>
+                e.id === normalizedIdentifier ||
+                e.guid === normalizedIdentifier ||
+                e.id === hydratedId,
+            );
+            if (existingIdx >= 0) {
+              const next = prev.slice();
+              next[existingIdx] = { ...prev[existingIdx], ...hydratedRow };
+              return next;
+            }
+            return [hydratedRow, ...prev];
+          });
+        }
+
+        setPendingMails((prev) => {
+          const next = prev.filter(
+            (m) => normalizeMailIdentifier(m.guid || m.file_guid) !== normalizedIdentifier,
+          );
+          pendingMailsRef.current = next;
+          return next;
+        });
+
+        const currentSel = selectedEmailRef.current;
+        const stillSelected =
+          currentSel &&
+          (getEmailDownloadIdentifier(currentSel) === normalizedIdentifier ||
+            currentSel.id === hydratedId);
+
+        if (stillSelected) {
+          setSelectedEmail((prev) => ({
+            ...prev,
+            ...hydrated.body,
+            ...hydratedSenderFields,
+            body: decryptedBody,
+            subject: decryptedSubject || prev?.subject,
+            isDownloaded: true,
+            isPending: false,
+            isDecrypting: false,
+            isRead: hydratedIsRead,
+          }));
+          setEmailAttachments(incomingAttachments);
+        }
+
+        if (shouldMarkRead && hydratedId) {
+          markEmailRead(hydratedId, true).catch((e) =>
+            console.warn("markEmailRead after hydrate failed:", e),
+          );
+        }
+
+        if (viewingInbox) {
+          loadEmails("inbox");
+        }
+        loadMailCounts();
+
+        return hydratedRow;
+      } catch (error) {
+        console.error("Download failed:", error);
+        if (shouldNotifyFailure()) {
+          showDashboardNotification("Download failed", "error");
+        }
+        return null;
+      } finally {
+        interactiveDecryptIdsRef.current.delete(normalizedIdentifier);
+        decryptRevealDeadlineRef.current.delete(normalizedIdentifier);
+        setSelectedEmail((prev) =>
+          prev &&
+          prev.isPending &&
+          getEmailDownloadIdentifier(prev) === normalizedIdentifier
+            ? { ...prev, isDecrypting: false }
+            : prev,
         );
+        setMailDecrypting(normalizedIdentifier, false);
+        mailDownloadPromisesRef.current.delete(normalizedIdentifier);
       }
+    })();
 
-      // Refresh from server — this will replace the synchronously-inserted
-      // hydratedRow with the canonical version.
-      loadEmails(currentFolder);
-      loadMailCounts();
+    mailDownloadPromisesRef.current.set(normalizedIdentifier, downloadPromise);
+    return downloadPromise;
+  };
 
-      showDashboardNotification("Message decrypted successfully!", "success");
+  // Re-fetch the open email's attachment rows so a just-completed on-demand
+  // download flips the row from PENDING (storage_mode 2) to downloaded, which
+  // clears the "Click to download" affordance in the reading pane.
+  const refreshEmailAttachments = async (emailId) => {
+    if (!emailId) return;
+    try {
+      const attRes = await getEmailAttachments(emailId);
+      if (attRes && attRes.success) {
+        setEmailAttachments(attRes.data.attachments || []);
+      }
     } catch (error) {
-      console.error("Download failed:", error);
-      showDashboardNotification("Download failed", "error");
-    } finally {
-      setIsDownloadingItem(null);
+      console.warn("Failed to refresh attachments:", error);
     }
   };
 
@@ -1486,6 +2601,8 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         `Download started for ${attachmentName || "attachment"}!`,
         "success",
       );
+      // The bytes now live on disk; reflect that in the open email.
+      await refreshEmailAttachments(emailId);
     } catch (error) {
       console.error("Attachment download failed:", error);
       showDashboardNotification("Failed to download attachment", "error");
@@ -1527,8 +2644,8 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
 
     setActiveView("inbox");
     setCurrentFolder("inbox");
-    setSelectedEmail(pendingRow);
-    setEmailAttachments([]);
+    currentFolderRef.current = "inbox";
+    handleSelectEmail(pendingRow);
     if (currentFolder !== "inbox") {
       loadEmails("inbox");
     }
@@ -1628,6 +2745,13 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         }}
       />
 
+      <WalletActionModal
+        isOpen={Boolean(walletActionMode)}
+        initialMode={walletActionMode || "add"}
+        walletBalance={walletBalance}
+        onClose={handleCloseWalletAction}
+        onWalletUpdated={handleWalletUpdated}
+      />
       <NavigationPane
         activeView={activeView}
         setActiveView={handleFolderChange}
@@ -1636,6 +2760,8 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         walletBalance={walletBalance}
+        onAddFundsClick={() => handleOpenWalletAction("add")}
+        onWithdrawClick={() => handleOpenWalletAction("withdraw")}
         folders={folders}
         raidaEchoSnapshot={raidaEchoSnapshot}
       />
@@ -1659,19 +2785,22 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
             onMarkAsRead={handleMarkAsRead}
             onDeleteEmail={handleDeleteEmail}
             onDeleteVisibleTrash={handleDeleteVisibleTrash}
+            onRowAction={handleMessageRowAction}
             onToggleStar={handleToggleStar}
             sortMode={sortMode}
             onSortChange={handleSortChange}
             loadingDraftId={loadingDraftId}
             searchResultCapHit={searchResultCapHit}
             pageSize={EMAILS_PER_PAGE}
+            qmailAddress={qmailAddress}
           />
           {!isComposeOpen && (
             <ReadingPane
               email={selectedEmail}
-              onDownload={handleDownloadMail}
-              isDownloading={
-                isDownloadingItem === (selectedEmail?.guid || selectedEmail?.id)
+              isDecrypting={
+                !!selectedEmail &&
+                (decryptingMailIds.has(getEmailDownloadIdentifier(selectedEmail)) ||
+                  selectedEmail.isDecrypting)
               }
               onReply={handleReply}
               onReplyAll={handleReplyAll}
@@ -1679,6 +2808,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               onMarkAsRead={handleMarkAsRead}
               onDeleteEmail={handleDeleteEmail}
               onMoveEmail={handleMoveEmail}
+              onRejectPayment={handleRejectPayment}
+              isRejectingPayment={
+                !!selectedEmail &&
+                refundingEmailIds.has(String(getEmailId(selectedEmail)).toLowerCase())
+              }
               attachments={emailAttachments}
               onDownloadAttachment={handleDownloadAttachment}
             />
@@ -1690,7 +2824,6 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       {activeView === "account" && (
         <AccountPane
           userAccount={userAccount}
-          walletBalance={walletBalance}
           onSignOut={handleSignOut}
         />
       )}

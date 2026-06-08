@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M18 82 V44 L34 32 H66 L82 44 V82 H18 Z M28 50 H36 V58 H28 V50 Z M28 62 H36 V70 H28 V62 Z M46 50 H54 V58 H46 V70 H54 V82 H46 V70 Z M64 50 H72 V58 H64 V50 Z M64 62 H72 V70 H64 V62 Z" fill="#f4edd1" />
+  <path d="M28 32 H72" stroke="#fff4bf" stroke-width="5" stroke-linecap="round" />
+  <path d="M50 32 V20" stroke="#fff4bf" stroke-width="4.4" stroke-linecap="round" />
+</svg>

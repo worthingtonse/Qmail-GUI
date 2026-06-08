@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Mail, ArrowRight, Lock, ShieldCheck, Download, ExternalLink, Loader2, AlertCircle, LogIn } from 'lucide-react';
+import { Mail, ArrowRight, Lock, ShieldCheck, Download, ExternalLink, Loader2, AlertCircle, LogIn, Info, X } from 'lucide-react';
 import {
   importCredentials,
   getIdentity,
@@ -57,6 +57,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
   const [localIdentityLoading, setLocalIdentityLoading] = useState(false);
   const [localIdentityError, setLocalIdentityError] = useState('');
   const [showBuyLockerHint, setShowBuyLockerHint] = useState(false);
+  const [showBuyLockerInfo, setShowBuyLockerInfo] = useState(false);
 
   const loadConfiguredIdentity = useCallback(async (attempts = 3) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -75,11 +76,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
     let cancelled = false;
 
     const checkLocalIdentity = async () => {
-      if (!shouldSkipAutoRestore()) {
-        setLocalIdentityAvailable(false);
-        setLocalIdentity(null);
-        return;
-      }
+      const skipAutoRestore = shouldSkipAutoRestore();
 
       setCheckingLocalIdentity(true);
       setLocalIdentityError('');
@@ -90,9 +87,18 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
           loadConfiguredIdentity(1),
         ]);
         if (cancelled) return;
+
         const hasLocalIdentity = Boolean(idCheck?.has_id || normalized?.configured);
-        setLocalIdentityAvailable(hasLocalIdentity);
-        setLocalIdentity(normalized?.configured ? normalized : null);
+        const configuredIdentity = normalized?.configured ? normalized : null;
+
+        if (hasLocalIdentity && !skipAutoRestore) {
+          clearSkipAutoRestore();
+          onSelectService('qmail', configuredIdentity);
+          return;
+        }
+
+        setLocalIdentityAvailable(Boolean(skipAutoRestore && hasLocalIdentity));
+        setLocalIdentity(configuredIdentity);
       } catch (err) {
         if (cancelled) return;
         console.warn("Existing identity check failed:", err);
@@ -109,7 +115,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
     return () => {
       cancelled = true;
     };
-  }, [loadConfiguredIdentity]);
+  }, [loadConfiguredIdentity, onSelectService]);
 
   const handleUseLocalIdentity = async () => {
     setLocalIdentityLoading(true);
@@ -224,7 +230,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
   };
 
   // The backend accepts any non-empty locker_key. If the input still looks
-  // like the QMail-native XXX-XXXXX shape (<=8 alphanumerics, no other
+  // like the QMail-native XXX-XXXX shape (<=8 alphanumerics, no other
   // characters), we apply the legacy auto-hyphenation as a typing affordance.
   // Otherwise we pass the value through unchanged so a longer/differently
   // formatted key from another tool can be pasted in.
@@ -322,16 +328,52 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
         </div>
       </button>
 
-      <button
-        type="button"
-        onClick={handleBuyLockerCode}
-        className="service-selection-screen__button service-selection-screen__button--wallet"
-      >
-        <div className="service-selection-screen__button-content">
-          <ExternalLink className="service-selection-screen__button-icon" size={24} />
-          <span>Buy Locker Code</span>
+      <div className="service-selection-screen__buy-locker-row">
+        <button
+          type="button"
+          onClick={handleBuyLockerCode}
+          className="service-selection-screen__button service-selection-screen__button--wallet"
+        >
+          <div className="service-selection-screen__button-content">
+            <ExternalLink className="service-selection-screen__button-icon" size={24} />
+            <span>Buy Locker Code</span>
+          </div>
+        </button>
+        <button
+          type="button"
+          className="service-selection-screen__info-button"
+          onClick={() => setShowBuyLockerInfo((show) => !show)}
+          aria-label="About buying a locker code"
+          aria-expanded={showBuyLockerInfo}
+        >
+          <Info size={18} />
+        </button>
+      </div>
+
+      {showBuyLockerInfo && (
+        <div
+          className="service-selection-screen__info-popover"
+          role="dialog"
+          aria-label="Locker code information"
+        >
+          <button
+            type="button"
+            className="service-selection-screen__info-close"
+            onClick={() => setShowBuyLockerInfo(false)}
+            aria-label="Close locker code information"
+          >
+            <X size={16} />
+          </button>
+          <p>
+            You do not have to purchase an email address if you have a RAIDA
+            locker code that contains one CloudCoin note valued more than 10
+            CloudCoins. The CloudCoin will be imported from the locker into this
+            program so you can stake your Qmail address. Locker codes can be
+            created by using the CloudCoin Desktop software or by clicking this
+            button.
+          </p>
         </div>
-      </button>
+      )}
 
       {showBuyLockerHint && (
         <div className="service-selection-screen__notice service-selection-screen__notice--hint">
@@ -352,7 +394,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
         value={lockerCode}
         onChange={handleLockerInputChange}
         onKeyPress={(e) => e.key === 'Enter' && !loading && handleImport()}
-        placeholder="XXX-XXXXX or any locker key"
+        placeholder="XXX-XXXX"
         className="service-selection-screen__locker-input"
         disabled={loading}
         autoFocus

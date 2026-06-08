@@ -205,18 +205,11 @@
  *   1. Focus rings — every interactive element gets a thick yellow
  *      outline. The default rgba glow in component CSS (e.g. App.css
  *      .nav-tab:focus) is invisible against black; this overrides it.
- *   2. Motion collapse — most component CSS still uses raw transition
- *      durations (Phase 4 hasn't migrated them). The token
- *      --motion-scale: 0 above only takes effect where the calc()
- *      pattern is used. The rule below kills any remaining transitions
- *      and animations under high-contrast, matching the a11y intent
- *      of the OS-level reduced-motion block in App.css :549–560.
- *   3. Decorative background layers — the body::after particle field
- *      in src/index.css uses hard-coded rgba purple/blue/amber gradients
- *      that bleed colour onto the black background. Force-hide them.
- *
- * !important is used intentionally: high-contrast is an accessibility
- * mode where consistency outranks component-level styling decisions.
+ *   2. Motion collapse — handled by the high-contrast
+ *      `--motion-scale: 0` token now that the remaining raw animation
+ *      durations have been migrated to the shared timing tokens.
+ *   3. Decorative background layers — handled by the transparent
+ *      particle tokens in the block above.
  */
 [data-theme="high-contrast"] :focus-visible,
 [data-theme="high-contrast"] button:focus,
@@ -226,21 +219,9 @@
 [data-theme="high-contrast"] textarea:focus,
 [data-theme="high-contrast"] [tabindex]:focus,
 [data-theme="high-contrast"] [role="button"]:focus {
-  outline: 3px solid #ffff00 !important;
-  outline-offset: 2px !important;
-  box-shadow: none !important;
-}
-
-[data-theme="high-contrast"] *,
-[data-theme="high-contrast"] *::before,
-[data-theme="high-contrast"] *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
-}
-
-[data-theme="high-contrast"] body::after {
-  opacity: 0 !important;
+  outline: 3px solid #ffff00;
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 /* Caret colour follows the accent so the user can find where they're

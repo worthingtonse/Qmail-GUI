@@ -1,0 +1,188 @@
+QMail upload stripe-size limit findings
+======================================
+
+Question
+--------
+Can the hardcoded ~65K-per-stripe upload limit be changed much higher, and can
+the amount be put in the configuration file?
+
+Short answer
+------------
+Not safely by changing a constant or config value alone.
+
+The current ~65K upload stripe limit comes from the RAIDA request packet header.
+The request header stores body length in two bytes at offset 22, so a single
+request body cannot exceed 65,535 bytes. The QMail upload code is correctly
+deriving its stripe payload ceiling from that protocol limit.
+
+If the server and client both add a new request framing format with a larger
+body-length field, then a larger per-stripe cap can be made configurable. Until
+that protocol/server change exists, a config value can only lower the current
+limit, not raise it.
+
+Primary evidence
+----------------
+1. Client request packets are limited to a 16-bit body size.
+
+   File:
+   D:\Code\src\C\rest_core\src\protocol.c
+
+   Important code:
+   - protocol_build_packet() calculates:
+     full_body_size = challenge(16) + command_data_size + terminator(2)
+   - It rejects full_body_size > UINT16_MAX.
+   - It writes the size with utils_write_u16_be() at PROTO_OFFSET_BODY_SIZE.
+
+   This means the packet writer cannot encode a request body above 65,535
+   bytes. Raising the QMail upload constant without changing this writer would
+   fail before the packet is sent, or worse, wrap/truncate the size if the guard
+   were removed.
+
+2. The protocol spec documents the request body length as two bytes.
+
+   File:
+   D:\Code\src\C\rest_core\docs\qmail_protocol_spec.md
+
+   The common RAIDA request header says:
+   offset 22, size 2, Body Length.
+
+   This is not specific to QMail attachments. It is the shared RAIDA request
+   packet format used by protocol_build_packet().
+
+3. The QMail upload orchestrator derives the stripe limit from the 16-bit
+   request body limit.
+
+   File:
+   D:\Code\src\C\rest_core\src\qmail\qmail_upload_orchestrator.c
+
+   Current constants:
+   - UPLOAD_PROTOCOL_MAX_BODY_SIZE = 65535
+   - UPLOAD_PROTOCOL_CHALLENGE_SIZE = 16
+   - QMAIL_PREAMBLE_SIZE = 32
+   - UPLOAD_WIRE_HEADER_SIZE = 38
+   - UPLOAD_PROTOCOL_TERMINATOR_SIZE = 2
+
+   Therefore:
+   UPLOAD_MAX_STRIPE_BYTES = 65535 - (16 + 32 + 38 + 2)
+                           = 65447 bytes
+
+   The upload body builder refuses a stripe larger than this and logs:
+   "QMail Upload: stripe too large for 16-bit request header"
+
+4. The CMD 70 UPLOAD2 command itself has a 4-byte data_length field.
+
+   File:
+   D:\Code\src\C\rest_core\docs\qmail_protocol_spec.md
+
+   UPLOAD2 has:
+   file_guid(16) + locker_code(16) + file_type(1) + duration(1) +
+   data_length(4) + stripe_data
+
+   So the QMail command format can describe much larger stripe data, but the
+   outer RAIDA request packet cannot currently carry it.
+
+Current practical upload ceiling
+--------------------------------
+Because each file is striped across data servers and one parity server, the max
+single-file size is approximately:
+
+  UPLOAD_MAX_STRIPE_BYTES * data_stripe_count
+
+With all 25 QMail servers available:
+
+  65,447 * 24 = 1,570,728 bytes, about 1.5 MiB
+
+With 7 servers total, meaning 6 data stripes and 1 parity:
+
+  65,447 * 6 = 392,682 bytes, about 383 KiB
+
+The code can expand the server set to keep stripes below 65,447 bytes, but it
+cannot exceed 24 data stripes because QMAIL_MAX_SERVERS is 25.
+
+Other limits found
+------------------
+1. QMAIL_MAX_ATTACHMENT_SIZE is still 5 MB.
+
+   File:
+   D:\Code\src\C\rest_core\include\qmail\qmail_types.h
+
+   The define is:
+   QMAIL_MAX_ATTACHMENT_SIZE (5 * 1024 * 1024)
+
+   This is not the tightest upload limit right now, but it remains a separate
+   attachment-size ceiling in some attachment handling paths.
+
+2. The GUI does not enforce a file-size limit directly.
+
+   File:
+   D:\Code\src\JavaScript\Qmail-GUI\src\qmail\screens\ComposeModal.jsx
+
+   It limits attachment count to 50 and combined attachment path bytes to 12,000.
+   That is path/count validation, not a file-size cap.
+
+3. Several upload/receive paths are whole-file-in-memory.
+
+   Files:
+   D:\Code\src\C\rest_core\src\qmail\qmail_upload_orchestrator.c
+   D:\Code\src\C\rest_core\src\qmail\qmail_receive.c
+   D:\Code\src\C\rest_core\src\qmail\qmail_db.c
+
+   The sender reads files into memory and creates stripe buffers. The receiver
+   reassembles attachments in memory and stores internal attachments as SQLite
+   blobs. Even if the packet limit were raised, this architecture is not a good
+   fit for hundreds of megabytes.
+
+Can it be made configurable?
+----------------------------
+Yes, but only as part of a protocol-aware change.
+
+Safe version:
+1. Add a config setting such as qmail_upload_max_stripe_bytes to rest_core.conf.
+2. Clamp it to the actual protocol/server capability.
+3. Use it only to choose upload chunk/page size, not to override the wire format.
+
+For the current protocol, the maximum allowed configured value would still be:
+
+  65,447 bytes
+
+If a larger request protocol is added, the config can be allowed to rise to that
+new negotiated maximum.
+
+Can the current 16-bit field be changed to 24-bit or 32-bit?
+-----------------------------------------------------------
+Technically yes, but this is a wire-protocol change and must be coordinated with
+the server. The client cannot do it alone.
+
+Options:
+1. Introduce a new request header version where body length is 24-bit or 32-bit.
+   The response side already uses a 24-bit body size in the client parser, but
+   request packets currently use 16-bit.
+
+2. Add a new QMail upload command that supports chunked/page upload while
+   keeping each RAIDA request under the existing 16-bit limit.
+
+Recommendation
+--------------
+Use chunked/page upload rather than simply making single request packets huge.
+
+For hundreds of megabytes, the safer design is:
+1. Split each attachment into pages/chunks, each small enough to fit the current
+   RAIDA request packet limit.
+2. Stripe each chunk/page across QMail servers.
+3. Add page_number/chunk_number, total_pages, original_size, and checksum/hash
+   metadata to the upload manifest.
+4. Store chunks on the server by guid, file_type, stripe_index, and page_number.
+5. On receive, download and verify pages, then stream them to disk instead of
+   building the whole attachment in memory.
+
+This lets the client send hundreds of megabytes without requiring a large
+single TCP send, without large server-side request buffers, and without forcing
+SQLite to hold very large attachment blobs.
+
+Bottom line
+-----------
+The 65K limit is real and is currently enforced correctly by the client. It is
+not just an arbitrary hardcoded QMail attachment limit. The limit can be made
+configurable only after the actual protocol capability is changed or after
+chunked upload is implemented. The recommended fix for hundreds-of-megabytes
+attachments is chunked upload plus streaming receive/storage.

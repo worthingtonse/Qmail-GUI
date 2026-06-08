@@ -461,6 +461,10 @@
   color: var(--accent-danger);
 }
 
+.account-pane__server-icon--unknown {
+  color: var(--text-tertiary);
+}
+
 /* was: .server-info */
 .account-pane__server-info {
   flex: 1;
@@ -482,6 +486,18 @@
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 }
 
+.account-pane__server-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.account-pane__server-meta span {
+  white-space: nowrap;
+}
 /* was: .security-actions */
 .account-pane__security-actions {
   display: grid;

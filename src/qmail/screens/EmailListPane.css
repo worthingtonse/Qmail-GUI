@@ -80,16 +80,63 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-sm);
+  min-width: 0;
+}
+
+.email-list-pane__title-group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
 }
 
 .email-list-pane__title {
+  flex-shrink: 0;
   margin: 0;
   color: var(--text-primary);
   font-size: var(--font-size-md);
   font-weight: 600;
 }
 
+.email-list-pane__qmail-address {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-list-pane__copy-address {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  align-self: center;
+}
+
+.email-list-pane__copy-address:hover {
+  color: var(--text-primary);
+  background-color: var(--surface-hover, rgba(255, 255, 255, 0.08));
+}
+
+.email-list-pane__copy-address:focus-visible {
+  outline: 2px solid var(--accent, #6366f1);
+  outline-offset: 1px;
+}
+
 .email-list-pane__count {
+  flex-shrink: 0;
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
@@ -210,6 +257,82 @@
   border-color: var(--accent-error);
   background: color-mix(in srgb, var(--status-error) 16%, transparent);
 }
+.email-list-pane__bulk-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-medium);
+  background: var(--tertiary-bg);
+}
+
+.email-list-pane__bulk-action-count {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.email-list-pane__bulk-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.email-list-pane__bulk-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: calc(var(--space-xs) / 1.5) var(--space-sm);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color calc(200ms * var(--motion-scale)) ease,
+    border-color calc(200ms * var(--motion-scale)) ease,
+    color calc(200ms * var(--motion-scale)) ease;
+}
+
+.email-list-pane__bulk-action-button--danger {
+  border-color: var(--status-error);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+}
+
+.email-list-pane__bulk-action-button--warning {
+  border-color: color-mix(in srgb, var(--accent-warning) 60%, var(--border-medium));
+  background: var(--status-warning-bg);
+  color: var(--accent-warning);
+}
+
+.email-list-pane__bulk-action-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.email-list-pane__bulk-action-button--danger:hover:not(:disabled) {
+  border-color: var(--accent-error);
+  background: color-mix(in srgb, var(--status-error) 16%, transparent);
+  color: var(--status-error);
+}
+
+.email-list-pane__bulk-action-button--warning:hover:not(:disabled) {
+  border-color: var(--accent-warning);
+  background: color-mix(in srgb, var(--accent-warning) 16%, transparent);
+  color: var(--accent-warning);
+}
+
+.email-list-pane__bulk-action-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 
 /* was: .email-list */
 .email-list-pane__list {
@@ -260,6 +383,7 @@
 
 /* was: .email-list-item */
 .email-list-pane__item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: var(--space-md);
@@ -318,6 +442,7 @@
 
 .email-list-pane__read-indicator,
 .email-list-pane__list-trash-indicator,
+.email-list-pane__row-menu-button,
 .email-list-pane__draft-checkbox-container {
   display: inline-flex;
   align-items: center;
@@ -355,15 +480,9 @@
 }
 
 .email-list-pane__list-trash-indicator {
-  opacity: 0;
-  transition:
-    opacity calc(200ms * var(--motion-scale)) ease,
-    color calc(200ms * var(--motion-scale)) ease;
-}
-
-.email-list-pane__item:hover .email-list-pane__list-trash-indicator,
-.email-list-pane__item:focus-visible .email-list-pane__list-trash-indicator {
   opacity: 1;
+  transition:
+    color calc(200ms * var(--motion-scale)) ease;
 }
 
 .email-list-pane__list-trash-icon {
@@ -374,10 +493,87 @@
 .email-list-pane__list-trash-indicator:hover .email-list-pane__list-trash-icon {
   color: var(--status-error);
 }
+.email-list-pane__row-menu {
+  position: relative;
+  z-index: 3;
+}
+
+.email-list-pane__row-menu-button {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color calc(200ms * var(--motion-scale)) ease,
+    color calc(200ms * var(--motion-scale)) ease;
+}
+
+.email-list-pane__row-menu-button:hover,
+.email-list-pane__row-menu-button:focus-visible {
+  background: var(--card-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.email-list-pane__row-menu-popover {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: min(17rem, 70vw);
+  padding: calc(var(--space-xs) / 1.5);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--secondary-bg);
+  box-shadow: var(--shadow-lg);
+}
+
+.email-list-pane__row-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-xs) var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.email-list-pane__row-menu-item:hover:not(:disabled),
+.email-list-pane__row-menu-item:focus-visible:not(:disabled) {
+  background: var(--card-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.email-list-pane__row-menu-item--danger:hover:not(:disabled),
+.email-list-pane__row-menu-item--danger:focus-visible:not(:disabled) {
+  background: var(--status-error-bg);
+  color: var(--status-error);
+}
+
+.email-list-pane__row-menu-item:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 .email-list-pane__pending-icon {
   margin-top: calc(var(--space-xs) / 2);
   color: var(--accent-warning);
+}
+
+.email-list-pane__pending-icon--decrypting {
+  color: var(--accent-primary);
 }
 
 .email-list-pane__draft-checkbox-container {
@@ -385,6 +581,23 @@
 }
 
 .email-list-pane__draft-checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--accent-primary);
+  pointer-events: none;
+}
+
+.email-list-pane__message-checkbox-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  margin-top: calc(var(--space-xs) / 2);
+}
+
+.email-list-pane__message-checkbox {
   width: 1rem;
   height: 1rem;
   accent-color: var(--accent-primary);
@@ -411,6 +624,12 @@
   font-size: var(--font-size-sm);
   font-weight: 700;
   box-shadow: var(--shadow-sm);
+}
+
+.email-list-pane__avatar-cartouche {
+  display: block;
+  width: 2.25rem;
+  height: 2.25rem;
 }
 
 /* was: .coin-badge */
@@ -716,11 +935,26 @@
   .email-list-pane__subject {
     font-size: var(--font-size-xs);
   }
+
+  .email-list-pane__bulk-action-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .email-list-pane__bulk-action-buttons {
+    justify-content: stretch;
+  }
+
+  .email-list-pane__bulk-action-button {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .email-list-pane__item:focus-visible,
 .email-list-pane__sort-button:focus-visible,
 .email-list-pane__draft-trash-button:focus-visible,
+.email-list-pane__bulk-action-button:focus-visible,
 .email-list-pane__search-input:focus-visible,
 .email-list-pane__trash-delete-button:focus-visible {
   outline: 2px solid var(--accent-primary);
@@ -732,6 +966,7 @@
   .email-list-pane__search,
   .email-list-pane__sort-button,
   .email-list-pane__draft-trash-button,
+  .email-list-pane__bulk-action-button,
   .email-list-pane__list-trash-indicator,
   .email-list-pane__envelope-icon,
   .email-list-pane__star-icon {

@@ -1,13 +1,13 @@
 /* eslint-disable react/prop-types */
 import { useState } from "react";
-import { Search, Mail, RefreshCw, Trash2, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, Mail, RefreshCw, Trash2, AlertTriangle, Loader2, Copy, Check } from "lucide-react";
 import EmailListItem from "./EmailListItem";
 import "./EmailListPane.css";
 
 const SORT_OPTIONS = [
   { key: "newest", label: "Newest" },
   { key: "unread", label: "Unread" },
-  { key: "fee", label: "Highest Paying" },
+  { key: "fee", label: "Income" },
   { key: "starred", label: "Starred" },
 ];
 
@@ -24,40 +24,27 @@ const EmailListPane = ({
   onMarkAsRead,
   onDeleteEmail,
   onDeleteVisibleTrash,
+  onRowAction,
   onToggleStar,
   sortMode = "newest",
   onSortChange,
   loadingDraftId = null,
   searchResultCapHit = false,
   pageSize = 50,
+  qmailAddress = "",
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [checkedIds, setCheckedIds] = useState(new Set());
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
   const [isDeletingTrashPage, setIsDeletingTrashPage] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
   const visibleTrashMessages =
     currentFolder === "trash" ? emails.filter((email) => !email.isPending) : [];
   const visibleTrashCount = visibleTrashMessages.length;
+  const showQmailAddress = currentFolder === "inbox" && qmailAddress.trim();
   const deleteTrashButtonLabel =
     visibleTrashCount === 1
       ? "Delete this message permanently"
       : `Delete these ${visibleTrashCount} messages permanently`;
-
-  const handleCheck = (id) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleTrashChecked = async () => {
-    for (const id of checkedIds) {
-      await onDeleteEmail(id, false);
-    }
-    setCheckedIds(new Set());
-  };
 
   const handleSearch = (e) => {
     const value = e.target.value;
@@ -65,12 +52,35 @@ const EmailListPane = ({
     onSearch(value);
   };
 
+  const handleCopyAddress = async () => {
+    const address = qmailAddress.trim();
+    if (!address) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(address);
+      } else {
+        // Fallback for environments without the async clipboard API.
+        const textarea = document.createElement("textarea");
+        textarea.value = address;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setAddressCopied(true);
+      setTimeout(() => setAddressCopied(false), 2000);
+    } catch (error) {
+      console.error("Failed to copy QMail address:", error);
+    }
+  };
+
   const handleConfirmDeleteVisibleTrash = async () => {
     setIsDeletingTrashPage(true);
     try {
       await onDeleteVisibleTrash(visibleTrashMessages);
       setShowTrashConfirm(false);
-      setCheckedIds(new Set());
     } finally {
       setIsDeletingTrashPage(false);
     }
@@ -108,7 +118,25 @@ const EmailListPane = ({
 
       <header className="email-list-pane__header">
         <div className="email-list-pane__header-top">
-          <h3 className="email-list-pane__title">{getFolderTitle(currentFolder)}</h3>
+          <div className="email-list-pane__title-group">
+            <h3 className="email-list-pane__title">{getFolderTitle(currentFolder)}</h3>
+            {showQmailAddress && (
+              <span className="email-list-pane__qmail-address" title={qmailAddress}>
+                {qmailAddress}
+              </span>
+            )}
+            {showQmailAddress && (
+              <button
+                type="button"
+                className="email-list-pane__copy-address"
+                onClick={handleCopyAddress}
+                title={addressCopied ? "Copied!" : "Copy address"}
+                aria-label={addressCopied ? "Address copied" : "Copy QMail address"}
+              >
+                {addressCopied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            )}
+          </div>
           <span className="email-list-pane__count">
             {emails.length} {emails.length === 1 ? "message" : "messages"}
           </span>
@@ -155,21 +183,6 @@ const EmailListPane = ({
         </div>
       )}
 
-      {currentFolder === "drafts" && checkedIds.size > 0 && (
-        <div className="email-list-pane__draft-trash-bar">
-          <span className="email-list-pane__draft-trash-count">
-            {checkedIds.size} selected
-          </span>
-          <button
-            type="button"
-            className="email-list-pane__draft-trash-button"
-            onClick={handleTrashChecked}
-          >
-            <Trash2 size={14} /> Delete
-          </button>
-        </div>
-      )}
-
       <div className="email-list-pane__list">
         {isLoading ? (
           <div className="email-list-pane__loading-state">
@@ -199,15 +212,14 @@ const EmailListPane = ({
               }
               onMarkAsRead={onMarkAsRead}
               onDeleteEmail={onDeleteEmail}
+              onRowAction={onRowAction}
               onToggleStar={onToggleStar}
-              isChecked={checkedIds.has(email.id)}
-              onCheck={handleCheck}
               isLoadingDraft={loadingDraftId === email.id}
+              currentFolder={currentFolder}
             />
           ))
         )}
 
-        {/* Pagination Controls */}
         {totalCount > pageSize && (
           <div className="email-list-pane__pagination">
             <button

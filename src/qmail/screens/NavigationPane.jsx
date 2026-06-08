@@ -10,10 +10,31 @@ import {
   Users,
   RefreshCw,
   Wallet,
+  Key,
   Archive,
+  Plus,
+  Upload,
+  AlertTriangle,
+  ExternalLink,
+  Info,
+  X,
 } from "lucide-react";
-import { echoRaida } from "../../api/qmailApiServices";
+import { echoRaida, getServers } from "../../api/qmailApiServices";
+import {
+  RAIDA_COUNT,
+  buildQmailStatusTitle,
+  buildRaidaStatusTitle,
+} from "./serverStatusUi";
 import "./NavigationPane.css";
+
+const CLOUDCOIN_PURCHASE_URL = "https://cloudcoin.com";
+
+const DMP_PAYMENT_INFO = [
+  "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
+  "The Inbox Fee lets recipients get paid for their attention when receiving email. Influencers can set their own inbox fee by registering at https://DistributedMailSystem.com.",
+  "The DMP open standard can support up to 65 thousand different payment currencies. In Phase 1, QMail uses CloudCoin: a quantum-safe, energy-efficient, instant digital cash technology that does not require usernames, logins, or private keys. Like physical cash, it provides strong privacy.",
+  "Places you can purchase CloudCoin include CloudCoin.com.",
+];
 
 const formatBalance = (value) => {
   if (value == null) return "0";
@@ -21,7 +42,46 @@ const formatBalance = (value) => {
   return rounded.toLocaleString();
 };
 
-const RAIDA_COUNT = 25;
+const getNumericWalletValue = (value) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+};
+
+const getWalletSpendableValue = (walletBalance) =>
+  getNumericWalletValue(walletBalance?.spendableValue ?? walletBalance?.totalValue);
+
+const getWalletLockedValue = (walletBalance) =>
+  getNumericWalletValue(walletBalance?.lockedValue ?? walletBalance?.lockerPool?.lockedValue);
+
+const getWalletCombinedValue = (walletBalance) => {
+  if (!walletBalance) return 0;
+  const combinedValue = Number(walletBalance.combinedTotalValue);
+  if (Number.isFinite(combinedValue)) return combinedValue;
+  return getWalletSpendableValue(walletBalance) + getWalletLockedValue(walletBalance);
+};
+
+const getWalletBalanceStatus = (walletBalance) => {
+  if (!walletBalance) return "unknown";
+  const total = getWalletCombinedValue(walletBalance);
+  if (total <= 0) return "empty";
+  if (total <= 100) return "low";
+  return "funded";
+};
+
+const getWalletBalanceTitle = (walletBalance, status) => {
+  if (!walletBalance) return "Default wallet balance";
+
+  const total = formatBalance(getWalletCombinedValue(walletBalance));
+  const spendable = formatBalance(getWalletSpendableValue(walletBalance));
+  const locked = walletBalance.lockerPoolError
+    ? "unknown"
+    : formatBalance(getWalletLockedValue(walletBalance));
+  const breakdown = `Total ${total} CC (${spendable} spendable, ${locked} in lockers).`;
+
+  if (status === "empty") return "Wallet is empty. Purchase or add CloudCoins before sending mail.";
+  if (status === "low") return `Wallet balance is low. ${breakdown}`;
+  return `Default wallet balance. ${breakdown}`;
+};
 
 const DEFAULT_FOLDER_ICONS = {
   inbox: Inbox,
@@ -66,40 +126,131 @@ const NavigationPane = ({
   onRefresh,
   isRefreshing,
   walletBalance,
+  onAddFundsClick,
+  onWithdrawClick,
   folders,
   raidaEchoSnapshot,
 }) => {
   const [raidaHealth, setRaidaHealth] = useState(null);
+  const [raidaDetails, setRaidaDetails] = useState(null);
   const [healthSummary, setHealthSummary] = useState(null);
+  const [qmailServers, setQmailServers] = useState(null);
+  const [qmailSummary, setQmailSummary] = useState(null);
+  const [showWalletPaymentInfo, setShowWalletPaymentInfo] = useState(false);
 
-  const applyRaidaEcho = useCallback((data) => {
-    if (!data || !Array.isArray(data.raidas)) return;
-    const statuses = data.raidas.map((raida) => raida.status === "Ready");
-    setRaidaHealth(statuses);
-    setHealthSummary({
-      available: data.totalAvailable,
-      error: data.totalError,
-      timeout: data.totalTimeout,
-      usable: data.arrayUsable,
-    });
+  const showUnknownRaidaHealth = useCallback(() => {
+    setRaidaHealth(null);
+    setRaidaDetails(null);
+    setHealthSummary(null);
   }, []);
 
-  const checkServerHealth = useCallback(async () => {
-    const result = await echoRaida();
-    if (result.success) {
-      applyRaidaEcho(result.data);
+  const showUnknownQmailHealth = useCallback(() => {
+    setQmailServers((previous) =>
+      Array.isArray(previous)
+        ? previous.map((server) => ({
+            ...server,
+            is_available: null,
+            latency_ms: null,
+          }))
+        : null,
+    );
+    setQmailSummary(null);
+  }, []);
+
+  const applyRaidaEcho = useCallback((data) => {
+    if (!data || !Array.isArray(data.raidas)) {
+      showUnknownRaidaHealth();
+      return;
     }
-  }, [applyRaidaEcho]);
+
+    const statuses = Array.from({ length: RAIDA_COUNT }, () => null);
+    const details = Array.from({ length: RAIDA_COUNT }, () => null);
+    data.raidas.forEach((raida, fallbackIndex) => {
+      const index = Number.isInteger(raida.index) ? raida.index : fallbackIndex;
+      if (index >= 0 && index < RAIDA_COUNT) {
+        statuses[index] = raida.status === "Ready";
+        details[index] = raida;
+      }
+    });
+
+    setRaidaHealth(statuses);
+    setRaidaDetails(details);
+    setHealthSummary({
+      available:
+        data.totalAvailable ?? statuses.filter((status) => status === true).length,
+      error: data.totalError ?? statuses.filter((status) => status === false).length,
+      timeout: data.totalTimeout ?? 0,
+      usable: data.arrayUsable,
+    });
+  }, [showUnknownRaidaHealth]);
+
+  const applyQmailServers = useCallback((servers) => {
+    if (!Array.isArray(servers)) {
+      showUnknownQmailHealth();
+      return;
+    }
+
+    setQmailServers(servers);
+    setQmailSummary({
+      available: servers.filter((server) => server.is_available === true).length,
+      total: servers.length,
+    });
+  }, [showUnknownQmailHealth]);
+
+  const checkServerHealth = useCallback(async () => {
+    const qmailResult = await getServers();
+
+    if (qmailResult.success) {
+      applyQmailServers(qmailResult.data?.servers);
+      if (qmailResult.data?.raidaEcho) {
+        applyRaidaEcho(qmailResult.data.raidaEcho);
+      } else {
+        showUnknownRaidaHealth();
+      }
+      return;
+    }
+
+    showUnknownQmailHealth();
+    const raidaResult = await echoRaida();
+    if (raidaResult.success) {
+      applyRaidaEcho(raidaResult.data);
+    } else {
+      showUnknownRaidaHealth();
+    }
+  }, [
+    applyQmailServers,
+    applyRaidaEcho,
+    showUnknownQmailHealth,
+    showUnknownRaidaHealth,
+  ]);
 
   useEffect(() => {
+    if (isRefreshing) return undefined;
+
     checkServerHealth();
     const interval = setInterval(checkServerHealth, 120000);
     return () => clearInterval(interval);
-  }, [checkServerHealth]);
+  }, [checkServerHealth, isRefreshing]);
+
+  useEffect(() => {
+    if (isRefreshing) {
+      showUnknownRaidaHealth();
+      showUnknownQmailHealth();
+    }
+  }, [isRefreshing, showUnknownQmailHealth, showUnknownRaidaHealth]);
 
   useEffect(() => {
     applyRaidaEcho(raidaEchoSnapshot);
   }, [applyRaidaEcho, raidaEchoSnapshot]);
+
+  const walletBalanceStatus = getWalletBalanceStatus(walletBalance);
+  const walletLockedValue = getWalletLockedValue(walletBalance);
+  const walletCombinedValue = getWalletCombinedValue(walletBalance);
+  const walletBalanceTitle = getWalletBalanceTitle(walletBalance, walletBalanceStatus);
+
+  const handlePurchaseCoins = () => {
+    window.open(CLOUDCOIN_PURCHASE_URL, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <aside className="navigation-pane">
@@ -134,7 +285,7 @@ const NavigationPane = ({
                 <span className="navigation-pane__link-label">
                   {folder.displayName}
                 </span>
-                {count && count.unread > 0 && folder.name !== "trash" && (
+                {count && count.unread > 0 && folder.name !== "sent" && folder.name !== "trash" && (
                   <span className="navigation-pane__count">{count.unread}</span>
                 )}
                 {count &&
@@ -161,21 +312,101 @@ const NavigationPane = ({
           <span className="navigation-pane__link-label">Contacts</span>
         </button>
 
-        <button
-          type="button"
-          className={`navigation-pane__link ${
-            activeView === "account" ? "navigation-pane__link--active" : ""
-          }`}
-          onClick={() => setActiveView("account")}
-        >
+
+        {/* Future wallet details navigation:
+            onClick={() => setActiveView("account")} */}
+        <div className="navigation-pane__link navigation-pane__link--static">
           <Wallet size={18} />
           <span className="navigation-pane__link-label">Wallet</span>
           {walletBalance && (
-            <span className="navigation-pane__wallet-balance">
-              {formatBalance(walletBalance.totalValue)} CC
+            <span
+              className={`navigation-pane__wallet-balance navigation-pane__wallet-balance--${walletBalanceStatus}`}
+              title={walletBalanceTitle}
+              aria-label={walletBalanceTitle}
+            >
+              {(walletBalanceStatus === "empty" || walletBalanceStatus === "low") && (
+                <AlertTriangle size={12} className="navigation-pane__wallet-balance-icon" />
+              )}
+              {formatBalance(walletCombinedValue)} CC
             </span>
           )}
-        </button>
+        </div>
+        <div className="navigation-pane__link navigation-pane__link--static">
+          <Key size={18} />
+          <span className="navigation-pane__link-label">In Lockers</span>
+          {walletBalance && (
+            <span
+              className="navigation-pane__locker-balance"
+              title="Coins pre-funded into locker codes"
+              aria-label={`In lockers ${walletBalance.lockerPoolError ? "unknown" : formatBalance(walletLockedValue)} CC`}
+            >
+              {walletBalance.lockerPoolError ? "--" : formatBalance(walletLockedValue)} CC
+            </span>
+          )}
+        </div>
+        <div className="navigation-pane__wallet-actions" aria-label="Wallet actions">
+          <button
+            type="button"
+            className="navigation-pane__wallet-action"
+            onClick={onAddFundsClick}
+            title="Add Funds"
+            aria-label="Add Funds"
+          >
+            <Plus size={14} />
+            <span>Add Funds</span>
+          </button>
+          <button
+            type="button"
+            className="navigation-pane__wallet-action"
+            onClick={onWithdrawClick}
+            title="Withdraw"
+            aria-label="Withdraw"
+          >
+            <Upload size={14} />
+            <span>Withdraw</span>
+          </button>
+        </div>
+        <div className="navigation-pane__wallet-purchase-row">
+          <button
+            type="button"
+            className="navigation-pane__wallet-action navigation-pane__wallet-action--purchase"
+            onClick={handlePurchaseCoins}
+            title="Purchase Coins"
+            aria-label="Purchase Coins"
+          >
+            <ExternalLink size={14} />
+            <span>Purchase Coins</span>
+          </button>
+          <button
+            type="button"
+            className="navigation-pane__wallet-info-button"
+            onClick={() => setShowWalletPaymentInfo((show) => !show)}
+            title="Why payments are needed"
+            aria-label="Why payments are needed"
+            aria-expanded={showWalletPaymentInfo}
+          >
+            <Info size={14} />
+          </button>
+        </div>
+        {showWalletPaymentInfo && (
+          <div
+            className="navigation-pane__wallet-info-popover"
+            role="dialog"
+            aria-label="Why QMail payments are needed"
+          >
+            <button
+              type="button"
+              className="navigation-pane__wallet-info-close"
+              onClick={() => setShowWalletPaymentInfo(false)}
+              aria-label="Close payment information"
+            >
+              <X size={14} />
+            </button>
+            {DMP_PAYMENT_INFO.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
+        )}
       </nav>
 
       <footer className="navigation-pane__footer">
@@ -190,38 +421,70 @@ const NavigationPane = ({
         </button>
 
         <section
-          className="navigation-pane__raida"
-          aria-label="RAIDA server health"
+          className="navigation-pane__status"
+          aria-label="Server health"
         >
-          <div className="navigation-pane__raida-grid">
-            {Array.from({ length: RAIDA_COUNT }, (_, index) => {
-              const isOnline = raidaHealth ? raidaHealth[index] : null;
-              return (
-                <span
-                  key={index}
-                  className={`navigation-pane__raida-dot ${
-                    isOnline === true
-                      ? "navigation-pane__raida-dot--online"
-                      : isOnline === false
-                        ? "navigation-pane__raida-dot--offline"
-                        : "navigation-pane__raida-dot--unknown"
-                  }`}
-                  title={`RAIDA ${index}: ${
-                    isOnline === true
-                      ? "Online"
-                      : isOnline === false
-                        ? "Offline"
-                        : "Unknown"
-                  }`}
-                />
-              );
-            })}
+          <div className="navigation-pane__status-row">
+            <div className="navigation-pane__status-header">
+              <span>QMail</span>
+              <span>
+                {qmailSummary
+                  ? `${qmailSummary.available}/${qmailSummary.total} servers`
+                  : "Checking..."}
+              </span>
+            </div>
+            {Array.isArray(qmailServers) && qmailServers.length > 0 && (
+              <div className="navigation-pane__status-grid navigation-pane__status-grid--qmail">
+                {qmailServers.map((server, index) => {
+                  const serverId = server.server_id ?? server.raida_index ?? index;
+                  const isOnline = server.is_available;
+                  return (
+                    <span
+                      key={serverId}
+                      className={`navigation-pane__raida-dot ${
+                        isOnline === true
+                          ? "navigation-pane__raida-dot--online"
+                          : isOnline === false
+                            ? "navigation-pane__raida-dot--offline"
+                            : "navigation-pane__raida-dot--unknown"
+                      }`}
+                      title={buildQmailStatusTitle(server, index)}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <span className="navigation-pane__raida-text">
-            {healthSummary
-              ? `${healthSummary.available}/${RAIDA_COUNT} servers`
-              : "Checking..."}
-          </span>
+
+          <div className="navigation-pane__status-row">
+            <div className="navigation-pane__status-header">
+              <span>RAIDA</span>
+              <span>
+                {healthSummary
+                  ? `${healthSummary.available}/${RAIDA_COUNT} servers`
+                  : "Checking..."}
+              </span>
+            </div>
+            <div className="navigation-pane__status-grid navigation-pane__status-grid--raida">
+              {Array.from({ length: RAIDA_COUNT }, (_, index) => {
+                const isOnline = raidaHealth ? raidaHealth[index] : null;
+                const detail = raidaDetails ? raidaDetails[index] : null;
+                return (
+                  <span
+                    key={index}
+                    className={`navigation-pane__raida-dot ${
+                      isOnline === true
+                        ? "navigation-pane__raida-dot--online"
+                        : isOnline === false
+                          ? "navigation-pane__raida-dot--offline"
+                          : "navigation-pane__raida-dot--unknown"
+                    }`}
+                    title={buildRaidaStatusTitle(index, isOnline, detail)}
+                  />
+                );
+              })}
+            </div>
+          </div>
         </section>
       </footer>
     </aside>

@@ -1,0 +1,296 @@
+QMail large file upload idea review - Version 2
+Model: GPT-5 / Codex
+Date: 2026-06-06
+
+Inputs reviewed
+===============
+
+Reviewed:
+
+  D:\Code\src\C\rest_core\docs\serverAI.file-upload.txt
+  D:\Code\src\C\rest_core\docs\opu.file-upload.txt
+  docs\gpt5.file-upload.txt
+
+Note: D:\Code\src\C\rest_core\docs\gpt5.file-upload.txt was referenced, but that
+file was not present when I checked. I used the gpt5 file in this GUI repo.
+
+
+What changed from my first version
+==================================
+
+The other reviews changed my thinking in one important way:
+
+  Paging decouples request body size from total file size.
+
+A 25 MB attachment does not need a 25 MB request. It can be many smaller page
+requests. That means a 32-bit request body length is useful, but it is not strictly
+required to meet the Phase 1 goal if we keep each page below the existing 65 KB
+request-body limit.
+
+My updated position:
+
+  - Use a new service/command for large uploads.
+  - Use paging.
+  - Drop the Payment Peek idea for Phase 1.
+  - Use a 2-byte page number for Phase 1.
+  - Put total pages and attachment metadata in the encrypted CBDF.
+  - Decide separately whether Phase 1 pages are legacy-sized <=65 KB or extended
+    pages using a 32-bit body length.
+
+
+What all models appear to agree on
+==================================
+
+1. The server can interpret the request header differently based on command group
+   and command ID, because bytes 4 and 5 are available before the body is read.
+
+2. Changes should be additive. Existing Upload behavior should remain stable.
+
+3. A new large-upload command or service is the cleanest way to isolate the new
+   header rules.
+
+4. Paging is the right design. The server should receive one page at a time, not a
+   whole large attachment in one request.
+
+5. The server should remain dumb/sessionless. It should store and serve page blobs;
+   clients should track progress, retry missing pages, and reassemble files.
+
+6. Filename/storage should include at least:
+
+     email GUID
+     file type or attachment index
+     page number
+
+7. Total pages should not be required in the request header. It belongs in the
+   encrypted CBDF manifest.
+
+8. Attachment metadata belongs in the encrypted CBDF, not in cleartext headers.
+   The CBDF should include original size, page size, total pages, hashes/checksums,
+   and enough mapping data for the receiver to reassemble.
+
+9. A one-byte page number is too small. The page number must be widened.
+
+10. The Payment Peek / 0xFF-to-0xFE idea should not ship as described. It leaks
+    information, is not proof of payment, and pre-auth state mutation creates a
+    denial-of-service risk.
+
+11. The server must cap accepted request/page body size per command before
+    allocation or disk write. Declared lengths must be unsigned and range-checked.
+
+12. UDP should be kept only for small one-packet-per-stripe messages. Large pages
+    should use TCP.
+
+13. Idempotent page upload is required. If the client retries a page, the server
+    should overwrite or return success for the same GUID/type/page rather than
+    creating duplicates.
+
+
+Likely controversial choices
+============================
+
+1. Do we need a 32-bit request body length in Phase 1?
+
+   Option A: No, keep page bodies <=65 KB.
+
+     Pros:
+       - Smallest server protocol change.
+       - Existing bytes 22/23 body length can remain authoritative.
+       - Lower per-request memory and DDoS risk.
+       - 25 MB is still easy with paging.
+
+     Cons:
+       - More requests.
+       - More per-page fees if fees are charged per page/request.
+       - More TCP overhead and retry bookkeeping.
+
+   Option B: Yes, add a 32-bit body length now at bytes 10-13 for the new command.
+
+     Pros:
+       - Fewer pages and fewer fees/round trips.
+       - Cleaner bridge toward a future V2 header.
+       - Lets the configured page size rise to 256 KB, 1 MB, or more.
+
+     Cons:
+       - Larger server change.
+       - More memory/read-timeout risk if not bounded carefully.
+       - Requires every length path to be audited for 16-bit truncation.
+
+   My recommendation: implement the new command so it can support the 32-bit length
+   field, but configure Phase 1 conservatively. Start with a max page body of 64 KB
+   or 256 KB, not multi-megabyte pages. If we choose 64 KB, the 32-bit field can be
+   present but is not operationally necessary yet.
+
+
+2. Should payment be per page or per email/GUID?
+
+   The serverAI note recommends reusing a per-GUID payment marker so one payment
+   covers all pages of an email. The opu note treats per-page fee as a natural
+   anti-abuse mechanism but also rejects Payment Peek.
+
+   My recommendation: separate DDoS protection from billing.
+
+   For Phase 1, do not make the header design depend on per-page billing. Use:
+
+     - configured max page size
+     - per-coin/per-IP rate limits
+     - local locker/payment validation
+     - TTL cleanup for abandoned uploads
+
+   Billing can be per GUID, per attachment, per page, or based on total bytes, but
+   that policy should not require cleartext payment hints in the header.
+
+
+3. Should the server read the whole page before checking payment?
+
+   For small pages <=64 KB, reading the full bounded body before validating payment
+   is probably acceptable.
+
+   For larger pages, the body layout should put payment/auth metadata at the front
+   so the server can read and validate a small encrypted prefix before accepting the
+   large page bytes. That is more robust but more invasive.
+
+   My recommendation: design the body format with a fixed-size encrypted prefix now,
+   even if Phase 1 reads the whole capped body. That gives us a clean path to
+   pre-body payment validation later.
+
+
+Updated Phase 1 design
+======================
+
+New public API/service:
+
+  upload_large_files
+
+New RAIDA/QMail command:
+
+  Upload_Large_File_Page
+
+Header layout for this command:
+
+  byte 8       keep existing presentation/layout value, normally 0x01
+  byte 9       large-upload header flags/version, initially 0x01
+  bytes 10-13  uint32 big-endian request body length for this command
+  bytes 14-15  uint16 big-endian page number
+  bytes 22-23  legacy body length field
+
+For bytes 22-23, I recommend mirroring the low 16 bits of the body length when the
+body is <=65,535 and setting them to 0xFFFF when the extended length is used. The
+server for this new command should use bytes 10-13, not bytes 22-23.
+
+Phase 1 page number:
+
+  uint16 page_number
+
+This allows 65,536 page indexes. With 64 KB stripe pages and 7 data stripes, this
+is already tens of GB of logical attachment data. It is enough for Phase 1 and for
+hundreds of MB. A future V2 header can widen this if needed.
+
+Encrypted request body, proposed minimum:
+
+  fixed prefix:
+    message GUID
+    file type / attachment index
+    page number, repeated from header
+    page data length
+    payment/locker token or reference
+    page hash or CRC
+
+  variable data:
+    page bytes
+
+The page number is repeated in the encrypted body so the server can verify that the
+clear header page number was not tampered with. The header page number exists only
+so the server can name/store the page without parsing more than necessary.
+
+
+CBDF manifest changes
+=====================
+
+Use encrypted CBDF key/value metadata for attachment/page information. Include:
+
+  - manifest version
+  - attachment count
+  - file type / attachment index
+  - original filename
+  - original file size, uint64
+  - selected page data size
+  - total pages, uint32 or uint64
+  - full-file SHA-256 or BLAKE3 hash
+  - per-page CRC32 or hash
+  - optional page offsets if variable page sizes are allowed
+
+A 1-byte key and 1-byte value length is fine for small scalar fields only if the
+value itself is encoded as fixed-width bytes. Do not store large counts as one-byte
+values. For long per-page hash lists, either repeat a key per page or define an
+extended-length CBDF field.
+
+
+DDoS / abuse controls
+=====================
+
+Drop Payment Peek for Phase 1.
+
+Do not expose locker-derived bytes in the clear header.
+Do not flip locker/payment bytes based on unauthenticated header data.
+Do not mark payment consumed until the page is validated and durably stored, or
+until the chosen billing design explicitly supports idempotent retry.
+
+Server-side controls:
+
+  - per-command maximum body/page size from config
+  - unsigned body-length parsing
+  - reject length 0 or length > configured max before allocation
+  - strict read timeout and minimum read-rate rules
+  - per-coin and/or per-IP rate limits
+  - local locker/payment validation before disk write
+  - idempotent store for duplicate GUID/type/page
+  - TTL sweeper for abandoned page sets
+
+For Phase 1, I would start with a conservative configured max page body:
+
+  64 KB if we want minimal risk and can tolerate more requests
+  256 KB if payment/round-trip cost is already a concern
+  1 MB only after the server read/allocation path is audited
+
+
+UDP plan
+========
+
+Keep UDP for small messages only.
+
+The practical UDP limit should be computed from the true packet budget, not from
+1400 bytes times server count. The request header, challenge, upload framing,
+preamble, and terminator reduce usable stripe bytes.
+
+Rule:
+
+  If one stripe fits in one UDP datagram, UDP is allowed.
+  Otherwise use TCP.
+
+Do not implement multi-packet UDP file pages in Phase 1.
+
+
+Questions for Sean
+==================
+
+1. For Phase 1, do you want the first implementation to use <=65 KB pages for the
+   smallest server change, or do you want 256 KB/1 MB pages immediately to reduce
+   fee and request count?
+
+2. Should billing/payment be per page, per email GUID, per attachment, or based on
+   total bytes? I recommend not letting this decision leak into the clear header.
+
+3. Is a Phase 1 maximum attachment size around 25 MB only, or should we choose
+   defaults that comfortably support hundreds of MB immediately?
+
+
+Bottom line
+===========
+
+The core design is solid and the models mostly agree: new large-upload path,
+paging, encrypted CBDF manifest, dumb server storage, client-managed retries, no
+Payment Peek, and strict server body limits.
+
+The main unresolved decision is page size. A conservative 64 KB page can meet the
+25 MB goal with fewer protocol changes. A 256 KB or 1 MB page is more efficient but
+requires the 32-bit length path and tighter server-side read/allocation controls.

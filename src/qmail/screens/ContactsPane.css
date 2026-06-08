@@ -528,6 +528,28 @@
   opacity: 0.9;
 }
 
+/* Favorite (star) toggle. Default state matches the muted action-button color;
+   the --favorite-on modifier paints the filled star gold so it reads as
+   "pinned". */
+.contacts-pane__action-button--favorite {
+  color: var(--text-tertiary);
+}
+
+.contacts-pane__action-button--favorite:hover:not(:disabled) {
+  border-color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+  color: var(--status-warning);
+}
+
+.contacts-pane__action-button--favorite-on {
+  color: var(--status-warning);
+}
+
+.contacts-pane__action-button--favorite-on:hover:not(:disabled) {
+  border-color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+}
+
 /* ==================== DELETE MODAL ==================== */
 
 /* was: .contact-delete-overlay */

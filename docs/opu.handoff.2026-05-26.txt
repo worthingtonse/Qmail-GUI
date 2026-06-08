@@ -1,0 +1,292 @@
+Opu (Claude Opus 4.7) — session handoff, 2026-05-26
+=====================================================
+For:   Next Opus session continuing the manual bug-fix phase
+From:  Claude Opus 4.7 (exiting)
+Date:  2026-05-26
+
+
+Status at exit
+==============
+GPT has just landed BUG-58 (RAIDA dashboard timeouts / stale IPs).
+My local PHASE 1+2 edits to that bug (-r11ip commented out in
+rest_core + electron.cjs, refreshed HARDCODED_IPS in raida_servers.c,
+also corresponding electron.cjs --r11ip plumbing commented) are
+effectively superseded by GPT's commit. Verify before re-doing.
+
+The shared bugfix log
+(docs/bugfix-log.2026-05-24.txt) now goes through BUG-60.
+Next BUG-NN to claim = BUG-61, unless someone else has already
+taken it — always grep the log first per STANDARD 2:
+
+  grep -hE "^## BUG-[0-9]+|^BUG-[0-9]+" \
+       docs/cla.bugs.txt docs/bugfix-log.2026-05-24.txt
+
+
+Read first
+==========
+On entry, in this order:
+  1. docs/bugfix-phase.standards.txt
+       Single source of truth for fix-log location, bug numbering,
+       commit cadence, pre-commit gates, rebuild flow, triage
+       thresholds. SUPERSEDES any conflict in individual handoffs.
+       Read this even if you remember it — Sean may have updated it.
+
+  2. docs/bugfix-log.2026-05-24.txt
+       The shared log. All recent context lives here. Scan the
+       most recent entries (currently BUG-58, BUG-59, BUG-60) for
+       Sean's latest "what's working / what's broken" picture.
+
+  3. This file.
+
+
+What just happened in MY session
+================================
+Bugs I worked on (this session):
+  - BUG-51  QMail.exe CLI flags + bundled core.exe. Committed
+            (qmail-GUI 98c7c0c, rest_core ae2aa22).
+  - BUG-52  -data-dir flag so Client_Data lands next to QMail.exe.
+            Committed (qmail-GUI 98c7c0c — combined with BUG-51 —
+            and rest_core 4467849).
+  - BUG-58  RAIDA dashboard timeouts. My local PHASE 1 (-r11ip
+            commented out) and PHASE 2 (HARDCODED_IPS refresh)
+            edits in rest_core were drafted but NOT committed by
+            me. GPT picked up the bug and apparently committed a
+            full fix. Verify GPT's commits address the same
+            concerns; if so, my dirty edits are superfluous —
+            git reset/discard them.
+
+Files I created this session (still on disk):
+  - docs/bugfix-phase.standards.txt    Cross-model standards
+  - docs/bugfix-log.2026-05-24.txt     Shared log (others write
+                                        to it now)
+  - docs/opu.bug.fix.ideas.txt         My BUG-51/52 planning notes
+  - docs/opu.bug-51.review-package.txt Review package for GPT
+  - docs/opu.raida-availability.txt    My BUG-58 findings
+                                        (superseded by gpt.* + GPT's fix)
+  - docs/opu.ip.plan.txt               My 5-phase BUG-58 plan
+                                        (GPT implemented the
+                                        equivalent — read this if
+                                        you want to compare design)
+  - docs/opu.handoff.2026-05-26.txt    THIS file
+
+
+Repo state at handoff
+=====================
+
+Qmail-GUI (D:\code\src\JavaScript\Qmail-GUI)
+  Branch:  main
+  Last opu commit:  7c7a5e9 (docs: fill in BUG-51/52 SHAs)
+  Likely dirty (NOT mine, untouched by me):
+    - electron.cjs has --r11ip references commented out per
+      Sean's preference; this is now in the worktree but I did
+      not commit it. GPT's BUG-58 work may have committed this
+      too. Verify: git diff electron.cjs against latest commit.
+    - Various CSS-workstream files (App.css, styles/*, etc.)
+      remain dirty from a parallel model's work. NOT mine.
+
+rest_core (D:\code\src\C\rest_core)
+  Branch:  qmail
+  Last opu commit:  4467849 (fix(BUG-52): add -data-dir flag)
+  GPT has committed BUG-58 since then — figure out the SHA
+  before basing new work on the branch.
+  Likely dirty (NOT mine, large parallel workstream):
+    - ~30+ files modified across api_src/, src/qmail/, include/.
+      That's another model's work. Don't touch.
+    - api_src/main_rest.c may include my dormant -r11ip
+      commenting plus GPT's BUG-58 edits plus other parallel
+      work. Carefully read git log + git diff before any new
+      change.
+    - src/raida_servers.c has the HARDCODED_IPS refresh I did
+      (BUG-58 PHASE 2). GPT may have re-done this OR built on
+      it; verify.
+
+Rig state
+  E:\Client3\QMail.exe       Last built by me late 2026-05-25,
+                              ~60.94 MB. GPT has probably
+                              rebuilt since. Check the timestamp.
+  E:\Client3\Client_Data\    May or may not exist depending on
+                              whether Sean has been smoke-testing.
+
+
+Standards reminders (frequently violated traps)
+==================================================
+- ALWAYS stage specific files, NEVER `git add -A` / `git add .`
+  The rest_core repo has a parallel workstream with ~30 dirty
+  files. If you `git add -A` you'll commit someone else's
+  in-progress code under your bug-fix message. (I did this on
+  BUG-52, had to soft-reset, stash, surgically reapply,
+  unstash. Don't repeat. Use `git stash push -- <specific
+  files>` to isolate your work if the repo is messy.)
+
+- Pre-commit gates (STANDARD 3): from D:/code/src/JavaScript/Qmail-GUI:
+    npm run lint              eslint --max-warnings 0
+    npm run build             vite
+    node --check electron.cjs
+    node --check preload.cjs
+  rest_core: cmake --build build --config Release
+
+- One commit per bug fix (STANDARD 4) unless Sean explicitly
+  says "batch these." Two repos = two commits even for one
+  bug. Use `fix(BUG-NN):` for single, `fix(BUG-NN, BUG-MM):`
+  for combined.
+
+- Build chain workflow that's now established and works:
+    1. Edit C source in rest_core
+    2. `cmake --build build --config Release` (mirror auto-
+       copies fresh core.exe to Qmail-GUI/backend/)
+    3. `npm run lint && npm run build && npm run build-portable`
+    4. PowerShell: kill stale QMail/core procs, copy
+       release/QMail.exe → E:\Client3\QMail.exe
+    5. Sean smokes; if fix confirmed, commit per STANDARD 4
+
+- Sean's communication preferences (STANDARD 12):
+    Terse, no trailing "what I just did" summaries, state
+    decisions directly. He reads the bugfix log for detail.
+
+
+What I'd tell myself if I were the next Opus
+=============================================
+
+1. **Don't redo BUG-58.** Read GPT's commits + the bugfix log
+   entry for BUG-58 first. If anything is missing, propose it
+   as a follow-up (e.g. BUG-61 "echo timeout still not honored"
+   IF GPT didn't do my PHASE C). My docs/opu.ip.plan.txt has
+   a list of 5 phases; cross-reference with GPT's commits to
+   see what's done and what isn't.
+
+2. **My uncommitted edits are likely superseded.** Best path:
+     cd D:/code/src/JavaScript/Qmail-GUI
+     git diff electron.cjs    # see if my --r11ip removal is in GPT's commit
+     git diff backend/core.exe  # binary won't diff cleanly, check mtime
+   And in rest_core:
+     git log --oneline -10    # find GPT's BUG-58 SHA
+     git show <SHA> --stat    # see what they touched
+   If GPT did the equivalent edits, `git checkout -- <file>` on
+   my dirty copies. Don't fight a model that already won the race.
+
+3. **The cross-model coordination via docs/bugfix-phase.standards.txt
+   IS working.** Both GPT and I are landing fixes via the same
+   bug-numbering scheme, same shared log, same commit shape.
+   When a new bug comes in, the workflow is:
+     - grep latest BUG-NN
+     - claim next number
+     - write findings to docs/opu.<topic>.txt (or appropriate)
+     - propose plan to Sean
+     - implement after approval
+     - log to shared bugfix log
+     - commit per STANDARD 4
+
+4. **Sean is generous with diagnostic info.** He'll:
+     - point you at the right files
+     - share a working comparison artifact (._id6.guardians)
+     - point at log files (E:\Client3\Client_Data\main.log)
+     - tell you which RAIDAs are genuinely down vs which should
+       work
+   USE THIS. Don't speculate when you can verify against his
+   real environment. If you need to run something
+   (curl/echo/test) say so; he'll run it for you or you can
+   launch core.exe directly with -port 9999 -data-dir
+   E:\Client3 to probe the rig data.
+
+5. **The Guardian protocol is dead to us.** cloudcoin_desktop
+   in D:/code/src/Go/cloudcoin_desktop uses Guardian HTTPS
+   polling for IP discovery. Sean has explicitly said NO to
+   porting that to rest_core. The RAIDAs themselves are
+   meant to be the source of truth. Don't go back to that
+   well.
+
+6. **Two parallel hardcoded RAIDA lists in rest_core** —
+   api_src/config.c:429 AND src/raida_servers.c:24. Both have
+   to stay in sync. GPT's BUG-58 likely addresses both, but
+   if you ever touch RAIDA IPs again, check BOTH files.
+
+7. **There's a bug I caught but didn't file**: cmd_echo.c
+   hardcodes timeout_ms=3000 in both serial and parallel
+   paths, silently ignoring the REST ?timeout= parameter
+   (cmd_echo.c:139 and :216). GPT may have fixed this as
+   part of BUG-58; if not, it deserves its own ticket. Look
+   for it in GPT's commit. If still broken, file as
+   BUG-61 (or whatever's next) — see opu.ip.plan.txt PHASE C
+   for design notes.
+
+8. **qmail_servers.c parses "ip" but the live JSON returns
+   "ip_address"** — GPT found this. Accept both keys.
+   Probably also part of GPT's BUG-58, but verify. Same trap
+   as #7.
+
+9. **Sean's RAIDA-10 sentinel test was instructive**: the
+   periodic echo path does NOT rewrite raida_ips.csv —
+   only the startup/bootstrap path does. If you ever see
+   "rest_core changed my file while I was editing it,"
+   that's the consensus-fetch success branch. The
+   write-if-changed logic GPT added (or may have added)
+   for PHASE E mitigates this.
+
+10. **Don't volunteer cleanup of files you didn't write.**
+    The rest_core and Qmail-GUI repos are messy because
+    multiple models are working in parallel. If you see
+    "duplicated JSX lines" or weird state in files outside
+    your scope, mention it to Sean and let HIM decide who
+    cleans it up. Don't fight someone else's diff.
+
+
+Where to look (paths I'll need next session)
+=============================================
+  Bugfix log:      docs/bugfix-log.2026-05-24.txt
+  Standards:       docs/bugfix-phase.standards.txt
+  My ideas docs:   docs/opu.bug.fix.ideas.txt
+                    docs/opu.raida-availability.txt
+                    docs/opu.ip.plan.txt
+  GPT's findings:  docs/gpt.raida-availability.txt
+                    docs/gpt.bug.fix.ideas.txt
+                    docs/gpt.manual-bugfix-fixes.md (deprecated
+                    log; new entries go to the shared log)
+  Gemini's work:   docs/gem.bug.fix.ideas.txt
+                    docs/gemini.bug-fix-handoff.txt
+
+  Source — GUI:    src/qmail/screens/NavigationPane.jsx
+                    (the lower-left echo dashboard)
+                    src/api/qmailApiServices.js
+                    (echoRaida + getServers)
+                    electron.cjs
+                    (CLI flags, backend spawning, data-dir)
+
+  Source — Core:   D:/code/src/C/rest_core/
+                    api_src/main_rest.c
+                    (CLI parsing, RAIDA 11 override, boot order)
+                    api_src/config.c
+                    (rest_init, create_default_files, load_raida_servers)
+                    src/raida_servers.c
+                    (HARDCODED_IPS, consensus fetch)
+                    src/qmail/qmail_servers.c
+                    (DEFAULT_JSON, "ip" vs "ip_address" parser)
+                    src/raida_consensus_fetch.c
+                    (MAX_FETCH_COUNT = 10)
+                    src/commands/cmd_echo.c
+                    (timeout_ms = 3000 hardcoded)
+                    src/platform.c
+                    (platform_get_client_data_dir — may or may
+                    not respect -data-dir now)
+                    CMakeLists.txt
+                    (kill-by-name pre-link, mirror post-build)
+
+  Rig:             E:/Client3/QMail.exe
+                    E:/Client3/Client_Data/
+                    E:/Client3/Client_Data/main.log
+                    E:/Client3/Client_Data/raida_ips.csv
+
+  Working ref:     C:/Users/User/cloudcoin_desktop/._id6.guardians
+                    (the authoritative-IP comparison artifact)
+
+
+Mood check
+==========
+This phase is mature. The cross-model coordination is working,
+the shared log and standards file are being respected, Sean has
+strong opinions about scope and listens to push-back. Don't
+over-engineer; don't speculate; ask before non-trivial.
+
+Good luck.
+
+
+End of handoff.

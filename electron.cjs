@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -10,6 +10,17 @@ let mainWindow;
 let splashWindow = null;
 let backendProcess = null;
 let backendPort = 0; // resolved before the backend is spawned
+let activeThemeMenuItem = 'dark';
+
+const THEME_MENU_ITEMS = [
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'high-contrast', label: 'High Contrast' },
+];
+
+function isStandardTheme(themeId) {
+  return THEME_MENU_ITEMS.some((item) => item.id === themeId);
+}
 
 function log(msg) {
   process.stdout.write(`[ELECTRON] ${msg}\n`);
@@ -27,8 +38,6 @@ Options:
                   Default: random free port.
   --debug         Enable core.exe debug logging (forwarded as -debug).
                   DevTools are reachable from the renderer via F12.
-  --r11ip         Forward -r11ip to core.exe — overrides RAIDA 11 to
-                  its LAN IP. Dev-only fallback for in-network testing.
   --dev           Run against the Vite dev server at localhost:5173
                   instead of the bundled renderer.
   --version, -V   Print version and exit.
@@ -38,13 +47,12 @@ Examples:
   QMail.exe                          Normal launch, random backend port.
   QMail.exe --port 8081              Pin backend to port 8081.
   QMail.exe --port 8082 --debug      Pin port 8082, verbose core logging.
-  QMail.exe --debug --r11ip          Debug logging + RAIDA-11 LAN override.
 
 Two instances launched without --port each get their own random port,
 so they will not conflict.`;
 
 function parseQMailArgs(argv) {
-  const out = { port: null, debug: false, r11ip: false, dev: false };
+  const out = { port: null, debug: false, dev: false };
   // argv[0] is the electron binary, argv[1] is the script path in dev.
   // In a packaged build there's no script path arg, but slice(2) is the
   // standard Electron convention for "args after our own".
@@ -65,7 +73,6 @@ function parseQMailArgs(argv) {
     }
     if (a === '--dev')   { out.dev   = true; continue; }
     if (a === '--debug') { out.debug = true; continue; }
-    if (a === '--r11ip') { out.r11ip = true; continue; }
     if (a === '--port' || a.startsWith('--port=')) {
       const v = a.startsWith('--port=') ? a.slice(7) : args[++i];
       const n = Number(v);
@@ -86,9 +93,9 @@ function parseQMailArgs(argv) {
   return out;
 }
 
-const qmailArgs = parseQMailArgs(process.argv) || { port: null, debug: false, r11ip: false, dev: false };
+const qmailArgs = parseQMailArgs(process.argv) || { port: null, debug: false, dev: false };
 const isDev = qmailArgs.dev;
-log(`Args: port=${qmailArgs.port ?? 'random'} debug=${qmailArgs.debug} r11ip=${qmailArgs.r11ip} dev=${qmailArgs.dev}`);
+log(`Args: port=${qmailArgs.port ?? 'random'} debug=${qmailArgs.debug} dev=${qmailArgs.dev}`);
 
 // Multi-instance support: ask the OS for a free TCP port. We bind a
 // throwaway server to port 0, read the port the OS assigned, then
@@ -166,7 +173,6 @@ function startBackend(port) {
   // Pass -data-dir explicitly so user data lands next to QMail.exe.
   const coreArgs = ['-port', String(port), '-data-dir', dataDir];
   if (qmailArgs.debug) coreArgs.push('-debug');
-  if (qmailArgs.r11ip) coreArgs.push('-r11ip');
   log('Backend args: ' + coreArgs.join(' '));
 
   try {
@@ -315,6 +321,125 @@ function createSplashWindow() {
   });
 }
 
+function sendThemeToRenderer(themeId) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('theme:select', themeId);
+}
+function sendQmailMenuCommand(command) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('qmail:menu-command', command);
+}
+
+function setThemeFromMenu(themeId) {
+  if (!isStandardTheme(themeId)) return;
+  activeThemeMenuItem = themeId;
+  buildApplicationMenu();
+  sendThemeToRenderer(themeId);
+}
+
+function buildApplicationMenu() {
+  const template = [
+    ...(process.platform === 'darwin' ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { role: process.platform === 'darwin' ? 'close' : 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Empty Trash',
+          click: () => sendQmailMenuCommand('empty-trash'),
+        },
+        {
+          label: 'Empty Drafts',
+          click: () => sendQmailMenuCommand('empty-drafts'),
+        },
+        {
+          label: 'Empty Inbox',
+          click: () => sendQmailMenuCommand('empty-inbox'),
+        },
+        {
+          label: 'Mark all as read',
+          click: () => sendQmailMenuCommand('mark-all-read'),
+        },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Appearance',
+          submenu: THEME_MENU_ITEMS.map(({ id, label }) => ({
+            label,
+            type: 'radio',
+            checked: activeThemeMenuItem === id,
+            click: () => setThemeFromMenu(id),
+          })),
+        },
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: `About ${app.name}`,
+          click: () => dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: `About ${app.name}`,
+            message: `${app.name} ${app.getVersion()}`,
+            buttons: ['OK'],
+          }),
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createMainWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -323,9 +448,61 @@ function createMainWindow(port) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs')
+      preload: path.join(__dirname, 'preload.cjs'),
+      // Enable Chromium spellcheck and pin the dictionary to en-US so the
+      // English build always uses the same dictionary regardless of OS
+      // locale. Suggestions arrive via the context-menu handler below.
+      spellcheck: true,
+    },
+  });
+  // setSpellCheckerLanguages must be called on the session AFTER the
+  // window exists; safe to do here.
+  mainWindow.webContents.session.setSpellCheckerLanguages(['en-US']);
+
+  // Chromium computes misspelling suggestions but Electron does not render
+  // a default context menu — apps must build one. This handler shows up to
+  // five suggestions, an Add-to-Dictionary entry, and standard editor
+  // actions. Without it the user sees red squiggles with no way to fix them.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const items = [];
+
+    if (params.misspelledWord) {
+      const suggestions = (params.dictionarySuggestions || []).slice(0, 5);
+      for (const suggestion of suggestions) {
+        items.push({
+          label: suggestion,
+          click: () => mainWindow.webContents.replaceMisspelling(suggestion),
+        });
+      }
+      if (suggestions.length === 0) {
+        items.push({ label: 'No suggestions', enabled: false });
+      }
+      items.push({
+        label: 'Add to Dictionary',
+        click: () =>
+          mainWindow.webContents.session.addWordToSpellCheckerDictionary(
+            params.misspelledWord
+          ),
+      });
+      items.push({ type: 'separator' });
+    }
+
+    if (params.isEditable) {
+      items.push({ role: 'cut', enabled: params.editFlags.canCut });
+      items.push({ role: 'copy', enabled: params.editFlags.canCopy });
+      items.push({ role: 'paste', enabled: params.editFlags.canPaste });
+      items.push({ type: 'separator' });
+      items.push({ role: 'selectAll' });
+    } else if (params.selectionText) {
+      items.push({ role: 'copy' });
+    }
+
+    if (items.length > 0) {
+      Menu.buildFromTemplate(items).popup({ window: mainWindow });
     }
   });
+
+  buildApplicationMenu();
 
   // mainWindow.webContents.openDevTools();
 
@@ -373,6 +550,12 @@ ipcMain.handle('show-error-dialog', async (event, title, message) => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.on('theme:changed', (_event, themeId) => {
+  if (!isStandardTheme(themeId) || activeThemeMenuItem === themeId) return;
+  activeThemeMenuItem = themeId;
+  buildApplicationMenu();
 });
 
 // BUG-08 FIX: Expose home directory so renderer can build valid paths
@@ -450,6 +633,64 @@ ipcMain.handle('compose:pickFiles', async () => {
   return enriched.filter((entry) => entry !== null);
 });
 
+ipcMain.handle('wallet:pickCoinFiles', async () => {
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose CloudCoin files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack', 'zip', 'png'] }],
+    });
+  } catch (error) {
+    log('wallet:pickCoinFiles dialog error: ' + error.message);
+    return [];
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return [];
+  }
+
+  const enriched = await Promise.all(
+    result.filePaths.map(async (filePath) => {
+      try {
+        const stat = await fs.promises.stat(filePath);
+        return {
+          path: filePath,
+          name: path.basename(filePath),
+          size: stat.size,
+        };
+      } catch (error) {
+        log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
+        return null;
+      }
+    }),
+  );
+
+  return enriched.filter((entry) => entry !== null);
+});
+
+ipcMain.handle('wallet:pickCoinFolder', async () => {
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose CloudCoin folder',
+      properties: ['openDirectory'],
+    });
+  } catch (error) {
+    log('wallet:pickCoinFolder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+});
 // Boot sequence:
 //   1. Pick a free port for the backend (OS-assigned, supports multi-instance).
 //   2. Open the splash window immediately so the user sees life.

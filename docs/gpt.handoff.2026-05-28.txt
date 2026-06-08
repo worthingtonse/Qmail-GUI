@@ -1,0 +1,91 @@
+GPT handoff - QMail GUI bugfix session
+Date: 2026-05-28
+Repo: D:\Code\src\JavaScript\Qmail-GUI
+Backend repo referenced: D:\Code\src\C\rest_core
+
+Read these first in the next session:
+- docs/bugfix-phase.standards.txt
+- docs/gpt.manual-bugfix-testing.handoff.txt
+- docs/cla.bugs.txt
+- docs/bugfix-log.2026-05-24.txt
+
+Current bug numbering:
+- BUG-73 is the last completed/documented bug.
+- The next new bug should be BUG-74 unless another model already adds one.
+
+Current working-tree cautions:
+- The repo is intentionally dirty. Do not reset or revert broad changes.
+- Many files are modified from previous phases and other models. Treat unrelated changes as user/model work.
+- `src/qmail/screens/WalletActionModal.jsx`, `src/qmail/screens/WalletActionModal.css`, and `src/qmail/screens/serverStatusUi.js` are currently untracked but intentional from recent work.
+- `release\QMail.exe` was rebuilt after BUG-73; it may be ignored and not show in `git status`.
+- `rg` is not installed in this environment. Use PowerShell `Select-String` / `Get-ChildItem` when searching.
+- Sandbox commands often fail with `windows sandbox: spawn setup refresh`; rerun important commands with escalation when needed.
+
+Recent completed bugs:
+
+BUG-68 - Wallet balance uses Default wallet, not Mail wallet
+- Files: `src/api/qmailApiServices.js`, `src/qmail/screens/WalletActionModal.jsx`
+- The left-pane Wallet total now resolves the registered Default wallet from `/api/wallets/list` and calls `/api/wallets/balance?wallet_path=<Default>`.
+- This avoids counting the Mail identity coin as spendable money.
+
+BUG-69 - Inbox QMail address readability
+- File: `src/qmail/screens/EmailListPane.css`
+- The Inbox QMail address label is larger, semibold, and uses a more readable text color.
+
+BUG-70 - Wallet row is static
+- Files: `src/qmail/screens/NavigationPane.jsx`, `src/qmail/screens/NavigationPane.css`
+- The Wallet row in the left pane is no longer clickable. The old `setActiveView("account")` behavior is preserved as a JSX comment for later re-enable.
+
+BUG-71 - Low/empty wallet warning and purchase path
+- Files: `src/qmail/screens/NavigationPane.jsx`, `src/qmail/screens/NavigationPane.css`
+- Default wallet totals <= 0 render red with a warning icon.
+- Totals from 1 through 100 render yellow with a warning icon.
+- Added `Purchase Coins`, opening `https://cloudcoin.com`.
+- Added an info button/popup explaining DMP inbox fees and CloudCoin.
+
+BUG-72 - Add Funds modal should only add funds
+- Files: `src/qmail/screens/WalletActionModal.jsx`, `src/qmail/screens/WalletActionModal.css`
+- The Add Funds dialog no longer shows an internal Withdraw tab.
+- The separate left-pane Withdraw button still opens the same component in withdraw mode, but that flow is withdraw-only.
+- Deposit source order is now Locker, Folder, Files.
+- Add Funds defaults to Locker.
+- File deposit uses a plain `File` icon instead of `FileUp`.
+- Removed unused Add/Withdraw mode-tab CSS.
+
+BUG-73 - Add Funds success needs See Receipt link
+- Files: `src/api/qmailApiServices.js`, `src/qmail/screens/WalletActionModal.jsx`, `src/qmail/screens/WalletActionModal.css`
+- After successful Add Funds from Locker, Folder, or Files, the success panel shows `See Receipt` when a receipt filename can be derived.
+- Clicking `See Receipt` calls `/api/wallets/receipts?wallet_path=<Default>&filename=<receipt>` and renders the returned JSON inline.
+- Added `getDefaultWalletReceipt()` in `qmailApiServices.js` instead of reusing `apiService.js` because QMail must honor the dynamic `backendPort` query used by Electron/random-port startup.
+- Deposit and locker helpers now preserve the resolved Default wallet path in their returned data.
+- Receipt filename derivation checks `receipt_id`, `receipt_path`, `task_id`, embedded receipt objects, and fallback task id. Core writes JSON receipts as `<Default Wallet>/Receipts/<task_id>.json`.
+
+Important implementation notes:
+- QMail wallet operations should target the Default wallet for spendable funds.
+- Mail wallet remains for identity/mailbox key operations only.
+- `WalletActionModal.jsx` has helper functions near the top for receipt filename derivation and formatting.
+- For file/folder deposits, `/api/transactions/deposit` starts a task; the GUI polls with `waitForTaskCompletion()` and then derives the receipt filename from task data or the original task id.
+- For locker downloads, `/api/locker/download` returns `task_id` and may include embedded receipt data; the GUI can derive `<task_id>.json`.
+- Existing older receipt helpers in `src/api/apiService.js` use a static Vite port and should not be used by QMail renderer flows unless they are updated to match the dynamic port resolver.
+
+Verification completed after BUG-73:
+- `npm run lint` passed.
+- `npm run build` passed.
+- `node --check electron.cjs` passed.
+- `node --check preload.cjs` passed.
+- Source whitespace check passed for BUG-73 files.
+- `npm run build-portable` passed and rebuilt `release\QMail.exe`.
+
+Current `git status --short` highlights at handoff time:
+- Modified docs: `docs/bugfix-log.2026-05-24.txt`, `docs/cla.bugs.txt`, plus existing modified model docs.
+- Modified runtime files include `electron.cjs`, `preload.cjs`, `src/App.jsx/css`, `src/api/qmailApiServices.js`, and many QMail screen/theme files from previous phases.
+- Untracked intentional files include `src/qmail/screens/WalletActionModal.jsx`, `src/qmail/screens/WalletActionModal.css`, and `src/qmail/screens/serverStatusUi.js`.
+- There are additional untracked planning/handoff docs from prior model work. Do not delete them unless Sean asks.
+
+Suggested next-session workflow:
+1. Read the standards and bug docs listed above.
+2. Check `git status --short` before editing.
+3. Assign the next issue as BUG-74 unless the docs already contain it.
+4. Keep changes tightly scoped to the user-reported bug.
+5. After a fix, update `docs/cla.bugs.txt` and `docs/bugfix-log.2026-05-24.txt`.
+6. Run at least `npm run lint`, `npm run build`, `node --check electron.cjs`, `node --check preload.cjs`, a whitespace check for touched files, and `npm run build-portable` if Sean needs a test executable.

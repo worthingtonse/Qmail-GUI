@@ -1,0 +1,722 @@
+BUG-53 — RAIDA availability dashboard shows excessive timeouts
+==============================================================
+Author:    Claude Opus 4.7
+Date:      2026-05-25
+Reported:  Sean (manual GUI testing)
+Severity:  HIGH
+
+What Sean sees
+--------------
+On the main dashboard's lower-left RAIDA status graphic, many of
+the 25 RAIDA servers time out when the GUI runs its echo test.
+Echo timeout is 3 seconds. Two suspected causes (Sean's):
+  (a) timeout too short, OR
+  (b) the IP addresses in use are stale / incorrect.
+Likely a combination, with (b) being the bigger factor.
+
+Sean also flagged that:
+  - The `-r11ip` flag can now be REMOVED (RAIDA 11 has moved from
+    the in-house internal address 192.168.1.145 to an external
+    address; the override is no longer needed and may be making
+    things worse if Electron passes it spuriously).
+  - rest_core already downloads server IPs from a centralized
+    source. The endpoints are:
+      https://raida11.cloudcoin.global/service/raida_servers
+      https://raida11.cloudcoin.global/service/qmail_servers
+  - A different client that works has IPs at
+    C:\Users\User\cloudcoin_desktop\._id6.guardians
+
+
+Investigation
+=============
+
+1. IP comparison: working client vs rest_core stored file
+---------------------------------------------------------
+Compared C:\Users\User\cloudcoin_desktop\._id6.guardians
+(working client) against
+E:\Client3\Client_Data\raida_ips.csv (rest_core's current list).
+
+Both have 25 entries, ports 50000-50024 identical. IPs DIFFER
+on 8 of 25 RAIDAs:
+
+  RAIDA   Working client (._id6.guardians)   rest_core (raida_ips.csv)
+  ----    --------------------------------    -----------------------
+   0      78.46.170.45                        78.46.170.45        match
+   1      47.229.9.94                         47.229.9.94         match
+   2      209.46.126.167                      209.46.126.167      match
+   3      116.203.157.233                     116.203.157.233     match
+   4      57.128.255.93           **DIFF**    95.183.51.104
+   5      31.163.201.90                       31.163.201.90       match
+   6      52.14.83.91                         52.14.83.91         match
+   7      161.97.169.229                      161.97.169.229      match
+   8      172.209.208.162         **DIFF**    195.133.198.6
+   9      124.187.106.233                     124.187.106.233     match
+   10     20.200.53.14            **DIFF**    94.130.179.247
+   11     96.86.143.105           **DIFF**    67.181.90.11
+   12     3.16.169.178                        3.16.169.178        match
+   13     113.30.247.109                      113.30.247.109      match
+   14     168.220.219.199                     168.220.219.199     match
+   15     185.37.61.73                        185.37.61.73        match
+   16     193.7.195.250                       193.7.195.250       match
+   17     193.108.114.189         **DIFF**    5.161.63.179
+   18     24.10.63.29             **DIFF**    24.23.27.180
+   19     190.105.235.113                     190.105.235.113     match
+   20     184.18.166.118                      184.18.166.118      match
+   21     125.236.210.184                     125.236.210.184     match
+   22     174.182.225.64                      174.182.225.64      match
+   23     130.255.77.156                      130.255.77.156      match
+   24     209.205.66.24                       209.205.66.24       match
+
+Eight stale IPs. That alone explains the timeouts on at least
+those eight RAIDAs (4, 8, 10, 11, 17, 18 — and Sean's prior
+description matches a high but-not-total failure rate).
+
+2. RAIDA 11 specifically
+------------------------
+The working client says RAIDA 11 = 96.86.143.105:50011.
+rest_core's file says 67.181.90.11:50011.
+
+Per Sean: "RAIDA 11 has been moved from an internal address
+(192.168.1.145) to an external address in my house. The -r11ip
+flag could be being called when it does not need to."
+
+Looking at rest_core/api_src/main_rest.c:316,
+RAIDA_11_LAN_IP = "192.168.1.102" (slightly different from the
+.145 Sean named, but same LAN concept). When -r11ip is passed,
+g_config.servers[11].ip_address is overwritten with
+192.168.1.102 (main_rest.c:944-946). On Sean's network today,
+NOTHING lives at 192.168.1.102 — so passing -r11ip forces
+RAIDA 11 into a guaranteed-timeout configuration.
+
+The BUG-51 work added a QMail.exe --r11ip flag that forwards
+this. If the user passes it (or any wrapper / shortcut sets
+it), RAIDA 11 will always time out. The hardcoded LAN IP itself
+is also wrong vs what Sean described.
+
+3. The hardcoded fallback list
+------------------------------
+rest_core/src/raida_servers.c:17-23 hardcodes a fallback list
+embedded in the binary. It matches the CURRENT stale
+raida_ips.csv (not the working client) on most entries. So
+deleting raida_ips.csv won't help — the hardcoded fallback IS
+the stale list.
+
+Comparison of hardcoded vs working client:
+
+  HARDCODED (raida_servers.c)             Working client
+  ----------                              --------------
+   4   95.183.51.104             vs       57.128.255.93     DIFF
+   8   195.133.198.6             vs       172.209.208.162   DIFF
+   10  94.130.179.247            vs       20.200.53.14      DIFF
+   11  67.181.90.11              vs       96.86.143.105     DIFF
+   17  5.161.63.179              vs       193.108.114.189   DIFF
+   18  24.23.26.36               vs       24.10.63.29       DIFF
+   (others match)
+
+Note: the hardcoded list also has RAIDA 18 = 24.23.26.36, but
+the stored file has 24.23.27.180. That suggests a partial
+consensus fetch updated RAIDA 18 at some point but didn't reach
+consensus on the other six stale RAIDAs.
+
+4. The consensus-fetch mechanism (already exists)
+-------------------------------------------------
+rest_core/src/raida_servers.c:75-107 already calls
+raida_consensus_fetch("raida_servers", ...) on every boot:
+  - 3 attempts of 3 fetches each
+  - Requires 2-of-3 consensus per round
+  - Iterates: https://raidaN.cloudcoin.global/service/raida_servers
+    (DNS_URL_TEMPLATE = "raida%d.cloudcoin.global" — defined in
+    rest_core/include/api/api_rest.h:155)
+  - On success, REWRITES raida_ips.csv with the fetched list
+
+So the canonical-source download IS happening — but it must be
+failing to reach consensus for Sean. Possible reasons:
+  (a) The same stale RAIDAs the GUI sees timing out are the
+      ones serving the consensus list. If the consensus
+      fetcher's HTTP timeout is also short, it fails before
+      enough valid RAIDAs respond.
+  (b) DNS for raidaN.cloudcoin.global might point at the same
+      stale IPs (or be unresolved for the renamed RAIDAs).
+  (c) The consensus fetch is succeeding but writing a stale
+      list because the CONSENSUS itself ratifies the wrong
+      IPs — i.e., a majority of the central servers also have
+      the old IPs. Unlikely but possible during a rollout
+      transition.
+  (d) The HARDCODED list is "good enough" to get consensus on
+      most entries but agrees on the wrong IP for some,
+      because the same wrong IP is the historical default
+      everywhere.
+  Diagnostic: need to read rest_core's main.log around startup
+  to see whether "Consensus found! Updating server list."
+  appears, or whether all 3 attempts log "No consensus."
+
+5. Echo timeout — is 3000ms too short?
+--------------------------------------
+GUI calls handleEchoTest at
+src/wallet/components/tabs/SettingsTab.jsx:20. The endpoint is
+core.exe's /api/raida/echo or similar; per-RAIDA timeout is
+the executor's `config.timeout_ms`. From main_rest.c:240,
+QMAIL_HEALTH_REFRESH_ECHO_TIMEOUT_MS = 3000 (the background
+health refresh — separate from the GUI button but same value
+class).
+
+3 seconds is on the short side for transatlantic RAIDA hops
+under load. But IF the IP is correct and the RAIDA is up, a
+healthy echo should complete in well under 1s. 3s timing out
+strongly suggests dead IPs, not slow ones. Bumping the timeout
+to 6-10s might mask a few flaky-but-alive RAIDAs but won't
+help the dead-IP cases.
+
+Recommendation: fix IPs first. If failures persist after IP
+freshness is confirmed, then raise timeout.
+
+
+Root cause (in priority order)
+==============================
+1. **PRIMARY**: rest_core's stored raida_ips.csv AND its
+   hardcoded fallback list are both stale by ~6 IPs. The
+   on-boot consensus fetch is supposed to refresh this but
+   either isn't running, isn't reaching consensus, or is
+   ratifying a stale-but-popular list.
+
+2. **SECONDARY (potential)**: If `-r11ip` is being passed by
+   QMail.exe (or by the user via the new --r11ip flag from
+   BUG-51), RAIDA 11 is forced to a LAN IP (192.168.1.102)
+   that doesn't host anything on Sean's current network. The
+   working client uses 96.86.143.105 for RAIDA 11. The flag
+   needs to be REMOVED per Sean.
+
+3. **TERTIARY**: 3-second echo timeout is borderline but
+   probably not the root cause — fix IPs first, re-measure.
+
+
+Proposed fix (BUG-53)
+=====================
+This is multi-part and crosses both repos. I'll break into
+ticketable sub-tasks:
+
+BUG-53.A — Remove the -r11ip flag and RAIDA-11 override
+   - rest_core: remove `g_r11ip`, remove the -r11ip / --r11ip
+     parsing in parse_arguments(), remove the RAIDA_11_LAN_IP
+     constant + override block at main_rest.c:943-991. Update
+     print_usage() and --help.
+   - Qmail-GUI: remove `--r11ip` from electron.cjs's
+     parseQMailArgs(), remove from QMAIL_USAGE, remove the
+     coreArgs append in startBackend. Drop the `r11ip` field
+     from the qmailArgs object.
+   Estimated: ~40 lines deleted across 2 files. Pure removal,
+   low risk. Two commits per STANDARD 4.
+
+BUG-53.B — Refresh the hardcoded fallback list
+   - rest_core/src/raida_servers.c:17-23: update HARDCODED_IPS
+     to match the working client (._id6.guardians) for the 6
+     stale RAIDAs (4, 8, 10, 11, 17, 18).
+   - But first VERIFY with Sean that ._id6.guardians is the
+     authoritative source. The desktop wallet may have its
+     own consensus state that's also stale, just less so.
+     Cross-check by curling
+     https://raida11.cloudcoin.global/service/raida_servers
+     directly and diffing all three sources.
+
+BUG-53.C — Force a consensus refresh on first launch
+   - Even after fixing the hardcoded list, the saved
+     raida_ips.csv on existing rigs will be stale. Two options:
+     (i)  delete raida_ips.csv on the rig, let rest_core
+          regenerate from hardcoded + consensus next boot.
+     (ii) add a `-refresh-raida` flag to core.exe that
+          ignores the existing file and forces a download.
+   I lean (i) for now (one-time manual cleanup) plus possibly
+   (ii) as a follow-up.
+
+BUG-53.D — Diagnose why consensus fetch isn't keeping the
+list current.
+   - Read main.log on a fresh launch and confirm whether the
+     consensus loop completes or fails.
+   - If failing: check the HTTP timeout used by
+     raida_consensus_fetch, and check whether DNS for
+     raidaN.cloudcoin.global resolves to the same stale IPs
+     as the .csv (which would be the root rot).
+   - This is the LONG-TERM fix; without it, future IP changes
+     will recur. Probably its own bug (BUG-54?) — too big to
+     bundle.
+
+BUG-53.E (optional) — Raise GUI echo timeout from 3s to 6s
+   - If after A/B/C/D the dashboard still shows occasional
+     timeouts on healthy RAIDAs, raise the per-RAIDA timeout.
+   - DEFER until after fixing IPs.
+
+
+Questions for Sean before I implement anything
+==============================================
+Q1. Confirm ._id6.guardians is the authoritative IP list. (I'd
+    like to also curl
+    https://raida11.cloudcoin.global/service/raida_servers
+    from my end and three-way diff, but the GUI client and
+    that endpoint both depend on RAIDA 11 itself being up at
+    its NEW external IP — which we don't know.) Tell me:
+      (a) is the IP next to "RAIDA 11" in ._id6.guardians
+          (96.86.143.105) the right one?
+      (b) is raida11.cloudcoin.global currently pointing at
+          that new external IP, or at the old internal one,
+          or at something else?
+
+Q2. Order of operations: do you want me to do BUG-53.A
+    (remove -r11ip) first as a standalone bugfix, then tackle
+    the IP-staleness work? Or bundle them?
+
+Q3. For BUG-53.B (update hardcoded fallback): should I just
+    copy ._id6.guardians's IPs verbatim, or do you want to
+    confirm each via curl/ping first? Verbatim is faster but
+    propagates any staleness ._id6.guardians might have.
+
+Q4. For BUG-53.C: do you want me to add a `-refresh-raida`
+    flag, or just delete E:\Client3\Client_Data\raida_ips.csv
+    as part of the smoke-test prep?
+
+Q5. The qmail_servers list is separate from raida_servers.
+    Is the GUI's echo dashboard testing raida_servers only,
+    or both? Worth checking the qmail_servers list for
+    similar staleness. (Sean specifically pointed at both
+    endpoints, so I'll plan to look at both.)
+
+
+Next action (pending Sean's answers)
+====================================
+After Q1-Q5 are answered, I'll likely sequence as:
+  1. BUG-53.A — strip -r11ip and the LAN override (low risk,
+     unblocks RAIDA 11 testing). Two commits.
+  2. Curl raida11.cloudcoin.global/service/raida_servers to
+     get the authoritative current list.
+  3. BUG-53.B — refresh hardcoded fallback with that list.
+  4. Delete raida_ips.csv on the rig and relaunch; verify
+     the GUI echo dashboard improves.
+  5. If failures remain: BUG-53.D consensus diagnostic.
+
+Rebuild rest_core (mirror auto-updates QMail-GUI/backend),
+rebuild QMail.exe, restage to E:\Client3\. Log each sub-fix
+as its own entry in docs/bugfix-log.2026-05-24.txt.
+
+
+UPDATE (2026-05-25, post-Sean answers + empirical echo data)
+=============================================================
+
+Sean's answers
+--------------
+A1. Yes — ._id6.guardians's RAIDA 11 (96.86.143.105) is correct,
+    and raida11.cloudcoin.global points at that new external IP.
+A2. COMMENT OUT -r11ip rather than fully remove; keep the code
+    in case it's needed later.
+A3. Use the echo API; results live in
+    E:\Client3\Client_Data\main.log starting line 722.
+A4. Just delete raida_ips.csv (no -refresh-raida flag).
+A5. Yes, check qmail_servers list too.
+
+Empirical echo data (ran ./backend/core.exe -port 9999 -data-dir
+E:\Client3\, curled /api/raida/echo, captured full response that
+the log truncates):
+
+  Timed out (8): RAIDAs 4, 8, 10, 11, 13, 15, 17, 18
+  Ready (17):    RAIDAs 0, 1, 2, 3, 5, 6, 7, 9, 12, 14, 16,
+                 19, 20, 21, 22, 23, 24
+  Total time:    3016 ms
+
+Sean confirms 13, 15, 17 are genuinely down (not an IP issue).
+So the IP-fix candidates are: 4, 8, 10, 11, 18 (five RAIDAs).
+After fix: expect 22/25 pass, 3/25 timeout (the genuinely-down
+ones — out of our control until those RAIDAs come back).
+
+Cross-referencing the diff vs ._id6.guardians:
+  RAIDA  4 — diff confirmed     → fix with 57.128.255.93
+  RAIDA  8 — diff confirmed     → fix with 172.209.208.162
+  RAIDA 10 — diff confirmed     → fix with 20.200.53.14
+  RAIDA 11 — diff confirmed     → fix with 96.86.143.105
+  RAIDA 17 — diff confirmed but RAIDA is down anyway; still
+             update to ._id6.guardians's 193.108.114.189 so
+             when it comes back the IP is right.
+  RAIDA 18 — diff confirmed     → fix with 24.10.63.29
+
+qmail_servers list
+------------------
+E:\Client3\Client_Data\qmail_servers.json exists. 8 RAIDAs:
+0, 2, 9, 11, 13, 14, 21, 22 (matches the
+DEFAULT_JSON-comment-listed set in
+rest_core/src/qmail/qmail_servers.c:7).
+
+Current IPs in qmail_servers.json vs ._id6.guardians:
+  RAIDA  0: 78.46.170.45     == _id6 (match)
+  RAIDA  2: 209.46.126.167   == _id6 (match)
+  RAIDA  9: 124.187.106.233  == _id6 (match)
+  RAIDA 11: 67.181.90.11     vs _id6 96.86.143.105     **DIFF**
+  RAIDA 13: 113.30.247.109   == _id6 (match — but down)
+  RAIDA 14: 168.220.219.199  == _id6 (match)
+  RAIDA 21: 125.236.210.184  == _id6 (match)
+  RAIDA 22: 174.182.225.64   == _id6 (match)
+
+Only RAIDA 11 is stale. Also, RAIDA 13 is in this set and
+currently down per Sean — that's a real availability problem
+for qmail (it stripes mail across this set), but not something
+the IP fix solves.
+
+Also note: qmail_servers.json uses port 50011 for RAIDA 11.
+But the DEFAULT_JSON embedded in qmail_servers.c:35 uses port
+443 with a hostname "raida11.cloudcoin.global". That's the
+HTTPS-fetch interface, not the RAIDA protocol port. The file
+on the rig was clearly regenerated/synced from a different
+source (probably the same consensus mechanism). The 50011 in
+the file is correct for talking to the RAIDA protocol.
+
+Also: qmail_servers.json's "updated" field is 2025-12-18,
+suggesting it hasn't been refreshed by consensus in months.
+The qmail_servers consensus loop in qmail_servers.c:247 should
+update it on boot — same diagnostic as BUG-53.D applies.
+
+
+Implementation order (sequenced + scoped)
+=========================================
+
+PHASE 1: Comment out -r11ip code paths (BUG-53.A)
+  - rest_core/api_src/main_rest.c: comment-out g_r11ip
+    declaration, the -r11ip parsing branch, the RAIDA_11_LAN_IP
+    constant + override block. Update print_usage() to drop
+    the -r11ip line. Leave the code with /* COMMENTED-OUT for
+    future RAIDA 11 LAN testing - BUG-53.A */ markers so it's
+    obvious how to revive.
+  - Qmail-GUI/electron.cjs: comment-out --r11ip handling in
+    parseQMailArgs, remove from QMAIL_USAGE printed help, drop
+    the coreArgs append in startBackend. Leave commented stubs.
+  Commits: 2 (one per repo).
+
+PHASE 2: Refresh hardcoded fallback IPs (BUG-53.B)
+  - rest_core/src/raida_servers.c:17-23: update IPs for
+    RAIDAs 4, 8, 10, 11, 17, 18 to match ._id6.guardians.
+    Six string edits, no logic change.
+  Commit: 1 (rest_core).
+
+PHASE 3: Refresh qmail_servers default RAIDA 11 IP (BUG-53.B
+continued)
+  - rest_core/src/qmail/qmail_servers.c:35: DEFAULT_JSON's
+    RAIDA 11 entry shows ip="194.195.88.44" port=443 (the
+    HTTPS fetch interface). That's the consensus-fetch
+    endpoint, not the protocol IP. This entry doesn't need
+    updating for the timeout issue — it's a different surface.
+    Actually no change needed in qmail_servers.c DEFAULT_JSON
+    since the issue is in the WRITTEN file
+    (qmail_servers.json on the rig), not the default. Just
+    delete that file for regeneration (PHASE 4 step).
+  No code change.
+
+PHASE 4: Clean rig + rebuild + restage
+  - Delete E:\Client3\Client_Data\raida_ips.csv
+  - Delete E:\Client3\Client_Data\qmail_servers.json (so
+    rest_core regenerates from DEFAULT_JSON on next boot)
+  - cmake --build (mirrors fresh core.exe to GUI backend/)
+  - npm run lint + build + build-portable
+  - Stage release/QMail.exe → E:\Client3\QMail.exe
+  - Verify: launch, hit echo, expect 22/25 pass (RAIDAs 13,
+    15, 17 still timing out per Sean — out of scope).
+
+Skipping: BUG-53.D (consensus-fetch diagnostic) — separate
+bug for follow-up. The qmail_servers.json's "updated":
+"2025-12-18" suggests the consensus loop hasn't run
+successfully recently; that's the root-cause investigation
+that needs main.log analysis on a fresh boot. Defer.
+
+Skipping: BUG-53.E (raising echo timeout) — empirical data
+shows healthy RAIDAs respond in 100-550ms. 3s is plenty.
+No change needed.
+
+
+UPDATE 2 (2026-05-25, post-implementation empirical test)
+==========================================================
+
+After PHASE 1 + 2 were implemented, rebuilt rest_core, deleted
+raida_ips.csv + qmail_servers.json on E:\Client3\Client_Data\,
+launched ./backend/core.exe -port 9998 -data-dir E:\Client3,
+curled /api/raida/echo.
+
+Result: **still 17/25 pass**, same 8 RAIDAs timing out.
+Same RAIDAs as before: 4, 8, 10, 11, 13, 15, 17, 18.
+
+What happened (per rest_core boot log)
+--------------------------------------
+  [WARN/NET ] RAIDA file not found. Creating from hardcoded list.
+  [INFO/NET ] DNS Discovery Attempt 1/3...
+  [INFO/NET ] Consensus fetch [raida_servers] from RAIDA 8
+  [INFO/NET ] Consensus fetch [raida_servers] from RAIDA 2
+  [INFO/NET ] Consensus fetch [raida_servers] from RAIDA 6
+  [INFO/NET ] Consensus fetch [raida_servers]: consensus reached
+              (2/2 match)
+  [INFO/NET ] Consensus found! Updating server list.
+
+The boot sequence wrote my refreshed hardcoded list (5
+corrected IPs) — but then the on-boot consensus fetch
+SUCCEEDED, reached 2-of-2 agreement, and OVERWROTE
+raida_ips.csv with the stale list it received from the central
+RAIDAs.
+
+Inspection of the regenerated raida_ips.csv confirms: it
+contains the OLD bad IPs (e.g. RAIDA 11 = 67.181.90.11 again),
+plus a DIFFERENT-AGAIN RAIDA 18 (24.23.27.180), which is
+neither the old hardcoded value (24.23.26.36) nor the working
+client value (24.10.63.29) nor my refreshed hardcoded value
+(24.10.63.29). So at least three different RAIDA 18 IPs exist
+in the wild.
+
+What this means
+---------------
+The central distribution itself is stale. The consensus
+mechanism is doing exactly what it's designed to do: ask the
+central RAIDAs, take majority, write that out. The data on
+the central RAIDAs is wrong.
+
+The working desktop client (`._id6.guardians`, last modified
+~1 hour before this test) tracks a DIFFERENT and apparently
+fresher list than `raida11.cloudcoin.global/service/raida_servers`
+returns. So:
+  - Either the working client uses a different update source
+    (something other than the consensus-fetch endpoint), OR
+  - The working client is no longer auto-updating and its list
+    is "frozen-correct" from before the central data went
+    stale, OR
+  - The working client has manual overrides that it persists.
+
+Updating the hardcoded list in rest_core (PHASE 2) IS still
+correct as a future-proofing measure — when the consensus
+fails (e.g. all 3 attempts return no consensus, or the central
+RAIDAs are unreachable), the hardcoded list is the fallback.
+But it doesn't help today because consensus is succeeding with
+bad data.
+
+Available paths forward (Sean's decision needed)
+------------------------------------------------
+A. **Diagnose the working client.** Find out where
+   ._id6.guardians is sourced from. If there's a different
+   update endpoint or scheme, point rest_core at the same
+   one. This is the right long-term fix but needs Sean to
+   share info about the working client's update logic.
+
+B. **Patch the consensus output before writing.** Add a
+   per-RAIDA cross-check: after consensus produces a result,
+   echo each IP and only accept the consensus IP if it
+   responds. Stale IPs in the consensus result get replaced
+   by either the hardcoded fallback or the previously-stored
+   IP. Code-intrusive, but it would make the system
+   self-healing against bad-central-data scenarios.
+
+C. **Disable the consensus overwrite for now.** Comment out
+   the raida_servers.c:75-110 consensus block so rest_core
+   uses ONLY the hardcoded list + whatever is in the file.
+   With the file deleted and the new hardcoded values landed
+   in PHASE 2, this would give 22/25 immediately. Risky in
+   the long term — when the network DOES update, manual
+   intervention would be needed.
+
+D. **Refresh the central RAIDAs.** Update the data on the
+   actual central servers so consensus returns the right
+   answer. Out of GUI / rest_core scope; that's network ops.
+
+E. **Hybrid: hardcoded list + opt-in consensus.** Add a
+   config flag (rest_core.conf or CLI) like
+   `raida_consensus_refresh=false` so the default behaviour
+   trusts the hardcoded list. Users / dev environments who
+   want auto-refresh enable it explicitly. Best of A+C: safe
+   default, opt-in to the broken-today refresh.
+
+My recommendation: (E) for the immediate user-visible fix,
+plus (A) as a parallel investigation. (C) is the
+quick-and-dirty version of (E).
+
+For now, the implemented changes (commented-out -r11ip,
+refreshed hardcoded fallback) are landed but DO NOT improve
+the dashboard until we choose one of A-E.
+
+
+UPDATE 3 (2026-05-25, post-Sean answers on architecture direction)
+==================================================================
+
+Sean's answers to my Option 1/2/3 questions
+-------------------------------------------
+A1. **Reject Option 1 (port Guardian protocol to rest_core).**
+    Project is intentionally moving AWAY from the guardian model.
+    The RAIDAs are supposed to be the source of truth. The
+    consensus-from-RAIDAs design rest_core already has is the
+    intended architecture. Don't add guardian polling back in.
+
+A2. Most guardians are offline anyway. Not a path forward even
+    as a backup mechanism.
+
+A3. coin_id=6 = CloudCoin = what rest_core uses. Single coin,
+    no parameterization needed. (Confirms `coin6.txt` is the
+    QMail-relevant file in the guardian protocol — but we're
+    not implementing that anyway per A1.)
+
+A4. TLS skip-verify acceptable. (Moot since we're not adding
+    HTTPS guardian fetches.)
+
+A5. Not yet answered (the config-flag-or-not question for the
+    consensus-disable stopgap).
+
+What this means for the diagnosis
+---------------------------------
+The architectural direction is "RAIDAs ARE the source of truth."
+The current bug is therefore NOT a design flaw — it's a data
+freshness problem at the RAIDA layer. The RAIDAs are serving
+stale `service/raida_servers` responses. Specifically:
+
+  - The working desktop client's `._id6.guardians` shows the
+    "correct" IPs because the guardians are independent
+    third-party watchers with their own update process.
+  - The RAIDAs themselves, when queried via
+    `https://raida<N>.cloudcoin.global/service/raida_servers`,
+    return a list with stale IPs for RAIDAs 4, 8, 10, 11, 18.
+  - rest_core's consensus correctly aggregates the (stale)
+    RAIDA responses → writes stale data back to raida_ips.csv.
+  - rest_core is doing its job. The data upstream is wrong.
+
+Sean's manual reconnaissance reinforces this: he checked the
+raida_servers endpoint on all 25 RAIDAs and ALL of them had
+correct IPs EXCEPT RAIDA 4. So:
+
+  - **The RAIDA-4 entry IS legitimately stale in the central
+    data**, on every RAIDA. That's a deploy-side fix, not
+    something rest_core can solve.
+  - **The other timeouts (RAIDA 8, 10, 11, 18) per Sean's
+    inspection have CORRECT IPs in the central data** — yet
+    rest_core is still using stale IPs for them.
+
+That contradiction needs explaining. Two possibilities:
+
+  (a) The 2-of-3 consensus is succeeding on a minority of
+      stale-RAIDA responses by accident. The fetch picks
+      3 random RAIDAs and requires 2 to match. If the random
+      sample happens to include 2 RAIDAs that haven't been
+      updated yet, those 2 "win" the consensus even though
+      the other 23 RAIDAs have the right data.
+
+  (b) The consensus IS receiving the right data, but the
+      RESPONSE PARSING or WRITE path has a bug that
+      preserves old IPs. Less likely given the file change
+      Sean observed (RAIDA 18 wrote a NEW-but-wrong IP, not
+      the old hardcoded fallback).
+
+Per Sean's observation about RAIDA 18 going to 24.23.27.180
+(neither the old hardcoded value 24.23.26.36 nor the
+authoritative 24.10.63.29), (a) is more likely. The
+consensus IS getting updates but only from a minority of
+RAIDAs and ratifying them.
+
+Also: Sean observed rest_core wrote to raida_ips.csv while
+he had the file open in an editor. That's the
+raida_servers.c consensus-success branch (lines 92-98)
+rewriting the file every boot. Causes confusion + risks
+data loss if the user is hand-editing.
+
+Revised recommendation
+----------------------
+Three things, each independently shippable:
+
+  **A. Sample more RAIDAs in consensus (the real fix).**
+     Change `consensus_cfg.fetch_count` from 3 to something
+     larger like 9 or 15, and `consensus_needed` from 2 to a
+     supermajority like 7 or 11. With 25 RAIDAs total and
+     most having correct data, a larger sample plus higher
+     threshold reduces the chance that a minority of
+     stale RAIDAs wins. Touches one line each in
+     raida_servers.c and qmail_servers.c.
+     Estimated: ~4 lines edits, low risk.
+     Caveat: increases boot HTTP traffic ~3-5x but each fetch
+     is small JSON. Acceptable.
+
+  **B. Refresh the hardcoded fallback list (already drafted
+     in PHASE 2).** Keep as-is. When consensus FAILS entirely
+     (all 3 attempts return no consensus), the hardcoded list
+     is what gets used. The current 6 IPs are stale and need
+     correction whether or not (A) is implemented. The 5 IPs
+     I already corrected from `._id6.guardians` are the right
+     values per Sean's audit, except possibly RAIDA 4 which
+     even the central data has wrong — leave the hardcoded
+     value matching `._id6.guardians` (57.128.255.93) since
+     that's the authoritative working IP per the desktop
+     client.
+
+  **C. Don't write raida_ips.csv unless it changed.** The
+     current code writes the file on every consensus success
+     regardless. Add a content compare: if the new content
+     equals the existing file content, skip the write. Fixes
+     Sean's "file changes while I'm editing it" annoyance
+     AND removes a class of "did anything change?" debugging
+     friction. Same fix should apply to qmail_servers.json.
+     Estimated: ~15 lines per file.
+
+  **D. (NOT recommended) Stopgap: disable consensus
+     overwrite.** Would give 22/25 today but bake in the
+     assumption that the hardcoded list never needs updating.
+     The whole architecture is "RAIDAs are the source of
+     truth" — disabling consensus contradicts that. Reject.
+
+What I will NOT do
+------------------
+  - Port the Guardian protocol (rejected per A1).
+  - Add a -refresh-raida CLI flag (Sean already said no to
+    that in his answer to original Q4 — just delete the
+    file).
+  - Touch the central RAIDA data (out of scope for
+    rest_core/Qmail-GUI).
+
+
+Implementation order
+====================
+
+  PHASE 1: -r11ip commented out                 DONE (uncommitted)
+  PHASE 2: hardcoded fallback IPs refreshed     DONE (uncommitted)
+  PHASE 3: consensus sample size + threshold    Recommendation A
+  PHASE 4: skip-write-on-unchanged              Recommendation C
+
+PHASE 3 + 4 are new since the original plan and reflect Sean's
+"RAIDAs are the truth" direction. PHASE 2's hardcoded-IP refresh
+is still correct but won't be the user-visible fix on its own.
+The user-visible fix is PHASE 3 (better sampling produces a
+correct consensus that overwrites the file with correct IPs).
+
+After all four phases land, expected behavior on a clean E:\Client3:
+  - Launch QMail.exe (no args).
+  - rest_core boots, writes hardcoded fallback list.
+  - Consensus fetch samples 9 RAIDAs, requires 7 to agree.
+  - Since most RAIDAs have correct data, 7-of-9 returns the
+    correct list and rewrites raida_ips.csv with it.
+  - Echo dashboard: 22/25 pass (RAIDA 4 still bad in central
+    data; 13/15/17 genuinely down).
+  - Subsequent reboots: consensus produces the same correct
+    list, no file rewrite triggered (PHASE 4), no user
+    confusion.
+
+
+Final question for Sean before I implement PHASE 3 + 4
+------------------------------------------------------
+
+Q-NEW. For PHASE 3 specifically, what numbers do you want?
+       Options:
+         (i)  fetch=9,  consensus=7  (modest sample, ~78% of
+              fetched RAIDAs must agree; tolerates 2 stale)
+         (ii) fetch=15, consensus=10 (larger sample, 67%
+              agreement; tolerates 5 stale — closer to
+              today's reality where ~5 RAIDAs are wrong)
+         (iii) fetch=25, consensus=13 (fetch ALL; majority
+               wins; the most-correct-possible answer but
+               max boot HTTP traffic)
+       I lean (ii). It catches the actual failure case Sean
+       saw (where ~5 minority RAIDAs were winning consensus)
+       while keeping boot cost low. (iii) is conceptually
+       cleanest but unnecessary unless the network situation
+       gets a lot worse.
+
+       Also: the same parameters apply to qmail_servers.json
+       fetch via raida_consensus_fetch("qmail_servers", ...)
+       in qmail_servers.c:247. Should use the same numbers.
+
+Q-NEW-5 (from before, restated). For the consensus-disable
+       stopgap that's NO LONGER recommended — irrelevant per
+       the new plan. Drop the question.
+
+
+End of findings.

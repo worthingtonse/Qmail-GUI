@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { AlertTriangle, Download, X, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle, Download, X, Loader2 } from "lucide-react";
 import "./App.css";
 import "./UpdateModal.css";
 import ServiceSelectionScreen from "./screens/ServiceSelectionScreen";
 import WalletSetupScreen from "./qmail/screens/WalletSetupScreen";
 import Wallet from "./wallet/Wallet";
 import QMail from "./qmail/QMail";
-import { shouldSkipAutoRestore } from "./qmail/skipAutoRestore";
+import { clearSkipAutoRestore } from "./qmail/skipAutoRestore";
 import { NotificationProvider } from "./components/common/notifications/NotificationContext";
 import NotificationContainer from "./components/common/notifications/NotificationContainer";
 import {
@@ -16,6 +16,19 @@ import {
   normalizeIdentityForUi,
 } from "./api/qmailApiServices";
 
+const QMAIL_DISCLAIMER_TEXT = `DISCLAIMER:
+This software is provided 'as-is', without any express or implied warranty.
+In no event shall the authors be held liable for any damages arising from
+the use of this software.
+
+This software deals with digital currency. The value of digital currency
+can fluctuate. There is no guarantee of value, and you could lose money.
+Use this software at your own risk. The developers, CloudCoin Consortium,
+and its affiliates are not responsible for any financial losses or damages
+incurred from the use or misuse of this software.
+
+By using this software, you acknowledge that you understand and agree to
+these terms. You are solely responsible for securing your digital assets.`;
 const SERVICES = {
   NONE: "none",
   PROVISIONING: "provisioning",
@@ -30,6 +43,7 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
+  const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
 
   // Wait for the backend to be ready before kicking off identity /
   // version checks. The Electron splash hides the very first window
@@ -85,16 +99,11 @@ function App() {
   // launch. WalletSetupScreen is now first-run-only (post-import).
   const checkIdentity = async () => {
     try {
-      if (shouldSkipAutoRestore()) {
-        setProvisioningData(null);
-        setSelectedService(SERVICES.NONE);
-        return;
-      }
-
       const identity = await getIdentity();
 
       if (identity && identity.configured) {
         // Returning user — normalize and seed the dashboard directly.
+        clearSkipAutoRestore();
         setProvisioningData(normalizeIdentityForUi(identity));
         setSelectedService(SERVICES.QMAIL);
         return;
@@ -107,6 +116,7 @@ function App() {
         // Coin files exist — go to QMAIL. QMailDashboard's mount-time
         // useEffect will retry getIdentity() and seed userAccount once
         // the backend has indexed the identity.
+        clearSkipAutoRestore();
         setProvisioningData(null);
         setSelectedService(SERVICES.QMAIL);
         return;
@@ -224,6 +234,34 @@ function App() {
     }
   };
 
+  if (!hasAcceptedDisclaimer) {
+    return (
+      <div className="app-shell">
+        <section
+          className="app-shell__disclaimer"
+          aria-labelledby="qmail-disclaimer-title"
+        >
+          <header className="app-shell__disclaimer-header">
+            <AlertTriangle size={28} className="app-shell__disclaimer-icon" />
+            <h1 id="qmail-disclaimer-title">Disclaimer</h1>
+          </header>
+          <div className="app-shell__disclaimer-copy">
+            {QMAIL_DISCLAIMER_TEXT.split("\n").map((line, index) =>
+              line ? <p key={index}>{line}</p> : <br key={index} />,
+            )}
+          </div>
+          <button
+            className="app-shell__disclaimer-accept"
+            type="button"
+            onClick={() => setHasAcceptedDisclaimer(true)}
+          >
+            <CheckCircle size={18} />
+            <span>Accept</span>
+          </button>
+        </section>
+      </div>
+    );
+  }
   // Show loading spinner while checking identity / waiting for backend
   if (isLoading) {
     return (

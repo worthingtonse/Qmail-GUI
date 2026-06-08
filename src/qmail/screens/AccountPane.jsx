@@ -5,13 +5,11 @@ import {
   Shield,
   Settings,
   RefreshCw,
-  Edit,
   Key,
   Smartphone,
   Download,
   LogOut,
   AlertTriangle,
-  X,
   Server,
   // Heart, <--- REMOVED with FIX-05 (Server Status section gone)
   Wifi,
@@ -25,6 +23,13 @@ import {
 import { isLocalStorageAvailable } from "../skipAutoRestore";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { ThemePicker } from "../../theme/ThemePicker";
+import {
+  buildQmailStatusTitle,
+  formatServerLatency,
+  getQmailServerAddress,
+  getQmailServerId,
+  serverStatusText,
+} from "./serverStatusUi";
 import "./AccountPane.css";
 
 const ComingSoonAction = ({ icon, title, description }) => (
@@ -66,11 +71,33 @@ const ComingSoonToggle = ({ title, description }) => (
   </div>
 );
 
-const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
+const buildQmailServerStats = (servers) => {
+  const onlineCount = servers.filter((s) => s.is_available === true).length;
+  const offlineCount = servers.filter((s) => s.is_available === false).length;
+  const hasHistorical = servers.some(
+    (s) => typeof s.percent_uptime === "number",
+  );
+
+  return {
+    total: servers.length,
+    online: onlineCount,
+    offline: offlineCount,
+    uptime:
+      servers.length === 0
+        ? 0
+        : hasHistorical
+          ? Math.round(
+              servers.reduce((sum, s) => sum + (s.percent_uptime || 0), 0) /
+                servers.length,
+            )
+          : Math.round((onlineCount / servers.length) * 100),
+  };
+};
+
+const AccountPane = ({ userAccount, onSignOut }) => {
   // State management
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const { showSuccess, showError, showInfo } = useNotification();
 
@@ -79,10 +106,10 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   // misrepresented service state on every Account view. NavigationPane's
   // dot grid (driven by /raida/echo) is the authoritative health view.
 
-  const [raidaServers, setRaidaServers] = useState([]);
-  
+  const [qmailServers, setQmailServers] = useState([]);
+
   // const [healthLoading, setHealthLoading] = useState(false); <--- REMOVED UNUSED STATE
-  
+
   const [serversLoading, setServersLoading] = useState(false);
   // repairing state removed with handleRepairIdentity (FIX-10 interim).
 
@@ -127,31 +154,9 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
 
       if (serversResult.success) {
         const servers = serversResult.data.servers || [];
-        setRaidaServers(servers);
+        setQmailServers(servers);
 
-        const onlineCount = servers.filter((s) => s.is_available).length;
-        // The backend exposes live availability via /raida/echo, but does not
-        // track historical percent_uptime. Use the current availability ratio
-        // as a proxy so the widget reflects real state rather than 0%.
-        const hasHistorical = servers.some(
-          (s) => typeof s.percent_uptime === "number",
-        );
-        const stats = {
-          total: servers.length,
-          online: onlineCount,
-          offline: servers.length - onlineCount,
-          uptime:
-            servers.length === 0
-              ? 0
-              : hasHistorical
-                ? Math.round(
-                    servers.reduce(
-                      (sum, s) => sum + (s.percent_uptime || 0),
-                      0,
-                    ) / servers.length,
-                  )
-                : Math.round((onlineCount / servers.length) * 100),
-        };
+        const stats = buildQmailServerStats(servers);
         setServerStats(stats);
       }
 
@@ -178,42 +183,20 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
       const result = await getServers();
       if (result.success) {
         const servers = result.data.servers || [];
-        setRaidaServers(servers);
+        setQmailServers(servers);
 
-        const onlineCount = servers.filter((s) => s.is_available).length;
-        // The backend exposes live availability via /raida/echo, but does not
-        // track historical percent_uptime. Use the current availability ratio
-        // as a proxy so the widget reflects real state rather than 0%.
-        const hasHistorical = servers.some(
-          (s) => typeof s.percent_uptime === "number",
-        );
-        const stats = {
-          total: servers.length,
-          online: onlineCount,
-          offline: servers.length - onlineCount,
-          uptime:
-            servers.length === 0
-              ? 0
-              : hasHistorical
-                ? Math.round(
-                    servers.reduce(
-                      (sum, s) => sum + (s.percent_uptime || 0),
-                      0,
-                    ) / servers.length,
-                  )
-                : Math.round((onlineCount / servers.length) * 100),
-        };
+        const stats = buildQmailServerStats(servers);
         setServerStats(stats);
 
         showNotification(
-          `Loaded ${stats.online}/${stats.total} available servers`,
+          `Loaded ${stats.online}/${stats.total} available QMail servers`,
           "info",
         );
       } else {
-        showNotification(`Failed to load servers: ${result.error}`, "error");
+        showNotification(`Failed to load QMail servers: ${result.error}`, "error");
       }
     } catch (error) {
-      showNotification(`Failed to load servers: ${error.message}`, "error");
+      showNotification(`Failed to load QMail servers: ${error.message}`, "error");
     } finally {
       setServersLoading(false);
     }
@@ -229,10 +212,6 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
     loadAccountData();
   };
 
-  const handleEditProfile = () => {
-    setIsEditing(!isEditing);
-  };
-
   const storageAvailable = isLocalStorageAvailable();
 
   const handleConfirmSignOut = () => {
@@ -246,9 +225,9 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   // Both were no-op handlers attached to controls that didn't do
   // anything. Disabled controls now have no onClick at all.
 
-  // Loading gate: show spinner only when initial RAIDA list hasn't
+  // Loading gate: show spinner only when initial QMail server list hasn't
   // arrived yet. (FIX-05: serverHealth check removed.)
-  if (loading && raidaServers.length === 0) {
+  if (loading && qmailServers.length === 0) {
     return (
       <div className="account-pane">
         <div className="account-pane__loading-state">
@@ -260,7 +239,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
   }
 
   // CHANGED: Update error check
-  if (error && raidaServers.length === 0) {
+  if (error && qmailServers.length === 0) {
     return (
       <div className="account-pane">
         <div className="account-pane__error">
@@ -317,17 +296,6 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
               <User size={20} />
               Profile Information
             </h3>
-            {userAccount && (
-              <button
-                className={`btn ${
-                  isEditing ? "btn--danger" : "btn--secondary"
-                } account-pane__edit-button`}
-                onClick={handleEditProfile}
-              >
-                {isEditing ? <X size={16} /> : <Edit size={16} />}
-                {isEditing ? "Cancel" : "Edit"}
-              </button>
-            )}
           </div>
 
           <div className="account-pane__profile-details">
@@ -338,13 +306,6 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
                   <div className="account-pane__field-value">
                     {userAccount.pretty_address ||
                       `${userAccount.address}@${userAccount.domain}`}
-                  </div>
-                </div>
-
-                <div className="account-pane__profile-field">
-                  <label className="account-pane__field-label">Serial Number</label>
-                  <div className="account-pane__field-value">
-                    #{userAccount.serial_number || "N/A"}
                   </div>
                 </div>
 
@@ -366,12 +327,12 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
           </div>
         </div>
 
-        {/* RAIDA Network Status Section */}
+        {/* QMail Server Status Section */}
         <div className="account-pane__network">
           <div className="account-pane__section-header">
             <h3 className="account-pane__section-title">
               <Server size={20} />
-              RAIDA Network Status
+              QMail Server Status
             </h3>
             <div className="account-pane__section-actions">
               {/* Sync Directory button removed: /api/admin/sync was removed
@@ -380,7 +341,7 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
                 className="btn btn--secondary account-pane__refresh-button"
                 onClick={loadServers}
                 disabled={serversLoading}
-                title="Refresh server status"
+                title="Refresh QMail server status"
               >
                 <RefreshCw
                   size={16}
@@ -403,89 +364,67 @@ const AccountPane = ({ userAccount, walletBalance, onSignOut }) => {
 
           <div className="account-pane__balance-grid">
             <div className="account-pane__balance-card account-pane__balance-card--total">
-              <div className="account-pane__balance-label">Total Coins</div>
-              <div className="account-pane__balance-value">
-                {walletBalance?.totalCoins || 0}
-              </div>
-              <div className="account-pane__balance-description">All coins in wallet</div>
-            </div>
-
-            <div className="account-pane__balance-card account-pane__balance-card--verified">
-              <div className="account-pane__balance-label">Bank (Ready)</div>
-              <div className="account-pane__balance-value">
-                {walletBalance?.folders.bank.coins || 0}
-              </div>
-              <div className="account-pane__balance-description">
-                {walletBalance?.folders.bank.value.toFixed(1) || 0} CC value
-              </div>
-            </div>
-
-            <div className="account-pane__balance-card account-pane__balance-card--counterfeit">
-              <div className="account-pane__balance-label">Fracked (Needs Repair)</div>
-              <div className="account-pane__balance-value">
-                {walletBalance?.folders.fracked.coins || 0}
-              </div>
-              <div className="account-pane__balance-description">
-                {walletBalance?.folders.fracked.value.toFixed(1) || 0} CC value
-              </div>
-            </div>
-
-            <div className="account-pane__balance-card account-pane__balance-card--suspect">
-              <div className="account-pane__balance-label">Limbo (Processing)</div>
-              <div className="account-pane__balance-value">
-                {walletBalance?.folders.limbo.coins || 0}
-              </div>
-              <div className="account-pane__balance-description">
-                {walletBalance?.folders.limbo.value.toFixed(1) || 0} CC value
-              </div>
+              <div className="account-pane__balance-label">QMail Servers</div>
+              <div className="account-pane__balance-value">{serverStats.total}</div>
+              <div className="account-pane__balance-description">Configured relay servers</div>
             </div>
 
             <div className="account-pane__balance-card account-pane__balance-card--network-online">
               <div className="account-pane__balance-label">Online</div>
               <div className="account-pane__balance-value">{serverStats.online}</div>
-              <div className="account-pane__balance-description">Available servers</div>
+              <div className="account-pane__balance-description">Available QMail servers</div>
             </div>
 
             <div className="account-pane__balance-card account-pane__balance-card--network-offline">
               <div className="account-pane__balance-label">Offline</div>
               <div className="account-pane__balance-value">{serverStats.offline}</div>
-              <div className="account-pane__balance-description">Unavailable servers</div>
+              <div className="account-pane__balance-description">Unavailable QMail servers</div>
             </div>
 
             <div className="account-pane__balance-card account-pane__balance-card--network-unknown">
-              <div className="account-pane__balance-label">Uptime</div>
-              <div className="account-pane__balance-value">
-                {serverStats.total > 0
-                  ? Math.round((serverStats.online / serverStats.total) * 100)
-                  : 0}
-                %
-              </div>
-              <div className="account-pane__balance-description">Network availability</div>
+              <div className="account-pane__balance-label">Availability</div>
+              <div className="account-pane__balance-value">{serverStats.uptime}%</div>
+              <div className="account-pane__balance-description">Current response ratio</div>
             </div>
           </div>
 
           {/* Server List */}
-          {raidaServers.length > 0 && (
+          {qmailServers.length > 0 && (
             <div className="account-pane__server-list">
               <h4 className="account-pane__server-list-title">
-                Server Details ({raidaServers.length})
+                QMail Server Details ({qmailServers.length})
               </h4>
               <div className="account-pane__server-grid">
-                {raidaServers.map((server, index) => {
-                  const serverId = server.server_id ?? server.raida_index ?? index;
+                {qmailServers.map((server, index) => {
+                  const serverId = getQmailServerId(server, index);
+                  const availability = server.is_available ?? null;
+                  const isOnline = availability === true;
+                  const status = serverStatusText(availability);
+                  const latency = formatServerLatency(server.latency_ms);
+                  const address = getQmailServerAddress(server);
+                  const offlineIconClass = availability === false
+                    ? "account-pane__server-icon--offline"
+                    : "account-pane__server-icon--unknown";
+
                   return (
-                    <div key={serverId} className="account-pane__server-item">
+                    <div
+                      key={serverId}
+                      className="account-pane__server-item"
+                      title={buildQmailStatusTitle(server, index)}
+                    >
                       <div className="account-pane__server-status">
-                        {server.is_available ? (
+                        {isOnline ? (
                           <Wifi size={16} className="account-pane__server-icon--online" />
                         ) : (
-                          <WifiOff size={16} className="account-pane__server-icon--offline" />
+                          <WifiOff size={16} className={offlineIconClass} />
                         )}
                       </div>
                       <div className="account-pane__server-info">
-                        <div className="account-pane__server-id">{serverId}</div>
-                        <div className="account-pane__server-address">
-                          {server.ip_address}:{server.port}
+                        <div className="account-pane__server-id">QMail {serverId}</div>
+                        <div className="account-pane__server-address">{address}</div>
+                        <div className="account-pane__server-meta">
+                          <span>{status}</span>
+                          <span>{latency}</span>
                         </div>
                       </div>
                     </div>

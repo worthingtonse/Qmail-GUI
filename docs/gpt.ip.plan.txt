@@ -1,0 +1,281 @@
+BUG-58 - RAIDA IP availability fix plan
+=======================================
+Author: GPT-5
+Date: 2026-05-26
+Companion findings:
+  docs/gpt.raida-availability.txt
+  docs/opu.ip.plan.txt
+
+Goal
+----
+Fix the dashboard RAIDA availability bug without reintroducing the old guardian
+model. QMail/rest_core should use the RAIDA-served topology as the normal
+source of truth, but it must not let stale or unvalidated topology data make a
+clean first launch worse.
+
+Current failure
+---------------
+On a clean E:\Client3 launch, QMail creates Client_Data correctly but the
+dashboard stays at 17/25. The failed IDs are:
+  4, 8, 10, 11, 13, 15, 17, 18
+
+Sean says 13, 15, and 17 are known down. The fix should recover 4, 8, 10, 11,
+and 18. Expected dashboard result after the IP fix is about 22/25.
+
+Core diagnosis
+--------------
+There are three separate problems:
+
+1. Duplicate stale defaults.
+   api_src/config.c writes E:\Client3\Client_Data\raida_ips.csv on first boot
+   from its own hardcoded IP list. src/raida_servers.c has another hardcoded
+   list. Keeping two tables already caused drift.
+
+2. Wrong data-dir for the RAIDA topology initializer.
+   raida_initialize_server_list() calls platform_get_client_data_dir(), which
+   derives Client_Data from the extracted core.exe path. The runtime echo path
+   later loads g_config.servers[] from g_config.client_data_path, which is the
+   visible -data-dir path passed by QMail. Those are different folders in the
+   packaged app.
+
+3. Unvalidated topology consensus.
+   raida_consensus_fetch("raida_servers") accepts matching text from a small
+   random sample and writes it as the server list. If the central RAIDA data
+   contains a bad entry, such as RAIDA4, the client can overwrite a working
+   fallback with a bad consensus result.
+
+Non-goals
+---------
+Do not port cloudcoin_desktop's guardian /coin6.txt mechanism into rest_core.
+The desktop guardian file is useful as a comparison source, but QMail is moving
+toward RAIDA-served topology.
+
+Do not add a -refresh-raida CLI flag. Sean already prefers deleting the file
+for manual reset.
+
+Plan
+----
+
+Phase 1 - Create one canonical fallback list
+--------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\src\raida_servers.c
+  D:\Code\src\C\rest_core\include\raida_servers.h
+  D:\Code\src\C\rest_core\api_src\config.c
+
+Keep the fallback IP table in one place only: src/raida_servers.c.
+
+Expose a helper such as:
+  result_t raida_write_default_server_file(const char *filepath);
+
+Then change api_src/config.c create_default_files() to call that helper instead
+of carrying its own const char *default_ips[] table.
+
+The canonical fallback list should match the known-working IPs:
+  4  -> 57.128.255.93:50004
+  8  -> 172.209.208.162:50008
+  10 -> 20.200.53.14:50010
+  11 -> 96.86.143.105:50011
+  17 -> 193.108.114.189:50017
+  18 -> 24.10.63.29:50018
+
+Why this phase matters:
+  A clean first boot writes the visible raida_ips.csv before any consensus
+  result can help. This phase alone should stop the clean-launch file from
+  starting stale.
+
+Phase 2 - Make core library data-dir explicit
+---------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\src\platform.c
+  D:\Code\src\C\rest_core\include\platform.h
+  D:\Code\src\C\rest_core\api_src\command_adapter.c
+  D:\Code\src\C\rest_core\api_src\config.c
+
+Do not make platform.c directly depend on REST's g_config. That is risky for
+non-REST builds. Instead add a platform-level override:
+  void platform_set_client_data_dir_override(const char *path);
+
+platform_get_client_data_dir() should return the override when set, otherwise
+fall back to executable_dir\Client_Data.
+
+Call platform_set_client_data_dir_override(g_config.client_data_path) from
+command_adapter_init(), after g_config.client_data_path has been computed.
+
+Also move transport_adapter_init() until after create_folder_structure() and
+create_default_files(). The current order lets raida_initialize_server_list()
+run before the target folder exists.
+
+Correct startup order should be:
+  1. compute g_config.client_data_path
+  2. command_adapter_init() / set platform data-dir override
+  3. create_folder_structure()
+  4. create_default_files()
+  5. transport_adapter_init()
+  6. network_init()
+  7. load_raida_servers()
+
+Why this phase matters:
+  The topology refresh and the runtime echo must read/write the same
+  E:\Client3\Client_Data\raida_ips.csv file.
+
+Phase 3 - Validate consensus before overwriting raida_ips.csv
+-------------------------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\src\raida_servers.c
+  D:\Code\src\C\rest_core\src\raida_consensus_fetch.c
+  D:\Code\src\C\rest_core\include\raida_consensus_fetch.h
+
+The RAIDA service should remain the normal source of truth, but the client
+should not blindly replace a working list with a candidate that lowers
+availability.
+
+Add raida_servers validation before writing:
+  - response must contain exactly 25 non-empty entries
+  - each entry must parse as host:port
+  - ports must match 50000 through 50024
+  - IP/host strings must be non-empty and bounded
+  - normalize CRLF/LF before comparing consensus payloads
+
+Then apply one of these safeguards:
+
+Preferred safeguard:
+  Parse the consensus payload into a temporary server list, run a quick echo
+  against that temporary list, and write it only if it is at least as available
+  as the current/fallback list. This protects against a bad central RAIDA4
+  entry while still accepting future central updates that improve the network.
+
+Minimum safeguard:
+  Increase topology consensus to a deterministic majority and validate format:
+    fetch_count = 25
+    consensus_needed = 13
+  Raise MAX_FETCH_COUNT from 10 to RAIDA_COUNT. Use this only for topology
+  endpoints where boot-time correctness matters more than a few small HTTPS
+  requests.
+
+If the preferred availability check is too much for one patch, implement the
+minimum safeguard first and leave the echo-validated apply as a follow-up.
+
+Why this phase matters:
+  If the central data still has RAIDA4 wrong, a bigger random sample alone will
+  preserve the wrong RAIDA4 entry. Validation must prevent consensus from making
+  the first-boot fallback worse.
+
+Phase 4 - Stop rewriting unchanged topology files
+-------------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\src\raida_servers.c
+  D:\Code\src\C\rest_core\src\qmail\qmail_servers.c
+
+Before writing raida_ips.csv or qmail_servers.json, read the existing file and
+compare it with the candidate normalized content. If unchanged, skip the write
+and log that the topology is already current.
+
+Why this phase matters:
+  It prevents confusing timestamp churn and makes Sean's manual tests easier to
+  interpret. It also narrows future debugging because a changed timestamp will
+  mean the topology really changed.
+
+Phase 5 - Fix qmail_servers parsing in the same IP pass
+-------------------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\src\qmail\qmail_servers.c
+
+The live qmail_servers JSON uses "ip_address". The current parser reads "ip".
+Accept both keys:
+  - "ip"
+  - "ip_address"
+
+Also use the same stronger consensus parameters and write-if-changed behavior
+from Phases 3 and 4.
+
+Why this phase matters:
+  The lower-left dashboard uses /api/raida/echo, not qmail_servers.json, but
+  QMail itself still needs qmail_servers to parse live topology correctly.
+
+Phase 6 - Wire echo timeout through cmd_echo
+--------------------------------------------
+File scope:
+  D:\Code\src\C\rest_core\include\cmd_echo.h
+  D:\Code\src\C\rest_core\src\commands\cmd_echo.c
+  D:\Code\src\C\rest_core\api_src\command_adapter.c
+
+cmd_echo_serial() and cmd_echo_parallel() currently hardcode:
+  config.timeout_ms = 3000
+
+Add a timeout_ms parameter to both functions. Pass the REST timeout through
+from command_adapter.c. Preserve 3000 as the default when timeout_ms is zero.
+
+Why this phase matters:
+  It is not the stale-IP root cause, but it fixes the misleading test behavior
+  where /api/raida/echo?timeout=6000 still finishes near 3000 ms.
+
+Phase 7 - Keep -r11ip dormant
+-----------------------------
+File scope:
+  D:\Code\src\C\rest_core\api_src\main_rest.c
+  D:\Code\src\JavaScript\Qmail-GUI\electron.cjs
+
+Verify the GUI does not forward --r11ip. Leave the rest_core code commented or
+disabled, not active. This is not the main bug, but it prevents manual launches
+from forcing RAIDA11 to a LAN address.
+
+Verification
+------------
+After implementation:
+
+1. Build rest_core:
+     cmake --build build --config Release
+
+2. Start from a clean rig:
+     delete E:\Client3\Client_Data
+     launch E:\Client3\QMail.exe
+
+3. Inspect:
+     E:\Client3\Client_Data\raida_ips.csv
+
+   It should contain the known-working values for 4, 8, 10, 11, 17, and 18
+   unless a validated consensus update replaces them with an equal-or-better
+   available list.
+
+4. Call:
+     GET /api/raida/echo
+
+   Expected:
+     4, 8, 10, 11, 18 ready
+     13, 15, 17 may still time out
+     total_available about 22
+
+5. Call:
+     GET /api/raida/echo?timeout=6000
+
+   If any RAIDA still times out, total_time_ms should be near 6000 ms, not
+   3000 ms.
+
+6. Restart QMail without deleting Client_Data.
+   If the topology content is unchanged, raida_ips.csv and qmail_servers.json
+   timestamps should not change.
+
+Recommended implementation order
+--------------------------------
+1. Phase 1 and Phase 2 together: canonical fallback plus correct data-dir.
+2. Phase 4: write-if-changed, low risk and useful for testing.
+3. Phase 3: stronger/validated consensus.
+4. Phase 5: qmail_servers parser and consensus cleanup.
+5. Phase 6: echo timeout plumbing.
+6. Phase 7: verify -r11ip remains dormant.
+
+Commit strategy
+---------------
+Use BUG-58. I would make two commits:
+
+1. fix(BUG-58): use correct RAIDA topology file
+   Phases 1, 2, 3, and 4.
+
+2. fix(BUG-58): finish topology consumers
+   Phases 5, 6, and 7.
+
+This keeps the user-visible dashboard fix separate from related cleanup while
+avoiding too many tiny commits for one backend bug.
+
+End of plan.

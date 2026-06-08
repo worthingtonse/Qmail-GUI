@@ -1,31 +1,38 @@
 /* eslint-disable react/prop-types */
 import { avatarColorFromString } from "./avatarColor";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
-const SenderAvatar = ({ sender, email, status }) => {
+const SenderAvatar = ({ sender, email, status, senderSn, senderDenominationCode }) => {
   // BUG-06 FIX: Guard against undefined/null sender
   const getInitials = (name) => {
     if (!name) return "?";
     // Show "?" for unknown/unresolved senders
     if (name === "Unknown Sender" || name === "Unknown" || name.startsWith("Unknown")) return "?";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .substring(0, 2)
-      .toUpperCase();
+    // Addresses are "@torch.bay.kilo" — skip the leading "@" (and any other
+    // leading punctuation/whitespace) and show the first real letter/digit.
+    const match = name.match(/[A-Za-z0-9]/);
+    return match ? match[0].toUpperCase() : "?";
   };
 
   const colorKey = email || sender || "";
   const { bg } = avatarColorFromString(colorKey);
+  const cartoucheAvatar = (
+    <QmailCartoucheAvatar
+      serialNumber={senderSn}
+      denominationCode={senderDenominationCode}
+    />
+  );
 
   return (
     <div className="email-list-pane__avatar">
-      <div
-        className="email-list-pane__avatar-circle"
-        style={{ "--email-list-pane-avatar-bg": bg }}
-      >
-        <span>{getInitials(sender)}</span>
-      </div>
+      {cartoucheAvatar || (
+        <div
+          className="email-list-pane__avatar-circle"
+          style={{ "--email-list-pane-avatar-bg": bg }}
+        >
+          <span>{getInitials(sender)}</span>
+        </div>
+      )}
       {status && status !== "none" && (
         <div className={`email-list-pane__coin-badge email-list-pane__coin-badge--${status}`}>
           {status === "gold" ? "◈" : status === "silver" ? "◇" : "●"}

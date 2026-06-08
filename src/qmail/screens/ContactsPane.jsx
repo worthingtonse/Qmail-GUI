@@ -9,6 +9,7 @@ import {
   Globe,
   Check,
   AlertTriangle,
+  Star,
 } from "lucide-react";
 import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
@@ -19,6 +20,7 @@ import {
   deleteContact,
   resolveAddressOrSn,
   convertSnToEmail,
+  setContactFavorite,
 } from "../../api/qmailApiServices";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 
@@ -112,6 +114,7 @@ useEffect(() => {
           email: contact.autoAddress,
           status: "none",
           description: contact.description,
+          isFavorite: Boolean(contact.isFavorite),
           source: "user",
         }));
         setUserContacts(transformedContacts);
@@ -168,6 +171,7 @@ useEffect(() => {
         description: contact.description,
         popularity: contact.popularity,
         contactCount: contact.contactCount,
+        isFavorite: Boolean(contact.isFavorite),
         source: "drd",
       }));
       setContacts(transformedContacts);
@@ -201,7 +205,10 @@ useEffect(() => {
 
   const getContactInitial = (contact) => {
     const value = String(contact?.name || contact?.email || contact?.id || "?").trim();
-    return value.charAt(0).toUpperCase() || "?";
+    // Addresses begin with "@" — skip leading punctuation and use the first
+    // real letter/digit so the avatar shows "T" for "@torch.bay.kilo", not "@".
+    const match = value.match(/[A-Za-z0-9]/);
+    return match ? match[0].toUpperCase() : "?";
   };
 
   const getContactAvatarToneClass = (contact) => {
@@ -398,6 +405,31 @@ useEffect(() => {
       showSuccess(`${contact.name} restored.`);
     } catch (err) {
       showError(`Error restoring contact: ${err.message}`);
+    }
+  };
+
+  const handleToggleFavorite = async (contact) => {
+    if (!contact || !contact.id) return;
+    const nextValue = !contact.isFavorite;
+
+    // Optimistic flip on both lists so the star updates instantly.
+    const flipInList = (list) =>
+      list.map((c) => (c.id === contact.id ? { ...c, isFavorite: nextValue } : c));
+    setUserContacts((prev) => flipInList(prev));
+    setContacts((prev) => flipInList(prev));
+
+    const result = await setContactFavorite(contact.id, nextValue);
+    if (!result.success) {
+      // Rollback.
+      const restoreInList = (list) =>
+        list.map((c) =>
+          c.id === contact.id ? { ...c, isFavorite: !nextValue } : c,
+        );
+      setUserContacts((prev) => restoreInList(prev));
+      setContacts((prev) => restoreInList(prev));
+      showError(
+        `Failed to update favorite: ${result.error || "unknown error"}`,
+      );
     }
   };
 
@@ -834,6 +866,29 @@ useEffect(() => {
                           </div>
                         )}
                       </div>
+                      {contact.source === "user" && (
+                        <button
+                          type="button"
+                          className={`contacts-pane__action-button contacts-pane__action-button--favorite${
+                            contact.isFavorite
+                              ? " contacts-pane__action-button--favorite-on"
+                              : ""
+                          }`}
+                          onClick={() => handleToggleFavorite(contact)}
+                          title={contact.isFavorite ? "Unfavorite" : "Mark as favorite"}
+                          aria-label={
+                            contact.isFavorite
+                              ? `Remove ${contact.name} from favorites`
+                              : `Mark ${contact.name} as favorite`
+                          }
+                          aria-pressed={contact.isFavorite ? "true" : "false"}
+                        >
+                          <Star
+                            size={16}
+                            fill={contact.isFavorite ? "currentColor" : "none"}
+                          />
+                        </button>
+                      )}
                       {contact.source === "user" && (
                         <button
                           type="button"

@@ -1,0 +1,350 @@
+QMail Beacon Redundancy Plan
+Date: 2026-06-04
+Author/model prefix: cod
+
+Goal
+----
+Allow a receiving client to monitor both primary and secondary beacon RAIDAs
+(currently 11 and 14) so mail is still found if one beacon is down or a sender
+uses the other beacon. Also allow the sending client to try the primary beacon
+first and fall back to the secondary beacon when the primary Tell fails.
+
+User Decisions
+--------------
+1. Phase 1 uses a fixed primary/fallback pair:
+   - primary: RAIDA11
+   - fallback/secondary: RAIDA14
+
+2. Future phases should allow clients to choose their own beacon pair. Code
+   should therefore use constants/config/directory fields rather than hard-coded
+   literals in send/receive logic.
+
+3. Sender fallback should run on any non-success Tell result unless the status
+   clearly proves the recipient identity is invalid.
+
+4. Receiver per-beacon last_tell_timestamp values should be stored persistently
+   in the local DB/config so restart does not lose catchup state.
+
+Current Problem
+---------------
+The sender can successfully upload the email body and attachments, then send the
+Tell to RAIDA14. The recipient can still miss the email if its QMail beacon
+thread is only PINGing/PEEKing RAIDA11.
+
+The observed Client4 -> Client5 test showed exactly this:
+- Client4 sent all three Tells to RAIDA14 and each was accepted.
+- Client5 was listening on RAIDA11.
+- Client5's catchup PEEK on RAIDA11 returned tell_count=0.
+- Client5 never logged the message GUIDs, never parsed a manifest, and never
+  entered QMail RECEIVE.
+
+There is also a local contact stale-default issue:
+- qmail_contacts schema defaults beacon_raida to 14.
+- qmail_db_contact_record_send() inserts contact stubs with beacon 14.
+- QMAIL_BEACON_RAIDA_ID is now 11.
+This means a sender can route to 14 from stale contact data while the receiver
+is actively monitoring 11.
+
+Design Principles
+-----------------
+1. A user's identity should carry both beacons:
+   - primary_beacon_raida: normally 11
+   - secondary_beacon_raida: normally 14
+   Define these as named constants/config values, not scattered hard-coded
+   literals. Keep QMAIL_BEACON_RAIDA_ID as primary and add a secondary constant
+   such as QMAIL_SECONDARY_BEACON_RAIDA_ID.
+   Phase 1 treats 11/14 as fixed defaults, but the storage and API shape should
+   support future user-selected beacon pairs.
+
+2. A receiver should monitor both beacons independently.
+   PING is a long-poll, so it must not call 11 and then 14 serially in one loop.
+   Serial long-poll would block on the first beacon and starve the second.
+
+3. A sender should prefer the recipient's primary beacon and use the secondary
+   beacon as fallback when the primary Tell fails.
+
+4. The receive path must dedupe by email GUID because a Tell can appear on both
+   beacons, especially during retry/fallback or future dual-send behavior.
+
+Phase 1 - Normalize Beacon Data
+-------------------------------
+0. Add one ordered beacon source of truth:
+   - QMAIL_BEACON_RAIDA_ID = 11
+   - QMAIL_SECONDARY_BEACON_RAIDA_ID = 14
+   - QMAIL_BEACON_RAIDAS[] = { 11, 14 }
+   - QMAIL_BEACON_RAIDA_COUNT = 2
+   The receiver monitor and sender failover code should iterate the same ordered
+   list unless a recipient-specific directory record overrides it.
+
+1. Replace hard-coded contact defaults of 14 with the configured/current primary
+   beacon constant where appropriate:
+   - qmail_contacts table schema default for beacon_raida should be 11.
+   - qmail_db_open() migration that adds beacon_raida should use default 11.
+   - qmail_db_contact_record_send() stub insert should use primary 11 and
+     secondary 14, not 14/14.
+
+2. Add a migration for old stub contacts:
+   - If beacon_raida=14 and secondary_beacon_raida=14 and the contact row has no
+     strong user-authored beacon metadata, update it to beacon_raida=11 and
+     secondary_beacon_raida=14.
+   - Preserve explicitly edited contacts if the UI later supports manual beacon
+     selection. Until then, stale 14/14 rows are more likely a default artifact
+     than user intent.
+
+3. Keep qmail_users.csv parsing as the authoritative directory source when a
+   directory row exists. If the directory says primary RAIDA11 and secondary
+   RAIDA14, the contact DB should be synced to that.
+
+4. When resolving a recipient, do not blindly trust a stored contact whose only
+   beacon data looks like the legacy default. If the row is 14/14 and has no
+   stronger directory/user-edited beacon metadata, resolve it as [11,14] even
+   before the migration has run. This prevents existing stale rows from
+   continuing to misroute mail.
+
+Phase 2 - Receiver Dual Beacon Monitoring
+-----------------------------------------
+Preferred implementation: one monitor worker per beacon.
+
+1. Extend qmail_beacon_state_t or add a small beacon-monitor list:
+   - identity serial number
+   - denomination
+   - primary beacon RAIDA
+   - secondary beacon RAIDA
+   - per-beacon last_tell_timestamp
+   - per-beacon backoff/consecutive_errors
+   - per-beacon active long-poll state
+
+2. Start two monitor loops for the active identity:
+   - one for RAIDA11
+   - one for RAIDA14
+
+3. Each loop performs its own catchup PEEK:
+   - PEEK primary since last timestamp for primary
+   - PEEK secondary since last timestamp for secondary
+
+4. Each loop then enters its own PING long-poll:
+   - PING RAIDA11 can block without preventing RAIDA14 monitoring.
+   - PING RAIDA14 can block without preventing RAIDA11 monitoring.
+
+5. On notification arrival:
+   - insert the Tell into qmail_received_tells using the existing GUID-based
+     identity.
+   - if the same file_guid already exists, merge/refresh manifest data rather
+     than creating duplicate visible emails.
+   - call receive/reassembly only once per file_guid at a time.
+
+6. Track per-beacon state independently:
+   - If RAIDA11 fails, back off RAIDA11 only.
+   - Keep RAIDA14 polling normally.
+   - If RAIDA14 fails, back off RAIDA14 only.
+   - Keep RAIDA11 polling normally.
+
+7. UI/status changes:
+   - /api/qmail/local/status should report both beacons:
+     primary_beacon_raida, secondary_beacon_raida, and per-beacon running/error
+     state.
+   - Keep the existing beacon_raida field for backward compatibility, mapped to
+     the primary beacon.
+
+Lower-risk alternative implementation:
+--------------------------------------
+If two long-poll workers are too invasive for the first patch, keep the existing
+primary long-poll on 11 and add periodic secondary PEEK on 14 every 15-60
+seconds. This is less responsive but safer to retrofit.
+
+Recommended receiver behavior:
+------------------------------
+Use dual workers if possible. If that is too large for the first change, ship
+primary PING + secondary periodic PEEK as an interim fix, then upgrade to dual
+PING workers.
+
+Implementation note:
+--------------------
+If the beacon count later grows past two, reconsider one thread per beacon. For
+the current 11/14 pair, two workers are simpler and avoid long-poll starvation.
+
+Phase 3 - Sender Primary/Secondary Fallback
+-------------------------------------------
+1. Ensure recipient resolution returns both beacons:
+   - recipient_with_beacon_t should carry primary and secondary beacon IDs.
+   - If only one beacon is known, secondary can be set to 0xFF/invalid or the
+     configured default secondary.
+
+2. For each recipient group:
+   - build unique primary beacon groups.
+   - send Tell to each primary beacon first.
+
+3. If primary Tell succeeds:
+   - mark recipient as sent.
+   - no secondary Tell is required.
+
+4. If primary Tell fails by transport failure, timeout, or rejected status:
+   - send the same Tell to the recipient's secondary beacon.
+   - record the fallback attempt in the receipt.
+   - if secondary succeeds, mark recipient sent with note "fallback beacon used".
+   Decision: fallback on any non-success Tell result unless the status clearly
+   proves the recipient identity is invalid.
+
+5. If primary succeeds for some recipients on a beacon but fails for others:
+   - fallback only the failed recipients.
+   - avoid sending duplicates for recipients already accepted.
+
+6. Pending tell retry queue:
+   - include both attempted beacon and fallback beacon in pending_tells or
+     receipt metadata.
+   - retry primary first only if it is no longer marked unhealthy; otherwise
+     retry secondary.
+   - do not persist stale stack pointers; keep the existing context-blob pattern
+     with enc_key cleared.
+
+7. Receipt changes:
+   - Store the beacon that actually accepted the Tell.
+   - Store whether fallback was used.
+   - Keep the old beacon_raida field for compatibility, but add accepted_beacon
+     or equivalent so the GUI/logs can show "delivered via RAIDA14 fallback".
+
+Optional later enhancement:
+---------------------------
+Dual-send to both beacons when reliability is more important than duplicate
+network traffic. This requires robust dedupe on the receiver and receipt logic
+that treats either accepted beacon as success. For now, primary-then-secondary
+fallback is the smaller behavioral change.
+
+Optional config shape:
+----------------------
+qmail.tell_fanout = first-success | both
+Default should be first-success. The both mode should only ship after duplicate
+receive handling is proven.
+
+Phase 4 - Deduplication Rules
+-----------------------------
+1. qmail_received_tells already keys on file_guid; use that as the canonical
+   dedupe key.
+
+2. When the same GUID arrives from another beacon:
+   - if existing row has no manifest and new row has manifest, update manifest.
+   - if existing row is not downloaded, keep downloaded=0 so receive can retry.
+   - if existing row is already downloaded, do not insert a second email row.
+
+3. qmail_emails should remain keyed by email_id/file_guid.
+
+4. Receive worker should guard against concurrent processing of the same GUID
+   from two beacon workers. Use DB state, a process-local in-flight set, or both.
+
+Phase 5 - Recovery for Messages Already Sent to Wrong Beacon
+------------------------------------------------------------
+1. After implementing receiver monitoring of secondary RAIDA14, restart Client5.
+
+2. Client5 should perform catchup PEEK on both RAIDA11 and RAIDA14 with since=0
+   or with per-beacon last timestamp.
+
+3. If the server still has the .tell files on RAIDA14, Client5 should discover:
+   - 9E004E754F508A428A9B2F6DA8D05EE0
+   - 635163ED44CE48C6DA1B3E16ADEED60A
+   - F3A28C33CF524C91E5E7EABFBEF41FF6
+
+4. If RAIDA14 already deleted them after an earlier PEEK/PING by another client,
+   resend the messages after the fallback/dual-monitor changes are installed.
+
+Phase 6 - Logging
+-----------------
+Add concise logs to make routing obvious:
+
+Sender:
+- recipient address, serial, denomination, primary beacon, secondary beacon
+- Tell primary attempt result
+- Tell secondary fallback attempt result
+- final per-recipient route used
+
+Receiver:
+- "Beacon monitor started: RAIDA11 primary"
+- "Beacon monitor started: RAIDA14 secondary"
+- PEEK/PING result per beacon: tell_count, status, body_len
+- notification GUID, files, manifest, source beacon
+- duplicate GUID handling: ignored, manifest refreshed, or processing skipped
+
+Phase 6b - API, GUI, and Config
+-------------------------------
+1. /api/qmail/local/status should return both shapes:
+   - existing beacon_raida for older GUI code, mapped to the primary beacon.
+   - new beacons[] array with raida, role, running/healthy, last_tell_timestamp,
+     consecutive_errors, and backoff_seconds.
+
+2. The GUI should tolerate both response shapes:
+   - old single beacon_raida only
+   - new beacons[] list
+
+3. Status UI should show both beacons, for example:
+   - Beacons: 11 OK, 14 OK
+   - Beacons: 11 down, 14 OK
+
+4. Add optional config keys with safe defaults:
+   - qmail.beacon_primary = 11
+   - qmail.beacon_secondary = 14
+   - qmail.tell_fanout = first-success
+   - qmail.beacon_backoff_max_seconds = existing default
+
+5. Compose/send UX does not need a new control for fallback. The behavior should
+   be backend-internal unless diagnostics are being shown.
+
+Phase 7 - Tests
+---------------
+1. Unit-level:
+   - qmail_parse_recipients resolves @torch.glen.kilo to SN 32340 and both
+     beacons when contact/directory data has 11/14.
+   - stale 14/14 stub contact is migrated to 11/14.
+   - new contact stub insert uses 11/14.
+
+2. Sender integration:
+   - primary RAIDA11 accepts Tell: no secondary send.
+   - primary RAIDA11 times out: secondary RAIDA14 receives Tell and receipt
+     marks sent via fallback.
+   - primary rejects: secondary is attempted.
+
+3. Receiver integration:
+   - Tell exists only on RAIDA11: receiver gets mail.
+   - Tell exists only on RAIDA14: receiver gets mail.
+   - Tell exists on both: receiver stores one email and one attachment set.
+
+4. Attachment regression:
+   - 5 KB, 10 KB, and 168 KB attachments sent to a client monitoring both
+     beacons.
+   - Receiver logs must show files=2 manifest=1 and stored attachment.
+
+Rollout Order
+-------------
+1. Add constants/config defaults and fix contact defaults/migration.
+2. Add sender fallback from primary to secondary. This should fix the current
+   observed failure where stale contacts route to 14 while receivers prefer 11.
+3. Add receiver secondary PEEK or dual PING workers. This adds true redundancy
+   and lets receivers recover tells already placed on the secondary.
+4. Add dedupe hardening for dual-beacon receive races.
+5. Add logging and status/API/GUI reporting.
+6. Run the three-size attachment test again.
+7. If stable, consider optional dual-send mode only if real-world reliability
+   still needs it.
+
+Build and Deploy Notes
+----------------------
+1. Build C core:
+   cmake --build D:\Code\src\C\rest_core\build
+
+2. Build GUI portable:
+   npm run build-portable
+
+3. Confirm the updated core.exe and QMail.exe are actually present in the test
+   client directories. The normal build may mirror core.exe into the GUI backend,
+   but it does not necessarily copy release\QMail.exe to E:\Client4 or
+   E:\Client5.
+
+Open Questions
+--------------
+No remaining open questions for the planning stage.
+
+Resolved decisions:
+1. Phase 1 primary/fallback is fixed at RAIDA11/RAIDA14.
+2. Future phases should allow each client to choose its own beacons, so the
+   implementation should keep beacon selection data-driven.
+3. Sender fallback should occur on any non-success Tell result unless the status
+   clearly means the recipient identity is invalid.
+4. Receiver per-beacon timestamps should be persisted in local DB/config.

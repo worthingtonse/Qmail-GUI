@@ -210,8 +210,8 @@
 .export-tab__submit-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none !important;
-  box-shadow: var(--shadow-sm) !important;
+  transform: none;
+  box-shadow: var(--shadow-sm);
 }
 
 /* was: .progress-section */
@@ -748,7 +748,7 @@
 .export-tab__fix-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
-  transform: none !important;
+  transform: none;
 }
 
 /* was: .skip-button */
@@ -776,7 +776,7 @@
 .export-tab__skip-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  transform: none !important;
+  transform: none;
 }
 
 /* was: .custom-dropdown */

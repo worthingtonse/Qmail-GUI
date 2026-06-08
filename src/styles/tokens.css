@@ -159,8 +159,7 @@
 /* ============================================================
  * AUTO-APPLY reduced motion (plan §2.1)
  * The OS-level preference forces --motion-scale to 0 regardless
- * of the active theme. Single source of truth — the !important
- * block in App.css will be removed in Phase 4.
+ * of the active theme. Single source of truth for motion collapse.
  * ============================================================ */
 @media (prefers-reduced-motion: reduce) {
   :root {

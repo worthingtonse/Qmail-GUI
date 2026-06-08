@@ -16,6 +16,7 @@ import {
   sendEmail,
   getTaskStatus,
   getContacts,
+  getPopularContacts,
   getServers,
   saveDraft,
   updateDraft,
@@ -24,7 +25,6 @@ import {
 const MIN_RAIDA_FOR_SEND = 6;
 const SEND_POLL_TIMEOUT_MS = 60000;
 const MAX_SEND_POLL_FAILURES = 3;
-const AUTOSAVE_DELAY_MS = 5000;
 const COMPOSE_ADVANCED_STORAGE_KEY = "qmail.compose.showAdvanced";
 
 const readStoredShowAdvanced = () => {
@@ -103,6 +103,40 @@ const getEmailList = (...values) => {
   return [];
 };
 
+// Valid QMail denomination TLDs. The address must end in one of these.
+const QMAIL_ADDRESS_TLDS = ["bit", "byte", "kilo", "mega", "giga"];
+
+// Client-side mirror of the backend's qmail_address_validate() rules so the
+// user gets immediate feedback before a network round-trip. A valid QMail
+// address starts with '@', ends in a denomination TLD, and has at least two
+// '.' separators (e.g. @torch.glen.kilo). The backend remains the
+// authoritative validator and word-list check.
+const validateQmailAddress = (address) => {
+  const value = String(address || "").trim();
+  if (!value) return "Address is empty";
+  if (!value.startsWith("@")) {
+    return "must start with '@' (e.g. @torch.glen.kilo)";
+  }
+  if ((value.match(/\./g) || []).length < 2) {
+    return "must contain at least two '.' (e.g. @torch.glen.kilo)";
+  }
+  const tld = value.split(".").pop().toLowerCase();
+  if (!QMAIL_ADDRESS_TLDS.includes(tld)) {
+    return "must end in .bit, .byte, .kilo, .mega or .giga";
+  }
+  return null;
+};
+
+// Validate a parsed list of addresses; returns a user-facing message for the
+// first invalid one, or null when all are valid.
+const findInvalidRecipient = (list, fieldLabel) => {
+  for (const addr of list) {
+    const reason = validateQmailAddress(addr);
+    if (reason) return `Invalid ${fieldLabel} address "${addr}": ${reason}`;
+  }
+  return null;
+};
+
 const ComposeModal = ({
   isOpen,
   onClose,
@@ -157,6 +191,11 @@ const ComposeModal = ({
 
   // Enhanced states for new functionality
   const [contacts, setContacts] = useState([]);
+  // Most-likely recipients from /qmail/db/contacts/list-popular — already
+  // ranked by (is_favorite, send_count, last_sent_at) on the backend. Shown
+  // as the dropdown when the user opens the "Show contacts" panel with an
+  // empty query, and used to bias the substring filter when typing.
+  const [popularContacts, setPopularContacts] = useState([]);
   const [contactSuggestionField, setContactSuggestionField] = useState(null);
   const [contactQuery, setContactQuery] = useState("");
   const [, setTaskId] = useState(null);
@@ -168,7 +207,6 @@ const ComposeModal = ({
   const cancelledRef = useRef(false);
   const autosaveTimerRef = useRef(null);
   const draftSavedTimerRef = useRef(null);
-  const latestSaveDraftRef = useRef(null);
   const saveDraftInFlightRef = useRef(false);
   const advancedPersistenceMountedRef = useRef(false);
 
@@ -187,13 +225,8 @@ const ComposeModal = ({
   };
 
   const scheduleAutosave = () => {
+    // Drafts are explicit-only: typing in compose must not create or update one.
     clearAutosaveTimer();
-    if (!isOpen || isSending || sendingStatus === "completed") return;
-
-    autosaveTimerRef.current = setTimeout(() => {
-      autosaveTimerRef.current = null;
-      latestSaveDraftRef.current?.({ autosave: true });
-    }, AUTOSAVE_DELAY_MS);
   };
 
   useEffect(() => {
@@ -266,20 +299,11 @@ const ComposeModal = ({
         setSubsubject("");
         setStorageWeeks(4);
         setCurrentDraftId(null);
-        // Only include the body if the email has been "downloaded".
-        // sourceEmail.body can still be null/empty even when isDownloaded
-        // is true (e.g. a hydrated message with no body), so coerce to ""
-        // before .replace().
-        if (sourceEmail.isDownloaded) {
-          const originalBody = sourceEmail.body || "";
-          const senderLabel =
-            sourceEmail.sender || sourceEmail.senderEmail || sourceEmail.from || "Unknown";
-          setBody(
-            `\n\n\n--- On ${sourceEmail.timestamp || ""}, ${senderLabel} wrote: ---\n> ${originalBody.replace(/\n/g, "\n> ")}`
-          );
-        } else {
-          setBody("\n\n\n--- Original message not downloaded ---");
-        }
+        // Per user request: a Reply does NOT quote the original message.
+        // The composer starts with an empty body so the user types only
+        // their own response. Forwarding still includes the original
+        // (see "forward" branch below).
+        setBody("");
         initialTouched.to = Boolean(senderAddr);
       } else if (mode === "replyAll" && sourceEmail) {
         // FIX-07: Reply All logic
@@ -316,16 +340,8 @@ const ComposeModal = ({
         setSubsubject("");
         setStorageWeeks(4);
         setCurrentDraftId(null);
-        if (sourceEmail.isDownloaded) {
-          const originalBody = sourceEmail.body || "";
-          const senderLabel =
-            sourceEmail.sender || sourceEmail.senderEmail || sourceEmail.from || "Unknown";
-          setBody(
-            `\n\n\n--- On ${sourceEmail.timestamp || ""}, ${senderLabel} wrote: ---\n> ${originalBody.replace(/\n/g, "\n> ")}`
-          );
-        } else {
-          setBody("\n\n\n--- Original message not downloaded ---");
-        }
+        // Per user request: Reply All does NOT quote the original message.
+        setBody("");
         initialTouched.to = Boolean(senderAddr);
         initialTouched.cc = uniqueCc.length > 0;
       } else if (mode === "forward" && sourceEmail) {
@@ -435,20 +451,33 @@ const ComposeModal = ({
     }
   };
 
-  // Load contacts for suggestions
+  // Load contacts for suggestions, plus the popularity-ranked subset so the
+  // dropdown can show "most likely recipients" before the user types and
+  // bias substring matches by send_count once they do.
   const loadContacts = async () => {
     try {
-      const result = await getContacts();
-      if (result.success) {
-        setContacts(result.data.contacts || []);
-        console.log("Contacts loaded:", result.data.contacts);
+      const [allResult, popularResult] = await Promise.all([
+        getContacts(),
+        getPopularContacts(20),
+      ]);
+
+      if (allResult.success) {
+        setContacts(allResult.data.contacts || []);
       } else {
-        console.error("Failed to load contacts:", result.error);
+        console.error("Failed to load contacts:", allResult.error);
         setContacts([]);
+      }
+
+      if (popularResult.success) {
+        setPopularContacts(popularResult.data.contacts || []);
+      } else {
+        // Popular endpoint is non-critical — substring filter still works.
+        setPopularContacts([]);
       }
     } catch (error) {
       console.error("Contact loading error:", error);
       setContacts([]);
+      setPopularContacts([]);
     }
   };
 
@@ -598,9 +627,6 @@ const ComposeModal = ({
     return false;
   };
 
-  useEffect(() => {
-    latestSaveDraftRef.current = handleSaveDraft;
-  });
 
   // gpt-batch5 #2: defensive limits tracking the backend's real
   // capacity for the comma/semicolon-joined attachment string buffer
@@ -724,12 +750,59 @@ const ComposeModal = ({
     }
   };
 
+  const contactText = (...values) => {
+    for (const value of values) {
+      if (value === null || value === undefined) continue;
+      const text = String(value).trim();
+      if (text) return text;
+    }
+    return "";
+  };
+
   const getContactAddress = (contact) =>
-    contact.autoAddress || contact.email || contact.fullName || "";
+    contactText(contact?.autoAddress, contact?.email, contact?.address, contact?.fullName);
+
+  const getContactName = (contact) =>
+    contactText(
+      contact?.fullName,
+      [contact?.firstName, contact?.middleName, contact?.lastName]
+        .map((part) => contactText(part))
+        .filter(Boolean)
+        .join(" "),
+      contact?.denomination,
+      contact?.userId ? `User ${contact.userId}` : "",
+      "Unknown Contact",
+    );
 
   const getRecipientSearchToken = (value) => {
     const tokens = String(value || "").split(",");
     return tokens[tokens.length - 1].trim();
+  };
+
+  const normalizePastedRecipientText = (value) =>
+    String(value || "")
+      .replace(/[\r\n\t]+/g, ", ")
+      .replace(/\s*,\s*/g, ", ")
+      .trim();
+
+  const handleRecipientPaste = (event, field, currentValue) => {
+    const pastedText = event.clipboardData?.getData("text/plain");
+    if (!pastedText) return;
+
+    event.preventDefault();
+
+    const input = event.currentTarget;
+    const value = String(currentValue || "");
+    const start =
+      typeof input.selectionStart === "number" ? input.selectionStart : value.length;
+    const end =
+      typeof input.selectionEnd === "number" ? input.selectionEnd : start;
+    const nextValue =
+      value.slice(0, start) +
+      normalizePastedRecipientText(pastedText) +
+      value.slice(end);
+
+    handleRecipientChange(field, nextValue);
   };
 
   const mergeContactAddress = (value, address, replaceLastToken) => {
@@ -758,9 +831,27 @@ const ComposeModal = ({
 
     const query = getRecipientSearchToken(value);
     setContactQuery(query);
+    // Open suggestions on the FIRST typed character (not the second), and
+    // keep them open on an empty query when the popular list has rows so
+    // clearing back to empty still surfaces likely recipients.
+    const haveTypedMatchSource = query.length >= 1 && contacts.length > 0;
+    const haveEmptyPopular = query.length === 0 && popularContacts.length > 0;
     setContactSuggestionField(
-      query.length > 1 && contacts.length > 0 ? field : null,
+      haveTypedMatchSource || haveEmptyPopular ? field : null,
     );
+  };
+
+  // Open the suggestion panel when a recipient field is focused with an
+  // empty token, so the user immediately sees the most-likely recipients
+  // without needing to click the "Show contacts" button. Non-empty fields
+  // are left alone — those rely on handleRecipientChange.
+  const handleRecipientFocus = (field, value) => {
+    if (isSending) return;
+    const query = getRecipientSearchToken(value);
+    if (query.length === 0 && popularContacts.length > 0) {
+      setContactQuery("");
+      setContactSuggestionField(field);
+    }
   };
 
   const handleContactSelect = (field, contact) => {
@@ -789,21 +880,68 @@ const ComposeModal = ({
     }
 
     setContactQuery("");
-    setContactSuggestionField(contacts.length > 0 ? field : null);
+    setContactSuggestionField(
+      contacts.length > 0 || popularContacts.length > 0 ? field : null,
+    );
   };
 
-  // Filter contacts for suggestions
-  const filteredContacts = contacts.filter((contact) => {
-    const query = contactQuery.trim().toLowerCase();
-    if (!query) return true;
+  // Popularity lookup keyed by userId so the typed-substring sort can pull
+  // ranking signals onto entries from the broader `contacts` list (which
+  // doesn't carry send_count itself).
+  const popularityByUserId = new Map(
+    popularContacts.filter(Boolean).map((c) => [
+      String(c.userId),
+      {
+        popularity: Number(c.popularity) || 0,
+        lastSentAt: Number(c.daysSinceLastContact) >= 0
+          ? -Number(c.daysSinceLastContact) // recent = larger
+          : Number.NEGATIVE_INFINITY,
+        isFavorite: Boolean(c.isFavorite),
+      },
+    ]),
+  );
 
-    const fullName = contact.fullName || "";
-    const address = getContactAddress(contact);
-    return (
-      fullName.toLowerCase().includes(query) ||
-      address.toLowerCase().includes(query)
-    );
-  });
+  // Filter + rank contacts for suggestions.
+  //   - empty query: show the popular-contacts list as-is (already ranked
+  //     by the backend); fall back to the full list if popularity hasn't
+  //     loaded yet.
+  //   - non-empty query: substring-filter the full list, then sort by
+  //     (favorite, popularity, recency) so the most-likely match surfaces.
+  const filteredContacts = (() => {
+    const query = String(contactQuery || "").trim().toLowerCase();
+    if (!query) {
+      return (popularContacts.length > 0 ? popularContacts : contacts).filter(Boolean);
+    }
+
+    const matches = contacts.filter(Boolean).filter((contact) => {
+      const fullName = getContactName(contact);
+      const address = getContactAddress(contact);
+      return (
+        fullName.toLowerCase().includes(query) ||
+        address.toLowerCase().includes(query)
+      );
+    });
+
+    return matches.slice().sort((a, b) => {
+      const aRank = popularityByUserId.get(String(a.userId)) || {
+        popularity: 0,
+        lastSentAt: Number.NEGATIVE_INFINITY,
+        isFavorite: false,
+      };
+      const bRank = popularityByUserId.get(String(b.userId)) || {
+        popularity: 0,
+        lastSentAt: Number.NEGATIVE_INFINITY,
+        isFavorite: false,
+      };
+      if (aRank.isFavorite !== bRank.isFavorite) {
+        return aRank.isFavorite ? -1 : 1;
+      }
+      if (bRank.popularity !== aRank.popularity) {
+        return bRank.popularity - aRank.popularity;
+      }
+      return bRank.lastSentAt - aRank.lastSentAt;
+    });
+  })();
 
   if (!isOpen) {
     return null;
@@ -823,6 +961,18 @@ const ComposeModal = ({
       setError("Please provide at least one valid recipient address.");
       return;
     }
+
+    // Validate every recipient address format before sending so the user
+    // gets immediate, specific feedback (the backend also enforces this).
+    const addressError =
+      findInvalidRecipient(toList, "To") ||
+      findInvalidRecipient(ccList, "Cc") ||
+      findInvalidRecipient(bccList, "Bcc");
+    if (addressError) {
+      setError(addressError);
+      return;
+    }
+
     if (!subject.trim()) {
       setError("Please enter a subject");
       return;
@@ -1005,15 +1155,16 @@ const ComposeModal = ({
       <div className="compose-modal__contact-suggestions">
         {filteredContacts.slice(0, 5).map((contact, index) => {
           const address = getContactAddress(contact);
+          const name = getContactName(contact);
           return (
             <button
               type="button"
-              key={contact.userId || `${field}-${index}`}
+              key={contact?.userId || `${field}-${index}`}
               className="compose-modal__contact-suggestion"
               onClick={() => handleContactSelect(field, contact)}
             >
               <div className="compose-modal__contact-name">
-                {contact.fullName || address || "Unknown Contact"}
+                {name}
               </div>
               {address && <div className="compose-modal__contact-address">{address}</div>}
             </button>
@@ -1033,6 +1184,8 @@ const ComposeModal = ({
             id={field}
             value={value}
             onChange={(e) => handleRecipientChange(field, e.target.value)}
+            onPaste={(e) => handleRecipientPaste(e, field, value)}
+            onFocus={(e) => handleRecipientFocus(field, e.target.value)}
             disabled={isSending}
             placeholder={placeholder}
           />
@@ -1040,7 +1193,10 @@ const ComposeModal = ({
             type="button"
             className="compose-modal__add-contacts-button"
             onClick={() => toggleContactSuggestions(field)}
-            disabled={isSending || contacts.length === 0}
+            disabled={
+              isSending ||
+              (contacts.length === 0 && popularContacts.length === 0)
+            }
             title="Show contacts"
             aria-label={`Show contacts for ${label.replace(":", "")}`}
           >

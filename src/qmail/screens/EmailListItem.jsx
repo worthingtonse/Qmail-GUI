@@ -1,5 +1,17 @@
 /* eslint-disable react/prop-types */
-import { ShieldAlert, Star, Mail, MailOpen, Trash2, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Archive,
+  Loader2,
+  Mail,
+  MailOpen,
+  Menu,
+  RotateCcw,
+  ShieldAlert,
+  Star,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 
 const EmailListItem = ({
@@ -9,10 +21,12 @@ const EmailListItem = ({
   onMarkAsRead,
   onToggleStar,
   onDeleteEmail,
-  isChecked,
-  onCheck,
+  onRowAction,
   isLoadingDraft = false,
+  currentFolder = "inbox",
 }) => {
+  const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const actionMenuRef = useRef(null);
   const isTrashItem = email.isTrashed || email.folder === "trash";
   const deleteTitle = isTrashItem ? "Delete permanently" : "Move to trash";
   const itemClassName = [
@@ -30,6 +44,135 @@ const EmailListItem = ({
     onSelect(email);
   };
 
+  useEffect(() => {
+    if (!isActionMenuOpen) return undefined;
+
+    const handleDocumentClick = (event) => {
+      if (
+        actionMenuRef.current &&
+        !actionMenuRef.current.contains(event.target)
+      ) {
+        setIsActionMenuOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") setIsActionMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isActionMenuOpen]);
+
+  const canUseRowActions =
+    Boolean(onRowAction) && !email.isPending && Boolean(email.id) && !isLoadingDraft;
+  const canUseSenderActions = Boolean(
+    email.senderSn ||
+      email.sender_sn ||
+      email.senderEmail ||
+      email.from ||
+      email.sender,
+  );
+  const canUseRefundActions =
+    currentFolder !== "sent" &&
+    currentFolder !== "drafts" &&
+    currentFolder !== "trash" &&
+    !email.isDraft;
+  const canArchiveSender =
+    currentFolder !== "archive" &&
+    currentFolder !== "trash" &&
+    currentFolder !== "drafts";
+  const rowActionItems = [
+    {
+      action: "add-contact",
+      label: "Add this person to contacts",
+      icon: UserPlus,
+      disabled: !canUseSenderActions,
+    },
+    {
+      action: "add-favorite",
+      label: "Add this person to favorites",
+      icon: Star,
+      disabled: !canUseSenderActions,
+    },
+    {
+      action: "refund",
+      label: "Refund",
+      icon: RotateCcw,
+      disabled: !canUseRefundActions,
+    },
+    {
+      action: "refund-delete",
+      label: "Refund and Delete",
+      icon: RotateCcw,
+      disabled: !canUseRefundActions,
+      danger: true,
+    },
+    {
+      action: "delete-from-sender",
+      label: "Delete All Qmails From this user",
+      icon: Trash2,
+      disabled: !canUseSenderActions,
+      danger: true,
+    },
+    {
+      action: "archive-from-sender",
+      label: "Archive all QMails from this user",
+      icon: Archive,
+      disabled: !canUseSenderActions || !canArchiveSender,
+    },
+  ];
+
+  const actionMenu = canUseRowActions ? (
+    <div className="email-list-pane__row-menu" ref={actionMenuRef}>
+      <button
+        type="button"
+        className="email-list-pane__row-menu-button"
+        title="Message actions"
+        aria-label="Message actions"
+        aria-expanded={isActionMenuOpen}
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsActionMenuOpen((open) => !open);
+        }}
+      >
+        <Menu size={15} />
+      </button>
+      {isActionMenuOpen && (
+        <div
+          className="email-list-pane__row-menu-popover"
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {rowActionItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.action}
+                type="button"
+                role="menuitem"
+                className={`email-list-pane__row-menu-item ${
+                  item.danger ? "email-list-pane__row-menu-item--danger" : ""
+                }`}
+                disabled={item.disabled}
+                onClick={() => {
+                  setIsActionMenuOpen(false);
+                  onRowAction(email, item.action);
+                }}
+              >
+                <Icon size={14} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     <article
       className={itemClassName}
@@ -43,37 +186,29 @@ const EmailListItem = ({
         handleSelect();
       }}
     >
-      {email.isDraft ? (
-        <div
-          className="email-list-pane__draft-checkbox-container"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isLoadingDraft) return;
-            onCheck && onCheck(email.id);
-          }}
-          title={isLoadingDraft ? "Loading draft..." : "Select for deletion"}
-        >
-          {isLoadingDraft ? (
-            <Loader2 size={16} className="spinning" />
-          ) : (
-            <input
-              type="checkbox"
-              className="email-list-pane__draft-checkbox"
-              checked={!!isChecked}
-              readOnly
-            />
-          )}
-        </div>
-      ) : (
-        <div className="email-list-pane__action-column">
-          {email.isPending ? (
-            <ShieldAlert
+      <div className="email-list-pane__action-column">
+        {isLoadingDraft ? (
+          <Loader2 size={16} className="spinning" title="Loading draft..." />
+        ) : (
+          actionMenu
+        )}
+        {email.isPending ? (
+          email.isDecrypting ? (
+            <Loader2
               size={16}
-              className="email-list-pane__pending-icon"
-              title="Encrypted message waiting to decrypt"
+              className="email-list-pane__pending-icon email-list-pane__pending-icon--decrypting spinning"
+              title="Decrypting message"
             />
           ) : (
-            <>
+            <Mail
+              size={16}
+              className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
+              title="Unread message queued for background decryption"
+            />
+          )
+        ) : (
+          <>
+            {!email.isDraft && (
               <div
                 className="email-list-pane__read-indicator"
                 onClick={(e) => {
@@ -94,22 +229,28 @@ const EmailListItem = ({
                   />
                 )}
               </div>
-              <div
-                className="email-list-pane__list-trash-indicator"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteEmail && onDeleteEmail(email.id, isTrashItem);
-                }}
-                title={deleteTitle}
-              >
-                <Trash2 size={14} className="email-list-pane__list-trash-icon" />
-              </div>
-            </>
-          )}
-        </div>
-      )}
+            )}
+            <div
+              className="email-list-pane__list-trash-indicator"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteEmail && onDeleteEmail(email.id, isTrashItem);
+              }}
+              title={deleteTitle}
+            >
+              <Trash2 size={14} className="email-list-pane__list-trash-icon" />
+            </div>
+          </>
+        )}
+      </div>
 
-      <SenderAvatar sender={email.sender} email={email.senderEmail || email.from} status={email.senderStatus} />
+      <SenderAvatar
+        sender={email.sender}
+        email={email.senderEmail || email.from}
+        status={email.senderStatus}
+        senderSn={email.senderSn ?? email.sender_sn}
+        senderDenominationCode={email.senderDenominationCode ?? email.sender_denomination_code}
+      />
 
       <div className="email-list-pane__details">
         <div className="email-list-pane__sender-row">

@@ -9,6 +9,7 @@
     "dev": "vite",
     "dev2": "cross-env VITE_PORT=5174 VITE_API_PORT=8081 vite",
     "build": "vite build",
+    "generate:qmail-avatars": "node scripts/generate-qmail-avatar-assets.mjs",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
     "test:watch": "vitest",

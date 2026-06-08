@@ -1,0 +1,255 @@
+hotspot
+bend
+crossing
+bridge
+cove
+flats
+cavern
+ville
+commons
+land
+quarry
+observatory
+branch
+skyway
+hideaway
+mansion
+gateway
+inn
+hedge
+mall
+dome
+district
+shire
+storehouse
+ship
+rock
+college
+vista
+outpost
+kingdom
+academy
+bank
+portal
+shore
+gate
+pyramid
+harbor
+jungle
+circles
+club
+fairway
+spur --- A cowboy boot with a spur on it
+view -- Binoculars
+kitchen -- An over with heat waves rising above
+road -- a horizontal line with a car driving on it. 
+hideout --
+lighthouse -- bigger lense on top
+downunder -- a map of australia
+strip -- One horizontal line with another line parallel above it that curls up on one side. 
+summit - 
+coast 
+gorge  -- two vertical lines with a bridge connecting them on the top
+boulevard -- a traffic light
+woods -- Two pine trees
+junction
+viaduct
+grounds
+tower -- veritcal cylider with a window and a sharp pointy roof
+loop  -- like the lowercase letter L written in cursive
+inlet --
+trails -- squigly line going up a moutain
+haven -- 
+library -- book shelves
+vineyard -- a buch of small circles in the shape of grapes
+glade - lots of thin vertical lines like grass
+crater -- a profile of a crater that looks like an 'M' but the lines are curred
+colony -- Hexegon
+forest -- Three pine trees
+alley -- Two vertical rectangles with a space in between them. 
+clinic 
+borough -- A hill with a hole in it. 
+pueblo -- rectangles with other rectangles on them and windows. 
+cinema -- A movie camers with two round reals on top 
+peninsula --  map of the state of florida
+canal -- 
+plateau -- a mountain with a flat top
+cape -- Waves on the left and a beach on the right (round hill)
+rapids -- 
+house
+lakes
+port -- Steam ship parked next to a line
+orchard
+depot  -- 
+glen
+estates
+domain
+place
+corner
+path
+fork
+ford
+mill
+beach
+locker
+passage
+foothills
+province
+avenue
+empire
+union
+entry
+greens
+throughway
+buttes
+mountain
+baths
+laboratory
+aquarium
+palms
+meadows
+parish
+creek
+park
+waters
+center
+foundry
+metro
+freeway
+course
+falls
+route
+gallery
+castle
+highway
+island
+fishery
+grotto
+turnpike
+cabin
+waterfall
+track
+expressway
+tunnel
+river
+aviary
+gulf
+manor
+gym
+obelisk
+symposium
+cave
+narrows
+brook
+palisade
+dairy
+prairie
+forge
+roost
+raceway
+atoll
+carnival
+parkway
+fort
+market
+bypass
+wall
+games
+point
+republic
+hollow
+pagoda
+ridge
+zoo
+base
+homestead
+well
+pass
+pavilion
+stadium
+crest
+plaza
+way
+fields
+gardens
+fountain
+drive
+workshop
+farm
+landing
+peak
+hotel
+hills
+ranch
+mounds
+camp
+motorway -- a flat line with a formul one car on it. 
+dock --  A ship's stearing wheel. 
+highlands -- bagpipe
+township 
+nation
+village -- huts
+street 
+pines
+loft
+arches
+heights 
+terrace -- steps like a gagged line going higher with every step
+keys -- A key
+pool --  kidney shaped 
+subway 
+plains --  A buffalo
+city
+galactic
+tavern -- a beer mug
+bar -- Bottle 
+station -- side view of a locamotive
+wharf
+grid
+anex  
+grove -- a top down view of  circles in a 3 by 3 grid. 
+lodge
+circle -- one circle
+crossroads
+roadhouse 
+canyon
+court -- a gavel
+reef -- Scub diver
+reservoir A damp (flat topped mountain with wavy water lines on one side
+bayou -- An top down view of an alagator
+realms - 
+ferry
+oasis -- a palm tree
+ocean
+marina -- an Anchor
+hq
+valley
+knoll
+hall
+mesa -- Wide bottomed moutain with a long flat top
+bay
+lookout
+cliff -- 
+marsh
+pond
+temple
+springs -- lines shooting up from the same point and then arching down in different directions. 
+acres - Flat horizontal line with one tree on the left
+palace -- a multi teared fountain
+farmstead -- Must include a silo. 
+church --  must have a window shaped like a gothic arch
+lane - A street light
+shoal -- wavy lines with ro ks in them
+shallows -- A line that looks like the letter 'U' but flatter
+fortress  -- a castle with a tower on the left and a towner on the right. 
+arcade -- Bowling ball next to a bowling pin
+causeway -- horizontal line with vertical posts going down from it
+abbey -- 
+bluffs --  Mountain with a flat top and some bushes on the top
+getaway -- Arch of triumph
+walkway -- Flat horizontal line with a stick man walking
+retreat -- White flag
+dunes  -- Waves with a hot sun above with rays
+delta -- The greek Delta
+square --  square
+desert -- a cactis

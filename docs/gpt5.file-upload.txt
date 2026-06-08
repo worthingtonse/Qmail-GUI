@@ -1,0 +1,251 @@
+QMail large file upload idea review
+Model: GPT-5 / Codex
+Date: 2026-06-06
+
+Short answer
+============
+
+Yes, the server can interpret request header bytes differently depending on command
+group and command ID, because bytes 4 and 5 are available before the body is read.
+That is a valid way to make additive protocol changes.
+
+However, I would not do this by changing the existing Upload command in-place.
+Use a new command such as Upload_Large_File_Page or Upload_File_Page2. That keeps
+old Upload behavior stable and lets the server apply a different header contract
+only to the new command.
+
+
+Recommended request header use for the large-page command
+=========================================================
+
+Using bytes 10-13 as a 32-bit request body length is a good bridge design:
+
+  byte 10  body length bits 31..24
+  byte 11  body length bits 23..16
+  byte 12  body length bits 15..8
+  byte 13  body length bits 7..0
+
+This is cleaner than splitting high bytes into 9/10 and low bytes into 22/23. The
+length becomes contiguous for the new command, and old commands can continue using
+bytes 22/23.
+
+For the new command, bytes 22/23 can remain the legacy length field or can be set
+to zero. I would not require old parsers to understand them for this command.
+
+Important: a new client must not send this new large-page command to old servers
+unless capability/version probing says the server supports it. An old server will
+ignore the 32-bit length, read the wrong amount of TCP data, and then reject or
+desynchronize the connection.
+
+
+Page number and total pages
+===========================
+
+Putting the page number in byte 14 works only for a small Phase 1 design. One byte
+allows 256 pages. That may be enough for 25 MB if pages are large, but it is not
+enough for the eventual very-large-file design.
+
+For future safety, I recommend:
+
+  byte 14  page flags or page number low byte only
+  byte 15  reserved, zero for now
+
+Put the real page number in the encrypted request body as a 32-bit or 64-bit value.
+The server does not need to understand much of it, but it can store it in the file
+name after decrypting/validating the request.
+
+Total pages should not be required in the request header. It belongs in the
+encrypted CBDF manifest. If the server is meant to be dumb, it does not need total
+pages at all.
+
+
+Payment peek / DDoS idea
+========================
+
+The payment-peek idea may help as a cheap negative filter, but I would be careful.
+Two bytes of a locker-derived key is not strong proof of payment. It can quickly
+reject random junk, but it cannot prove the request is authorized.
+
+The biggest concern is mutating payment state too early. If the server changes the
+locker from 0xFF to 0xFE before the full body is read, decrypted, validated, and
+stored, then retries become dangerous. A client could pay, lose the TCP connection,
+and then be unable to retry the same page.
+
+Recommended rule:
+
+  Do not consume or mark payment used until the page has been fully validated and
+  durably stored.
+
+Payment peek can be used only as an early lookup hint:
+
+  1. Read header.
+  2. If command is large upload, check body length against configured max before
+     allocating memory.
+  3. Optionally use a payment hint/prefix to reject obvious junk.
+  4. Read body with strict timeout and max-size enforcement.
+  5. Decrypt/validate body.
+  6. Verify full payment token.
+  7. Store page.
+  8. Mark payment used.
+
+If bytes are available, a 4-byte or 8-byte payment hint is much better than 2 bytes.
+It still should not be treated as authorization; it is only a fast index into the
+server's local locker/payment table.
+
+Also, byte 8 is currently used by existing clients as the presentation/packet
+layout byte and is normally set to 0x01. Reusing byte 8 for payment peek would be
+risky. I would avoid changing byte 8. Bytes 9 and 14/15 are safer candidates if the
+new command owns their meaning.
+
+
+Body length abuse
+=================
+
+Malicious clients can set the body length to a huge value. The server must defend
+against this before reading or allocating:
+
+  - Have a per-command maximum request body size in config.
+  - Reject lengths above that max immediately.
+  - Enforce read timeouts and minimum read rates.
+  - Stream large bodies to a bounded temp file or fixed buffer path; do not require
+    one giant allocation.
+  - Close the connection on invalid oversized requests.
+
+For Phase 1, a max page body size of 1 MB to 4 MB is reasonable. That is already a
+major improvement over 65 KB and supports 25 MB attachments with a modest number of
+pages.
+
+
+CBDF / encrypted manifest
+=========================
+
+Putting attachment metadata into the encrypted CBDF is the right direction. The
+server does not need to know original filename, original file size, page count,
+hash, or offsets unless it is needed for storage.
+
+The CBDF manifest should include, per attachment:
+
+  - attachment index / file type
+  - original file size
+  - page size chosen by sender
+  - total pages
+  - full-file hash, preferably SHA-256
+  - per-page hash or CRC32
+  - per-page original data size for the last page
+
+CRC32 is good for accidental corruption detection, but it is not a security hash.
+For malicious corruption detection, use SHA-256 or BLAKE3 if available.
+
+
+Server storage model
+====================
+
+The proposed filename shape is good:
+
+  email_guid + file_type + page_number
+
+The server can remain dumb:
+
+  - It stores one validated page at a time.
+  - It returns success/failure for that page.
+  - It does not assemble the attachment.
+  - It does not track global upload completion.
+  - It does not synchronize pages across servers.
+
+The sender tracks which pages were accepted by which RAIDA and retries missing
+pages. The receiver downloads pages according to the CBDF manifest and reassembles
+locally.
+
+
+UDP
+===
+
+Keeping UDP for small messages is compatible with this design. I would keep UDP on
+the old/small command path and use TCP for large-page uploads.
+
+A UDP-safe small upload size around one 1400-byte packet is reasonable. With eight
+QMail servers and seven data stripes, roughly 9.8 KB total CBDF payload is a useful
+small-message target.
+
+Do not try to make large-page upload work over UDP in Phase 1. That introduces
+fragmentation, retransmission, ordering, and retry complexity that the client can
+avoid by using TCP pages.
+
+
+What I would change in the proposal
+===================================
+
+1. Use a new command for large pages instead of changing existing Upload.
+
+2. Use bytes 10-13 as a contiguous 32-bit body length for that new command.
+
+3. Do not use byte 8 for payment peek because existing clients use it as the
+   presentation/layout byte.
+
+4. Do not put real page number or total page count in one-byte header fields. Put
+   them in the encrypted request body or encrypted CBDF as 32-bit/64-bit values.
+
+5. Treat payment peek as an optional early rejection hint, not proof of payment.
+   Do not mark a locker/payment used until after the full page is stored.
+
+6. Add server-configured maximum body/page size and strict read limits before
+   accepting any extended-length request.
+
+
+Suggested Phase 1 design
+========================
+
+New command:
+
+  Upload_Large_File_Page
+
+Header for this command:
+
+  bytes 4-5    command group / command ID
+  bytes 10-13  uint32 request body length
+  byte 14      flags, initially zero
+  byte 15      reserved, must be zero
+  bytes 22-23  legacy field, ignored for this command
+
+Encrypted request body:
+
+  payment token / locker key
+  email GUID
+  file type
+  file index
+  page number uint32 or uint64
+  page data size
+  page hash
+  page bytes
+
+Server behavior:
+
+  parse command
+  read uint32 body length from bytes 10-13
+  reject if body length exceeds configured large-upload max
+  read body with timeout/rate limits
+  decrypt and validate payment
+  store page as guid + file_type + page_number
+  return success/failure
+
+Client behavior:
+
+  choose page size based on config and server capability
+  stripe/page the attachment
+  upload pages in bounded parallelism
+  record accepted pages per RAIDA
+  retry missing pages
+  put the complete encrypted manifest in CBDF
+
+
+Conclusion
+==========
+
+The general direction is good: additive command, encrypted metadata, client-managed
+pages, server as simple page store, UDP preserved for small messages, TCP used for
+large file pages.
+
+The biggest design correction is to avoid putting too much future meaning into the
+old 32-byte header. Use the header only for fields needed before reading the body:
+command ID, body length, and maybe small flags. Put everything else in the
+encrypted body or encrypted CBDF manifest.

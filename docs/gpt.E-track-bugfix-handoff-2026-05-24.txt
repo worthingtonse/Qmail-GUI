@@ -1,0 +1,107 @@
+E-TRACK BUGFIX HANDOFF FOR OPUS
+Date: 2026-05-24
+Author: GPT
+
+Scope of this pass
+- Fix the bounded E-track bugs that were clearly actionable without starting the full missing rename passes for E8/E10/E12.
+- Correct the Phase 4 tracker so it matches the on-disk state after Opus's acceptance sweep.
+
+Files changed
+1. src/styles/tokens.css
+   - Added `--font-size-2xs: calc(0.625rem * var(--font-scale));`
+   - Rationale: this is the single shared 10px badge token Opus proposed for the E9/E11 tiny uppercase pill cases.
+
+2. src/qmail/screens/EmailListPane.css
+   - Replaced the two failing literal sizes:
+     - `.email-list-pane__coin-badge`
+     - `.email-list-pane__tag`
+   - Both now use `var(--font-size-2xs)`.
+   - No broader rename was attempted here; marker pass is still pending.
+
+3. src/qmail/screens/ContactsPane.css
+   - Replaced the failing `0.625rem` badge literal with `var(--font-size-2xs)`.
+   - Renamed the source badge subtree and added required marker comments:
+     - `/* was: .contact-source-badge */`
+     - `/* was: .badge-drd */`
+     - `/* was: .badge-user */`
+   - New selectors:
+     - `.contacts-pane__source-badge`
+     - `.contacts-pane__source-badge--drd`
+     - `.contacts-pane__source-badge--user`
+
+4. src/qmail/screens/ContactsPane.jsx
+   - Updated the source badge className to the new `contacts-pane__source-badge*` names.
+
+5. src/App.css
+   - Replaced `var(--font-size-base)` with `var(--font-size-md)` for the update-modal typography.
+   - This fixes the old E6 bug note about relying on a non-global token outside `.qmail-dashboard`.
+
+6. src/qmail/screens/AccountPane.css
+   - Replaced `var(--font-size-base)` with `var(--font-size-md)` at the four usages found in this file.
+
+7. src/qmail/screens/QMailDashboard.css
+   - Removed the now-unused local `--font-size-base` alias from `.qmail-dashboard`.
+   - After the App.css and AccountPane.css fixes, no live consumers remained.
+
+8. docs/theme.status.txt
+   - Corrected the premature review statuses:
+     - E8  -> OPEN
+     - E9  -> OPEN (with note that the tiny-badge token fix landed; marker pass still pending)
+     - E10 -> OPEN
+     - E11 -> OPEN (with note that the source-badge retokenize/rename landed; broader rename still pending)
+     - E12 -> OPEN
+   - Updated the "Last updated" line to describe this correction.
+
+What I explicitly verified
+- `rg 'font-size-base|0\.5625rem|0\.625rem|contact-source-badge|badge-drd|badge-user' src`
+  no longer shows any live E5/E6/E9/E11 code hits; the only remaining matches are:
+  - the new `--font-size-2xs` definition
+  - the intentional `/* was: ... */` comments in ContactsPane.css
+- `npm run lint`
+- `npm run test`
+- `npm run build`
+
+What Opus should review
+1. Re-check the bounded bugfixes
+   - `rg 'font-size:\s*[0-9.]+(px|rem|em)' src/qmail/screens/EmailListPane.css src/qmail/screens/ContactsPane.css`
+   - Expected: no matches
+
+2. Re-check the E11 badge rename wiring
+   - `rg 'contact-source-badge|badge-drd|badge-user' src/qmail/screens/ContactsPane.css src/qmail/screens/ContactsPane.jsx`
+   - Expected: only the three `/* was: ... */` comments in CSS
+
+3. Re-check the E5/E6 token bug
+   - `rg 'font-size-base' src/App.css src/qmail/screens/AccountPane.css src/qmail/screens/QMailDashboard.css`
+   - Expected: no matches
+
+4. Re-check the tracker correction
+   - Review `docs/theme.status.txt` lines around E8-E12
+   - Expected:
+     - E8/E10/E12 are OPEN
+     - E9/E11 are OPEN with notes describing the bounded fixes
+     - E1/E2 remain IN REVIEW
+
+Remaining E-track work not fixed in this pass
+- E8 ComposeModal.css
+  - Still OPEN because the broader rename/marker pass was not done here.
+
+- E9 EmailListPane.css
+  - Tiny-badge token issue is fixed.
+  - Still OPEN because the broader marker pass has not been reconstructed.
+
+- E10 DicewarePasswordCreator.css
+  - Still OPEN because no rename/marker pass was done here.
+
+- E11 ContactsPane.css
+  - The source badge is now tokenized and partially renamed.
+  - Still OPEN because the rest of the broader ContactsPane Phase 4 rename is not complete.
+
+- E12 QMailDashboard.css
+  - Still OPEN because no rename/marker pass was done here.
+
+Notes on stale bug docs I checked
+- The older `gpt.bugs.txt` items about:
+  - ComposeModal send-status polling
+  - ContactsPane browser confirm
+  - App.css disabled-button ripple
+  appear to already be fixed in the current tree, so I did not touch them in this pass.

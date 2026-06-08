@@ -18,6 +18,18 @@ const API_PORT =
   import.meta.env.VITE_API_PORT ||
   "8080";
 const API_BASE_URL = `http://localhost:${API_PORT}/api`;
+const parsedApiPort = Number(API_PORT);
+
+// SSE event stream listens on http_port + 100 — see rest_core sse_server.c
+// and docs/opu.sse.plan.txt. Multi-instance (8080/8081/8082) maps to
+// (8180/8181/8182), no collisions. Used by QMailDashboard's useEffect to
+// open an EventSource for real-time new-mail notifications.
+export const SSE_URL =
+  Number.isInteger(parsedApiPort) &&
+  parsedApiPort >= 0 &&
+  parsedApiPort <= 65435
+    ? `http://localhost:${parsedApiPort + 100}/events`
+    : null;
 
 const extractApiErrorMessage = (data, fallback) => {
   if (!data || typeof data !== "object") {
@@ -95,6 +107,146 @@ function folderIdToName(id) {
   return FOLDER_ID_TO_NAME[id] ?? 'inbox';
 }
 
+const QMAIL_DENOMINATION_CODE_TO_VALUE = {
+  0: 1,
+  1: 10,
+  2: 100,
+  3: 1000,
+  4: 10000,
+};
+
+const readNumericApiField = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue)) return numberValue;
+  }
+  return null;
+};
+
+const getSenderSerialNumber = (source = {}) => {
+  const sn = readNumericApiField(source.sender_sn, source.senderSn);
+  return sn && sn > 0 ? sn : null;
+};
+
+const getSenderDenominationCode = (source = {}) => {
+  const code = readNumericApiField(
+    source.sender_denomination_code,
+    source.senderDenominationCode,
+  );
+  return code !== null && code >= 0 && code <= 4 ? code : null;
+};
+
+const getSenderDenominationValue = (source = {}) => {
+  const value = readNumericApiField(
+    source.sender_denomination,
+    source.senderDenomination,
+  );
+  if (value && value > 0) return value;
+
+  const code = getSenderDenominationCode(source);
+  return code !== null ? QMAIL_DENOMINATION_CODE_TO_VALUE[code] : null;
+};
+
+const isSerialNumberText = (value) =>
+  typeof value === "string" && /^\d+$/.test(value.trim());
+
+const getSenderAddress = (source = {}, fallback = "Unknown Sender") => {
+  const address = [
+    source.sender_address,
+    source.senderAddress,
+    source.senderEmail,
+    source.from,
+    source.sender,
+  ].find(
+    (value) =>
+      typeof value === "string" &&
+      value.trim().length > 0 &&
+      !isSerialNumberText(value) &&
+      !/^SN#/i.test(value.trim()) &&
+      !/^Unknown( Sender)?$/i.test(value.trim()),
+  );
+
+  if (address) return address.trim();
+
+  const senderSn = getSenderSerialNumber(source);
+  if (senderSn) return String(senderSn);
+
+  const serialText = [source.senderEmail, source.from, source.sender].find(
+    (value) => typeof value === "string" && isSerialNumberText(value),
+  );
+  return serialText ? serialText.trim() : fallback;
+};
+
+const withSenderFields = (source = {}, fallback = "Unknown Sender") => {
+  const senderSn = getSenderSerialNumber(source);
+  const senderDenominationCode = getSenderDenominationCode(source);
+  const senderDenomination = getSenderDenominationValue(source);
+  const senderAddress = getSenderAddress(source, senderSn ? String(senderSn) : fallback);
+  const senderEmail =
+    senderAddress && (senderAddress !== fallback || senderSn) ? senderAddress : "";
+
+  return {
+    sender: senderAddress || fallback,
+    senderEmail,
+    from: senderEmail,
+    sender_address: senderEmail,
+    senderSn,
+    sender_sn: senderSn,
+    senderDenomination,
+    sender_denomination: senderDenomination,
+    senderDenominationCode: senderDenominationCode,
+    sender_denomination_code: senderDenominationCode,
+  };
+};
+
+// For Sent/Drafts the GUI shows the recipient ("To"), not the sender. The
+// list endpoint now carries the primary recipient (recipient_sn /
+// recipient_address / recipient_denomination_code) plus recipient_count.
+// Mirror withSenderFields() so the dashboard can swap in recipient identity.
+const getRecipientSerialNumber = (source = {}) => {
+  const sn = readNumericApiField(source.recipient_sn, source.recipientSn);
+  return sn && sn > 0 ? sn : null;
+};
+
+const getRecipientDenominationCode = (source = {}) => {
+  const code = readNumericApiField(
+    source.recipient_denomination_code,
+    source.recipientDenominationCode,
+  );
+  return code !== null && code >= 0 && code <= 4 ? code : null;
+};
+
+const withRecipientFields = (source = {}) => {
+  const recipientSn = getRecipientSerialNumber(source);
+  const recipientDenominationCode = getRecipientDenominationCode(source);
+  const recipientDenomination =
+    recipientDenominationCode !== null
+      ? QMAIL_DENOMINATION_CODE_TO_VALUE[recipientDenominationCode]
+      : null;
+  const recipientAddress =
+    typeof source.recipient_address === "string" &&
+    source.recipient_address.trim().length > 0
+      ? source.recipient_address.trim()
+      : recipientSn
+      ? String(recipientSn)
+      : "";
+  const recipientCount = readNumericApiField(source.recipient_count) ?? 0;
+
+  return {
+    recipientAddress,
+    recipient_address: recipientAddress,
+    recipientSn,
+    recipient_sn: recipientSn,
+    recipientDenomination,
+    recipient_denomination: recipientDenomination,
+    recipientDenominationCode,
+    recipient_denomination_code: recipientDenominationCode,
+    recipientCount,
+    recipient_count: recipientCount,
+  };
+};
+
 /**
  * Gets the health status of the QMail Client Core service.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
@@ -154,6 +306,7 @@ export const getPopularContacts = async (limit = 10) => {
             contactCount: contact.contact_count,
             popularity: contact.popularity,
             daysSinceLastContact: contact.days_since_last_contact,
+            isFavorite: Boolean(contact.is_favorite),
             // Full name for display
             fullName: `${contact.first_name}${
               contact.middle_name ? " " + contact.middle_name : ""
@@ -198,9 +351,8 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0, sort
         id: email.email_id,
         // API-FIX: email.Subject → email.subject
         subject: email.subject || "No Subject",
-        // API-FIX: email.sender → email.sender_sn (serial number, convert to string)
-        sender: String(email.sender_sn || "Unknown Sender"),
-        senderEmail: String(email.sender_sn || ""),
+        ...withSenderFields(email),
+        ...withRecipientFields(email),
         // API-FIX: email.ReceivedTimestamp → email.received_timestamp, removed SentTimestamp
         timestamp: email.received_timestamp,
         receivedTimestamp: email.received_timestamp,
@@ -552,7 +704,10 @@ export const searchEmails = async (query, limit = 50) => {
         success: true,
         data: {
           query: data.query || query,
-          results: data.results || [],
+          results: (data.results || []).map((email) => ({
+            ...email,
+            ...withSenderFields(email),
+          })),
           count: data.count || 0,
           limit: data.limit || limit,
         },
@@ -723,6 +878,25 @@ export const starEmail = async (emailId, starred) => {
 };
 
 /**
+ * Toggle the is_favorite flag on a contact. Favorites sort to the top of
+ * the popular-recipients dropdown.
+ * @param {number|string} sn      Contact serial number.
+ * @param {boolean}       value   New favorite state.
+ */
+export const setContactFavorite = async (sn, value) => {
+  try {
+    if (!sn) throw new Error("Contact serial number is required");
+    const url = `${API_BASE_URL}/qmail/db/contacts/favorite?sn=${encodeURIComponent(sn)}&value=${value ? "true" : "false"}`;
+    const response = await fetch(url);
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    console.error("Set contact favorite failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
  * Gets complete metadata for a specific email by ID.
  * @param {string} emailId - The unique email identifier (32-character hex string)
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
@@ -753,14 +927,15 @@ export const getEmailById = async (emailId) => {
         return value || "";
       };
 
+      const senderFields = withSenderFields(data, "");
+
       return {
         success: true,
         data: {
           // API-FIX: id mapped from data.email_id
           id: data.email_id || emailId,
-          // API-FIX: from mapped from data.sender_sn (serial number as string)
-          from: data.sender_address || String(data.sender_sn || ""),
-          senderEmail: data.sender_address || String(data.sender_sn || ""),
+          ...senderFields,
+          ...withRecipientFields(data),
           // API-FIX: subject mapped from data.subject
           subject: data.subject || "No Subject",
           // API-FIX: body mapped from data.body
@@ -775,6 +950,10 @@ export const getEmailById = async (emailId) => {
           isRead: data.is_read,
           // API-FIX: folder mapped via folderIdToName
           folder: folderIdToName(data.folder),
+          inboxFee: readNumericApiField(data.inbox_fee, data.inboxFee) ?? 0,
+          inbox_fee: readNumericApiField(data.inbox_fee, data.inboxFee) ?? 0,
+          paymentStatus: readNumericApiField(data.payment_status, data.paymentStatus),
+          paymentStatusText: data.payment_status_text || data.paymentStatusText || "",
           // API-FIX: Removed attachments mapping (they come from separate endpoint)
         },
       };
@@ -819,6 +998,10 @@ export const getEmailAttachments = async (emailId) => {
             fileExtension: att.extension,
             // API-FIX: att.size_bytes → size
             size: att.size_bytes,
+            // storage_mode: 0=internal blob, 1=external file, 2=PENDING (bytes
+            // not yet downloaded — fetched on demand when the user clicks).
+            storageMode: att.storage_mode,
+            isDownloaded: att.storage_mode !== 2,
             dangerous:
               isTruthyApiFlag(att.dangerous) ||
               isTruthyApiFlag(att.is_dangerous) ||
@@ -933,6 +1116,7 @@ export const getContacts = async (query = "") => {
         className: contact.class_name || "",
         trustLevel: contact.trust_level ?? 0,
         userNotes: contact.user_notes || "",
+        isFavorite: Boolean(contact.is_favorite ?? contact.isFavorite),
         fullName:
           `${contact.first_name || contact.firstName || ""} ${contact.middle_name || contact.middleName ? " " + (contact.middle_name || contact.middleName) : ""} ${contact.last_name || contact.lastName || ""}`.trim() ||
           contact.denomination ||
@@ -1036,9 +1220,9 @@ export const deleteContact = async (serialNumber) => {
 };
 
 /**
- * Gets RAIDA server topology and live availability.
+ * Gets QMail server topology and live RAIDA echo availability.
  * Merges /api/qmail/local/status (topology) with /api/raida/echo (per-server health).
- * @returns {Promise<{success: boolean, data?: {servers, totalServers, availableServers}, error?: string}>}
+ * @returns {Promise<{success: boolean, data?: {servers, totalServers, availableServers, raidaEcho}, error?: string}>}
  */
 export const getServers = async () => {
   try {
@@ -1062,7 +1246,7 @@ export const getServers = async () => {
 
       const merged = statusRes.servers.list.map((s) => {
         const echo = echoByIndex.get(s.raida_index);
-        const isAvailable = echo ? echo.status === "Ready" : false;
+        const isAvailable = echo ? echo.status === "Ready" : null;
         return {
           ...s,
           // Aliases for legacy consumers (AccountPane reads server_id / ip_address).
@@ -1082,6 +1266,7 @@ export const getServers = async () => {
           servers: merged,
           totalServers: statusRes.servers.count || merged.length,
           availableServers: merged.filter((s) => s.is_available).length,
+          raidaEcho: echoRes,
         },
       };
     } else {
@@ -1120,17 +1305,75 @@ export const echoRaida = async () => {
   }
 };
 
+const getLockerPoolStatusData = async (walletPath = null) => {
+  const resolvedPath = walletPath && String(walletPath).trim()
+    ? String(walletPath).trim()
+    : (await lookupDefaultWalletPath()).path;
+
+  if (!resolvedPath) {
+    throw new Error("No Default wallet is registered on the QMail backend.");
+  }
+
+  const query = new URLSearchParams({ wallet_path: resolvedPath });
+  const response = await fetch(`${API_BASE_URL}/qmail/local/locker-pool/status?${query.toString()}`);
+  const data = await handleResponse(response);
+
+  if (!data || data.success !== true) {
+    throw new Error("Invalid response from locker pool status endpoint");
+  }
+
+  const lockedValue = readNumericApiField(data.locked_value) ?? 0;
+  const walletBalance = readNumericApiField(data.wallet_balance) ?? 0;
+
+  return {
+    uploadAvailable: readNumericApiField(data.upload_available) ?? 0,
+    inboxFeeAvailable: readNumericApiField(data.inbox_fee_available) ?? 0,
+    lockedValue,
+    lockedAvailableValue: readNumericApiField(data.locked_available_value) ?? 0,
+    lockedReservedValue: readNumericApiField(data.locked_reserved_value) ?? 0,
+    lockedLimboValue: readNumericApiField(data.locked_limbo_value) ?? 0,
+    lockedUploadValue: readNumericApiField(data.locked_upload_value) ?? 0,
+    lockedInboxFeeValue: readNumericApiField(data.locked_inbox_fee_value) ?? 0,
+    walletBalance,
+    combinedWalletValue: readNumericApiField(data.combined_wallet_value) ?? (walletBalance + lockedValue),
+    lowBalance: Boolean(data.low_balance),
+  };
+};
+
 /**
- * Gets the wallet balance and coin distribution across folders.
+ * Gets current pre-funded locker pool status for the Default wallet.
+ * @param {string|null} walletPath - Optional resolved wallet path.
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getQMailLockerPoolStatus = async (walletPath = null) => {
+  try {
+    return { success: true, data: await getLockerPoolStatusData(walletPath) };
+  } catch (error) {
+    console.error("Get locker pool status failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Gets the wallet balance, locker value, and coin distribution across folders.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 // Renamed from getWalletBalance to getQMailWalletBalance to avoid
 // name collision with apiService.js getWalletBalance (different endpoint/shape).
 export const getQMailWalletBalance = async () => {
   try {
-    // API-FIX: Changed /api/wallet/balance → /api/wallets/balance to match rest_core
-    // rest_core requires wallet_path param; omitting it defaults to "Default" wallet
-    const response = await fetch(`${API_BASE_URL}/wallets/balance`);
+    // The left-pane Wallet total is backed by the Default payment wallet, not the Mail identity key.
+    const lookup = await lookupDefaultWalletPath();
+    if (!lookup.path) {
+      throw new Error(
+        lookup.reason === "no_wallet"
+          ? "No Default wallet is registered on the QMail backend."
+          : "Could not reach the QMail backend to look up the Default wallet.",
+      );
+    }
+
+    const query = new URLSearchParams({ wallet_path: lookup.path });
+    const response = await fetch(`${API_BASE_URL}/wallets/balance?${query.toString()}`);
     const data = await handleResponse(response);
 
     console.log("Data received from /wallets/balance:", data);
@@ -1139,13 +1382,30 @@ export const getQMailWalletBalance = async () => {
     //   total_value, total_notes, bank_value, bank_notes, fracked_value, fracked_notes,
     //   limbo_value, limbo_notes }
     if (data && data.success) {
+      let lockerPool = null;
+      let lockerPoolError = null;
+      try {
+        lockerPool = await getLockerPoolStatusData(lookup.path);
+      } catch (lockerError) {
+        lockerPoolError = lockerError.message;
+        console.warn("Locker pool status unavailable:", lockerError);
+      }
+
+      const spendableValue = readNumericApiField(data.total_value) ?? 0;
+      const lockedValue = lockerPool?.lockedValue ?? 0;
+
       return {
         success: true,
         data: {
           walletPath: data.wallet_path,
           walletName: data.wallet_name,
           totalCoins: data.total_notes || 0,
-          totalValue: data.total_value || 0,
+          totalValue: spendableValue,
+          spendableValue,
+          lockedValue,
+          combinedTotalValue: spendableValue + lockedValue,
+          lockerPool,
+          lockerPoolError,
           folders: {
             bank: {
               coins: data.bank_notes || 0,
@@ -1279,6 +1539,69 @@ export const deleteEmail = async (emailId) => {
   }
 };
 
+
+export const getQMailPaymentInfo = async (emailId) => {
+  try {
+    if (!emailId || String(emailId).length !== 32) {
+      throw new Error("Invalid email ID. Must be a 32-character hexadecimal string.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/db/payments/get?email_id=${encodeURIComponent(emailId)}`,
+    );
+    const data = await handleResponse(response);
+    const paymentStatus = readNumericApiField(data.payment_status, data.paymentStatus);
+
+    return {
+      success: true,
+      data: {
+        emailId: data.email_id || emailId,
+        hasPayment: Boolean(data.has_payment),
+        lockerCode: data.locker_code || "",
+        lockerCodeHex: data.locker_code_hex || "",
+        paymentStatus,
+        paymentStatusText: data.payment_status_text || "",
+        canRetry: data.can_retry !== false,
+        message: data.message || "",
+      },
+    };
+  } catch (error) {
+    console.error("Get QMail payment info failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const markQMailPaymentRefunded = async (emailId) => {
+  try {
+    if (!emailId || String(emailId).length !== 32) {
+      throw new Error("Invalid email ID. Must be a 32-character hexadecimal string.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/db/payments/mark-refunded?email_id=${encodeURIComponent(emailId)}`,
+      { method: "POST" },
+    );
+    const data = await handleResponse(response);
+    const paymentStatus = readNumericApiField(data.payment_status, data.paymentStatus);
+
+    return {
+      success: true,
+      data: {
+        emailId: data.email_id || emailId,
+        status: data.status || "refunded",
+        paymentStatus,
+        paymentStatusText: data.payment_status_text || "refunded",
+        alreadyRefunded: Boolean(data.already_refunded),
+        lockerCode: data.locker_code || "",
+        message: data.message || "Payment marked refunded",
+      },
+    };
+  } catch (error) {
+    console.error("Mark QMail payment refunded failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 export const sendEmail = async (emailData) => {
   try {
     const toList = Array.isArray(emailData.to) ? emailData.to : [];
@@ -1346,12 +1669,26 @@ export const sendEmail = async (emailData) => {
 };
 
 // Convert a coin serial number to a full email address
-export const convertSnToEmail = async (sn) => {
+export const convertSnToEmail = async (sn, denomination = null) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/qmail/local/address/from-sn?sn=${sn}`);
+    const params = new URLSearchParams({ sn: String(sn) });
+    const denominationValue = Number(denomination);
+    if (Number.isFinite(denominationValue) && denominationValue > 0) {
+      params.set("denomination", String(denominationValue));
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/local/address/from-sn?${params.toString()}`,
+    );
     const data = await handleResponse(response);
     if (data && data.success && data.email) {
-      return { success: true, email: data.email, firstName: data.first_name, lastName: data.last_name };
+      return {
+        success: true,
+        email: data.email,
+        firstName: data.first_name,
+        lastName: data.last_name,
+        denomination: data.denomination,
+      };
     }
     return { success: false, error: data.message || "Lookup failed" };
   } catch (error) {
@@ -1378,17 +1715,7 @@ export const checkVersion = async () => {
   }
 };
 
-/**
- * gpt-batch4 #2: shared helper to find the registered Mail wallet
- * filesystem path. Used both by importCredentials (to decide where
- * to store credentials) and by WalletSetupScreen (to target the
- * right wallet for Check Change). Returns null if the list call
- * fails OR succeeds-but-empty; callers can distinguish those cases
- * by inspecting the second return value when needed.
- *
- * @returns {Promise<{path: string|null, reason: "ok"|"network"|"no_wallet"}>}
- */
-export const lookupMailWalletPath = async () => {
+const lookupWalletPathByName = async (walletName) => {
   try {
     const listRes = await fetch(`${API_BASE_URL}/wallets/list`);
     if (!listRes.ok) {
@@ -1398,24 +1725,269 @@ export const lookupMailWalletPath = async () => {
     if (!listData || !Array.isArray(listData.wallets) || listData.wallets.length === 0) {
       // gpt-batch4 #3: backend reachable, but no wallets registered.
       // This is a "configure your wallet" failure, NOT a network
-      // failure — they need different recovery messages.
+      // failure - they need different recovery messages.
       return { path: null, reason: "no_wallet" };
     }
-    const wallets = listData.wallets;
-    const mailWallet =
-      wallets.find((w) => w.wallet_name === "Mail" && w.online) ||
-      wallets.find((w) => w.wallet_name === "Mail");
-    const fallback = wallets.find((w) => w.online) || wallets[0];
-    const resolved = (mailWallet || fallback)?.wallet_path || null;
+
+    const target = String(walletName || "").trim().toLowerCase();
+    const wallet = listData.wallets.find(
+      (w) => String(w.wallet_name || w.name || "").trim().toLowerCase() === target,
+    );
+    const resolved = wallet?.wallet_path || wallet?.path || null;
     return resolved
       ? { path: resolved, reason: "ok" }
       : { path: null, reason: "no_wallet" };
   } catch (e) {
-    console.warn("lookupMailWalletPath: /wallets/list unreachable:", e);
+    console.warn(`lookupWalletPathByName: /wallets/list unreachable for ${walletName}:`, e);
     return { path: null, reason: "network" };
   }
 };
 
+/**
+ * gpt-batch4 #2: shared helper to find the registered Mail wallet
+ * filesystem path. Used by importCredentials to decide where to store
+ * credentials. Returns null if the list call fails OR succeeds-but-empty;
+ * callers can distinguish those cases by inspecting the reason.
+ *
+ * @returns {Promise<{path: string|null, reason: "ok"|"network"|"no_wallet"}>}
+ */
+export const lookupMailWalletPath = async () => lookupWalletPathByName("Mail");
+
+export const lookupDefaultWalletPath = async () => lookupWalletPathByName("Default");
+
+const LOCKER_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+export const generateLockerCode = () => {
+  const pick = () => LOCKER_CODE_CHARS[Math.floor(Math.random() * LOCKER_CODE_CHARS.length)];
+  return `${Array.from({ length: 3 }, pick).join("")}-${Array.from({ length: 4 }, pick).join("")}`;
+};
+
+export const normalizeLockerCode = (lockerCode) =>
+  String(lockerCode || "").trim().toUpperCase();
+
+export const validateLockerCode = (lockerCode) =>
+  /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{3}-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/.test(
+    normalizeLockerCode(lockerCode),
+  );
+
+const resolveDefaultWalletPathForOperation = async (walletPath = null) => {
+  if (walletPath && String(walletPath).trim()) {
+    return String(walletPath).trim();
+  }
+
+  const lookup = await lookupDefaultWalletPath();
+  if (lookup.path) return lookup.path;
+
+  throw new Error(
+    lookup.reason === "no_wallet"
+      ? "No Default wallet is registered on the QMail backend."
+      : "Could not reach the QMail backend to look up the Default wallet.",
+  );
+};
+
+const addWalletPathParam = async (url, walletPath = null) => {
+  const resolvedPath = await resolveDefaultWalletPathForOperation(walletPath);
+  url.searchParams.set("wallet_path", resolvedPath);
+  return resolvedPath;
+};
+
+const normalizeReceiptFilename = (filename) => {
+  const normalized = String(filename || "").trim().replace(/\\/g, "/");
+  const basename = normalized.split("/").filter(Boolean).pop() || "";
+  if (!basename || basename === "." || basename === "..") {
+    throw new Error("Receipt filename is required.");
+  }
+  if (basename.includes("..")) {
+    throw new Error("Invalid receipt filename.");
+  }
+  return basename;
+};
+
+export const getDefaultWalletReceipt = async (filename, walletPath = null) => {
+  try {
+    const receiptFilename = normalizeReceiptFilename(filename);
+    const resolvedPath = await resolveDefaultWalletPathForOperation(walletPath);
+    const query = new URLSearchParams({
+      wallet_path: resolvedPath,
+      filename: receiptFilename,
+    });
+
+    const response = await fetch(`${API_BASE_URL}/wallets/receipts?${query.toString()}`);
+    const data = await handleResponse(response);
+    if (!data || (data.success !== true && data.status !== "success") || data.content === undefined) {
+      throw new Error(extractApiErrorMessage(data, "Invalid receipt response."));
+    }
+
+    return {
+      success: true,
+      data: {
+        filename: data.filename || receiptFilename,
+        walletPath: data.wallet_path || resolvedPath,
+        content: data.content,
+        size: data.size || null,
+        raw: data,
+      },
+    };
+  } catch (error) {
+    console.error("Get Default wallet receipt failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+const getTaskIdFromResponse = (data) =>
+  data?.task_id || data?.taskId || data?.payload?.task_id || data?.payload?.id || null;
+
+const CLOUDCOIN_DEPOSIT_EXTENSIONS = [".bin", ".stack", ".zip", ".png"];
+const CLOUDCOIN_DEPOSIT_EXTENSION_LABEL = CLOUDCOIN_DEPOSIT_EXTENSIONS.join(", ");
+
+const isSupportedCloudCoinDepositFile = (filePath) => {
+  const normalized = String(filePath || "").trim().toLowerCase();
+  return CLOUDCOIN_DEPOSIT_EXTENSIONS.some((extension) => normalized.endsWith(extension));
+};
+
+export const depositCloudCoinFiles = async (filePaths, memo = "QMail deposit", walletPath = null) => {
+  try {
+    const files = Array.isArray(filePaths)
+      ? filePaths.map((file) => String(file || "").trim()).filter(Boolean)
+      : [];
+    if (files.length === 0) {
+      throw new Error(`Choose at least one CloudCoin file (${CLOUDCOIN_DEPOSIT_EXTENSION_LABEL}).`);
+    }
+
+    const invalidFiles = files.filter((file) => !isSupportedCloudCoinDepositFile(file));
+    if (invalidFiles.length > 0) {
+      throw new Error(`Only CloudCoin ${CLOUDCOIN_DEPOSIT_EXTENSION_LABEL} files can be deposited.`);
+    }
+
+    const url = new URL(`${API_BASE_URL}/transactions/deposit`);
+    files.forEach((file) => url.searchParams.append("file", file));
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    const taskId = getTaskIdFromResponse(data);
+    if (!data?.success && !taskId) {
+      throw new Error(extractApiErrorMessage(data, "Deposit did not start."));
+    }
+
+    return { success: true, data: { ...data, task_id: taskId, wallet_path: data?.wallet_path || resolvedWalletPath } };
+  } catch (error) {
+    console.error("Deposit CloudCoin files failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const depositCloudCoinFolder = async (folderPath, memo = "QMail folder deposit", walletPath = null) => {
+  try {
+    const sourceFolder = String(folderPath || "").trim();
+    if (!sourceFolder) {
+      throw new Error("Choose a folder containing CloudCoin files.");
+    }
+
+    const url = new URL(`${API_BASE_URL}/transactions/deposit`);
+    url.searchParams.set("source_folder", sourceFolder);
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    const taskId = getTaskIdFromResponse(data);
+    if (!data?.success && !taskId) {
+      throw new Error(extractApiErrorMessage(data, "Deposit did not start."));
+    }
+
+    return { success: true, data: { ...data, task_id: taskId, wallet_path: data?.wallet_path || resolvedWalletPath } };
+  } catch (error) {
+    console.error("Deposit CloudCoin folder failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null) => {
+  try {
+    const normalizedKey = normalizeLockerCode(lockerCode);
+    if (!validateLockerCode(normalizedKey)) {
+      throw new Error("Enter a locker code in the format XXX-XXXX.");
+    }
+
+    const url = new URL(`${API_BASE_URL}/locker/download`);
+    url.searchParams.set("locker_key", normalizedKey);
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    if (data?.status !== "success" && data?.coins_saved === undefined) {
+      throw new Error(extractApiErrorMessage(data, "Locker download failed."));
+    }
+
+    return { success: true, data: { ...data, locker_key: normalizedKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
+  } catch (error) {
+    console.error("Download locker to Default wallet failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const withdrawToLockerCode = async (amount, walletPath = null) => {
+  try {
+    const numericAmount = Number(amount);
+    if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
+      throw new Error("Enter a positive whole-number CloudCoin amount.");
+    }
+
+    const lockerKey = generateLockerCode();
+    const url = new URL(`${API_BASE_URL}/locker/upload`);
+    url.searchParams.set("locker_key", lockerKey);
+    url.searchParams.set("amount", String(numericAmount));
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    if (data?.status !== "success" && data?.coins_uploaded === undefined) {
+      throw new Error(extractApiErrorMessage(data, "Locker withdraw failed."));
+    }
+
+    return { success: true, data: { ...data, locker_key: data?.locker_key || lockerKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
+  } catch (error) {
+    console.error("Withdraw to locker failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const waitForTaskCompletion = async (
+  taskId,
+  { timeoutMs = 180000, intervalMs = 1000, onUpdate } = {},
+) => {
+  if (!taskId) {
+    return { success: false, error: "Task ID is required." };
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const result = await getTaskStatus(taskId);
+    if (!result.success) {
+      return result;
+    }
+
+    if (typeof onUpdate === "function") {
+      onUpdate(result.data);
+    }
+
+    if (result.data?.isFinished) {
+      return result.data.isSuccessful
+        ? { success: true, data: result.data }
+        : { success: false, error: result.data.error || result.data.message || "Task failed." };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return {
+    success: false,
+    error: "The operation is still running. Refresh the wallet balance in a moment.",
+    status: "timeout",
+  };
+};
 /**
  * Imports credentials using a locker code.
  * Scenario 1 & 2: Success (Healthy or Healed)
@@ -1712,14 +2284,18 @@ export const getMailNotifications = async () => {
       success: true,
       data: {
         ...data,
-        notifications: (data.notifications || []).map((notification) => ({
-          ...notification,
-          guid: notification.file_guid,
-          sender_address:
-            notification.sender_address ||
-            notification.sender_name ||
-            "",
-        })),
+        notifications: (data.notifications || []).map((notification) => {
+          const senderFields = withSenderFields(notification, "");
+          return {
+            ...notification,
+            ...senderFields,
+            guid: notification.file_guid,
+            sender_address:
+              senderFields.sender_address ||
+              notification.sender_name ||
+              "",
+          };
+        }),
       },
     };
   } catch (error) {
@@ -1730,12 +2306,21 @@ export const getMailNotifications = async () => {
 /**
  * Downloads the actual email text/content using the GUID
  */
-export const downloadEmailContent = async (guid) => {
+// background=true asks the backend to download on a worker thread and return
+// 202 immediately (the single-threaded HTTP server otherwise blocks every other
+// request, including the inbox list, for the whole 30s+ download). Completion
+// arrives via the SSE "new-mail" event. Interactive opens leave it false so they
+// still get the synchronous body to render right away.
+export const downloadEmailContent = async (guid, { background = false } = {}) => {
   try {
     // API-FIX: Changed GET /api/mail/download/{guid} → POST /api/qmail/net/messages/download?file_guid={guid}
-    const response = await fetch(`${API_BASE_URL}/qmail/net/messages/download?file_guid=${guid}`, {
-      method: "POST",
-    });
+    const asyncQuery = background ? "&async=1" : "";
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/net/messages/download?file_guid=${guid}${asyncQuery}`,
+      {
+        method: "POST",
+      },
+    );
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {

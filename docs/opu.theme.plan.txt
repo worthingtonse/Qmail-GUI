@@ -101,6 +101,37 @@ The single biggest file is wallet/components/MainDashboard.css at 2,296 lines.
 AccountPane.css (935), ExportTab.css (1,023), AuthenticateTab.css (987), and
 LockerTab.css (971) round out the heavy hitters.
 
+Sprint change snapshot (measured 2026-05-25 after the Phase 4 sprint):
+
+    28 CSS files, 12,220 lines total, 353,377 bytes on disk (~345 kB)
+
+    Change vs. the 2026-05-22 baseline:
+      files  +6
+      lines  -1,524
+
+    Current CSS surface by bucket:
+      src/index.css                        133   (was 208)
+      src/App.css                          215   (was 803)
+      src/UpdateModal.css                  165   (new split from App.css)
+      src/screens/*.css                    644   (1 file; was 679)
+      src/qmail/screens/*.css            4,128   (9 files; was 3,759 across 8)
+      src/wallet/components/*.css        3,098   (5 files; was 4,366)
+      src/wallet/components/tabs/*.css   2,624   (4 files; was 3,229)
+      src/components/common/.../Notif...   214   (was 334)
+      src/styles/*.css                     624   (3 new shared theme/primitives files)
+      src/theme/*.css                      375   (2 new theme UI files)
+
+    Current heaviest CSS files:
+      wallet/components/MainDashboard.css        1,722   (was 2,296; -574)
+      wallet/components/tabs/ExportTab.css         903   (was 1,023; -120)
+      qmail/screens/AccountPane.css                799   (was   935; -136)
+      wallet/components/tabs/LockerTab.css         744   (was   971; -227)
+      wallet/components/tabs/AuthenticateTab.css   720   (was   987; -267)
+
+The tree now has more CSS files but fewer total lines, which is the shape
+expected from the refactor: shared/theme infrastructure was split out while the
+large legacy files shrank.
+
 1.2  Variables already in place
 -------------------------------
 src/index.css :5–83 defines a usable design-token set under :root :
@@ -1297,6 +1328,27 @@ because <section> introduced a margin collapse on Safari" or similar.
 
 The site is overwhelmingly div-soup with nine semantic landmarks. Phase
 4 should move this ratio meaningfully without rewriting components.
+
+Current sprint-end measurement (2026-05-25)
+-------------------------------------------
+  <div>      446 occurrences across 34 JSX files   (was 529; -83)
+  <span>     154                                  (was 152; +2)
+  <h1>–<h6>   86                                  (was 85; +1)
+  <nav>        2                                  (unchanged)
+  <section>   48                                  (was 3; +45)
+  <header>    22                                  (was 2; +20)
+  <main>      10                                  (was 1; +9)
+  <footer>    16                                  (was 2; +14)
+  <article>    5                                  (was 0; +5)
+  <aside>      4                                  (was 1; +3)
+  inline `style={{...}}` blocks: 5               (was 58; -53)
+
+  Semantic landmarks total: 107                   (was 11; +96)
+
+Sprint result: still div-heavy, but meaningfully less so. The biggest gains
+from Phase 4 were the drop in inline styles and the large increase in semantic
+landmarks (`section`, `header`, `main`, `footer`, `article`, `aside`) without
+needing a wholesale JSX rewrite.
 
 13.3  Heading levels — restrict to h1–h6
 ----------------------------------------

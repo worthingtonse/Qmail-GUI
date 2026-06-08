@@ -18,5 +18,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // the user cancels. ComposeModal checks for window.electronAPI
   // before calling — falls back to a disabled-button state in the
   // browser/Vite build.
-  pickAttachments: () => ipcRenderer.invoke('compose:pickFiles')
+  pickAttachments: () => ipcRenderer.invoke('compose:pickFiles'),
+  pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
+  pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
+  onThemeSelect: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, themeId) => callback(themeId);
+    ipcRenderer.on('theme:select', handler);
+    return () => ipcRenderer.removeListener('theme:select', handler);
+  },
+  onQmailMenuCommand: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, command) => callback(command);
+    ipcRenderer.on('qmail:menu-command', handler);
+    return () => ipcRenderer.removeListener('qmail:menu-command', handler);
+  },
+  notifyThemeChanged: (themeId) => ipcRenderer.send('theme:changed', themeId)
 });

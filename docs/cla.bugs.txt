@@ -1557,3 +1557,697 @@ BUG-50 - handleConfirmDeleteContact loadContacts may setState after unmount
 ###############################################################################
   END OF PHASE 3 BATCH 17 APPENDIX
 ###############################################################################
+
+-------------------------------------------------------------------------------
+
+BUG-59 - Hardcoded RAIDA timeout values should be configurable
+  File:     D:\Code\src\C\rest_core\src\commands\cmd_echo.c,
+            D:\Code\src\C\rest_core\include\cmd_echo.h,
+            D:\Code\src\C\rest_core\api_src\command_adapter.c,
+            and related call sites that pass fixed timeout values
+  Severity: MEDIUM
+  Status:   deferred
+  Found by: Sean (manual GUI testing) / GPT-5 during BUG-58 Phase 6 planning
+
+  Several RAIDA operations still use hardcoded timeout values instead of a
+  caller-configurable timeout. The visible example from BUG-58 Phase 6 is the
+  echo path: cmd_echo_serial() and cmd_echo_parallel() have historically used
+  a fixed 3000ms timeout even when the REST caller supplies a different timeout
+  intent.
+
+  FIX PLAN:
+  Add timeout_ms plumbing through the command/API layers so callers can choose
+  a timeout, preserving 3000ms as the default when no timeout is supplied. Keep
+  this separate from BUG-58 because the stale-IP topology fix is now working and
+  Sean wants the timeout configurability handled later.
+
+-------------------------------------------------------------------------------
+
+BUG-60 - Startup asks for locker code even when Mail ID exists
+  File:     src/App.jsx,
+            src/screens/ServiceSelectionScreen.jsx
+  Severity: HIGH
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  On startup, QMail should inspect the Mail wallet and go directly to the
+  dashboard when a mailbox key already exists in Mail/Bank or Mail/Fracked.
+  Instead, the GUI could show the first-run locker-code welcome screen because
+  the persistent qmail.skipAutoRestore flag short-circuited App.checkIdentity()
+  before it called the backend identity APIs.
+
+  FIX:
+  Treat skipAutoRestore as a same-session manual Sign Out guard only. Startup
+  now always calls the backend identity check first, clears the stale skip flag
+  when identity/get or identity/exists reports a local Mail identity, and routes
+  to QMail. The welcome screen also rechecks identity if reached without the
+  skip flag, so a late backend identity response still routes to the dashboard
+  instead of asking for a locker code.
+
+-------------------------------------------------------------------------------
+
+BUG-61 - RAIDA refresh spinner can spin forever
+  File:     src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/NavigationPane.jsx
+  Severity: HIGH
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The dashboard Refresh button above the RAIDA status grid could spin forever,
+  and the RAIDA dots kept showing stale red/green states while a new echo was
+  in progress. The refresh path waited on several backend calls with no UI-side
+  timeout, so a hung request left isRefreshing true indefinitely.
+
+  FIX:
+  When refresh starts, clear the RAIDA echo snapshot so NavigationPane renders
+  the 25 dots as gray/unknown. Run the RAIDA echo first, repopulate the dots
+  when its result arrives, and wrap each refresh step in a finite timeout so the
+  button spinner always stops and failures are reported as a warning instead of
+  trapping the UI in a loading state.
+
+-------------------------------------------------------------------------------
+
+BUG-62 - First-run welcome screen order and Check Change cleanup
+  File:     src/qmail/screens/WalletSetupScreen.jsx,
+            src/qmail/screens/WalletSetupScreen.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  After first-run locker import, the welcome screen showed the generated Qmail
+  address before the healthy/verified identity message and still exposed the
+  temporary Check Change action. Sean requested the status line before the
+  address, the address prefixed with "Your Qmail Address is:", and Check
+  Change hidden for now.
+
+  FIX:
+  Make the heading always read "Welcome!", render the identity health message
+  before the address, prefix the address with "Your Qmail Address is:", and
+  hide the Check Change button plus its helper text. The unused Check Change
+  handler/imports and denomination breakdown UI were removed so lint stays
+  clean while the feature is parked.
+
+-------------------------------------------------------------------------------
+
+BUG-63 - Contacts search empty because QMail users directory can sync header-only CSV
+  File:     D:\Code\src\C\rest_core\src\qmail\qmail_users.c
+  Severity: HIGH
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  In the Contacts area, clicking "Search contacts or DRD alias..." showed no
+  directory contacts. The local E:\Client3\Client_Data\qmail_users.csv file was
+  present but contained only the CSV header, so the contacts database had no
+  QMail users to populate search results.
+
+  ROOT CAUSE:
+  qmail_users_sync() accepted any /service/users response containing "Email,"
+  as valid consensus data. If the sampled RAIDA servers returned a header-only
+  users list, the sync treated it as successful, wrote the empty directory to
+  qmail_users.csv, and never tried RAIDA11, even though RAIDA11 currently has
+  the usable users list.
+
+  FIX:
+  Validate users CSV data by requiring the header plus at least one non-empty
+  data row with an address and comma-separated fields. If the normal RAIDA
+  consensus fetch cannot produce a non-empty users directory, fetch
+  https://raida11.cloudcoin.global/service/users directly, parse it, and save it
+  to qmail_users.csv for later boots. Saved qmail_users.csv fallback now also
+  rejects header-only files so stale empty data does not hide RAIDA11 data.
+
+-------------------------------------------------------------------------------
+
+BUG-64 - Profile card exposes non-editable data and Inbox header hides address
+  File:     src/qmail/screens/AccountPane.jsx,
+            src/qmail/screens/EmailListPane.jsx,
+            src/qmail/screens/EmailListPane.css,
+            src/qmail/screens/QMailDashboard.jsx
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The Account Management Profile Information card showed an Edit button even
+  though profile editing is not needed, and it exposed the mailbox serial
+  number even though the user-facing identifier is the QMail address. The Inbox
+  header did not show the current QMail address, and the "Highest Paying" sort
+  label consumed enough width to encourage wrapping in the narrow message list.
+
+  FIX:
+  Remove the Profile Information Edit button and serial-number field. Keep the
+  QMail address in the profile card, pass the normalized identity address from
+  QMailDashboard into EmailListPane, and render it as a compact truncated label
+  next to the Inbox title. Rename the fee sort label from "Highest Paying" to
+  "Income" to reduce header wrapping.
+
+-------------------------------------------------------------------------------
+
+BUG-65 - QMail server status is mislabeled as RAIDA status
+  File:     src/api/qmailApiServices.js,
+            src/qmail/screens/AccountPane.jsx,
+            src/qmail/screens/AccountPane.css,
+            src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css,
+            src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/serverStatusUi.js
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The Account Management Wallet view showed a section titled "RAIDA Network
+  Status" even though the detailed server cards were QMail servers. The same
+  section mixed wallet coin totals into the server status area, while the left
+  pane already had the RAIDA status dots and refresh control. The left-pane
+  dots also did not expose the echo latency that is useful for diagnosing slow
+  or timing-out servers.
+
+  FIX:
+  Rename the Account page section to QMail Server Status, remove the wallet
+  coin cards from that server section, and show QMail server totals plus
+  per-server address, availability, and echo latency. Add a compact QMail
+  status row above the RAIDA row in the left navigation pane, keep RAIDA status
+  there, and put latency details in hover titles for both QMail and RAIDA dots.
+  The GUI now reuses the RAIDA echo payload already fetched by getServers() so
+  the navigation pane does not run duplicate echo calls during normal refresh.
+-------------------------------------------------------------------------------
+
+BUG-66 - Wallet MVP lacks left-pane Add Funds and Withdraw actions
+  File:     src/api/qmailApiServices.js,
+            electron.cjs,
+            preload.cjs,
+            src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css,
+            src/qmail/screens/WalletActionModal.jsx,
+            src/qmail/screens/WalletActionModal.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The MVP wallet operations needed by QMail users were not available from the
+  normal left-pane workflow. Sean decided Add Funds and Withdraw should live in
+  the left pane for the MVP, and native File menu wallet actions can wait until
+  after the MVP.
+
+  FIX:
+  Add compact Add Funds and Withdraw buttons under the left-pane Wallet entry.
+  Add a WalletActionModal that can deposit selected CloudCoin .bin files,
+  deposit a folder through /api/transactions/deposit, download an existing
+  locker through /api/locker/download, and withdraw a positive whole-number
+  CloudCoin amount into a generated locker code through /api/locker/upload.
+  Expose narrow Electron IPC pickers for wallet files/folders through preload,
+  keep the calls on the current random backend port, and refresh the Mail
+  wallet balance after successful operations. No File menu wallet actions were
+  added in this MVP pass.
+-------------------------------------------------------------------------------
+
+BUG-67 - Startup shows spinner before required disclaimer acceptance
+  File:     src/App.jsx,
+            src/App.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  On startup, QMail showed the loading spinner immediately while the backend
+  wait, version check, and identity check ran. The user needed to see and accept
+  the disclaimer first, but accepting it should not delay the background startup
+  work.
+
+  FIX:
+  Hard-wire the disclaimer text from rest_core/src/commands/cmd_disclaimer.c
+  into the GUI startup shell. App initialization still starts immediately from
+  the existing mount effect, but the render path now shows the disclaimer gate
+  before the loading spinner. Clicking Accept reveals the spinner only if the
+  startup checks are still running; otherwise QMail immediately renders the
+  resolved startup screen. Add responsive styling for the disclaimer panel and
+  Accept button.
+-------------------------------------------------------------------------------
+
+BUG-68 - Left-pane Wallet balance counts Mail identity coin as spendable funds
+  File:     src/api/qmailApiServices.js,
+            src/qmail/screens/WalletActionModal.jsx
+  Severity: HIGH
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The Wallet button in the left pane showed the Mail wallet balance. That made
+  the mailbox key look like spendable CloudCoin money and inflated the user's
+  funds display.
+
+  FIX:
+  Resolve the registered Default wallet from /api/wallets/list and call
+  /api/wallets/balance with wallet_path set to that Default wallet path. The
+  value displayed in the left pane comes from the response total_value field.
+  The MVP Add Funds / Withdraw modal now also labels and targets the Default
+  wallet so deposits, locker downloads, withdrawals, and balance refreshes all
+  operate on spendable funds. The Mail wallet lookup remains in place for the
+  identity import flow because mailbox keys still belong in Mail.
+-------------------------------------------------------------------------------
+
+BUG-69 - Inbox QMail address label is too subtle to read
+  File:     src/qmail/screens/EmailListPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The QMail address shown beside the Inbox title was visible but too subtle.
+  It used muted text color and extra-small type, which made the address hard to
+  read in the main dashboard header.
+
+  FIX:
+  Increase the Inbox QMail address label from extra-small to small text, switch
+  from muted to secondary text color, and make it semibold while preserving the
+  existing inline truncation behavior.
+-------------------------------------------------------------------------------
+
+BUG-70 - Left-pane Wallet row should not navigate to Account view
+  File:     src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The Wallet row in the left navigation pane was clickable and opened the
+  Account view. For the current MVP, Wallet should be a static balance row,
+  with Add Funds and Withdraw as the explicit wallet actions.
+
+  FIX:
+  Replace the Wallet button with a static nav-style row and comment the current
+  account navigation handler next to it for future re-enable. Add a static row
+  modifier that keeps the same left-nav visual structure but removes pointer
+  cursor and hover affordance.
+
+-------------------------------------------------------------------------------
+BUG-71 - Wallet balance needs low-funds warning and purchase path
+  File:     src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The left-pane Wallet total did not warn users when spendable Default wallet
+  funds were empty or low. Users also had no immediate purchase path or inline
+  explanation of why QMail uses CloudCoin payments for DMP inbox fees.
+
+  FIX:
+  Add wallet balance status logic to the navigation pane: zero or lower totals
+  are shown in red with a warning icon, totals from 1 through 100 are shown in
+  yellow with a warning icon, and higher balances keep the funded styling. Add
+  a Purchase Coins button under Add Funds and Withdraw that opens CloudCoin.com.
+  Add a compact info button and dismissible popover explaining DMP, inbox fees,
+  CloudCoin, and the influencer inbox-fee registration URL.
+
+-------------------------------------------------------------------------------
+BUG-72 - Add Funds modal exposes withdraw controls and wrong deposit order
+  File:     src/qmail/screens/WalletActionModal.jsx,
+            src/qmail/screens/WalletActionModal.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Clicking Add Funds opened a wallet dialog that still contained both Add Funds
+  and Withdraw tabs. The deposit source tabs were ordered Files, Folder, Locker,
+  and the file picker used a paper-with-up-arrow icon that looked like an upload
+  or withdraw action.
+
+  FIX:
+  Make the modal mode fixed by the left-pane button that opened it: Add Funds
+  renders only deposit controls, and Withdraw renders only withdraw controls.
+  Change the deposit source order to Locker, Folder, Files and default Add Funds
+  to Locker. Replace the file source and Choose Files icon with a plain file icon
+  and remove the now-unused Add/Withdraw mode-tab CSS.
+
+-------------------------------------------------------------------------------
+BUG-73 - Add Funds success needs See Receipt link
+  File:     src/api/qmailApiServices.js,
+            src/qmail/screens/WalletActionModal.jsx,
+            src/qmail/screens/WalletActionModal.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  After a successful Add Funds operation, the dialog only reported generic
+  success. Users could not inspect the import outcome for coins imported from a
+  locker, folder, or selected files, even though rest_core writes JSON receipts
+  under the Default wallet Receipts folder and exposes them through
+  /api/wallets/receipts.
+
+  FIX:
+  Add a QMail-specific Default wallet receipt helper that uses the same dynamic
+  backend port as the rest of QMail. The Add Funds flow now derives the receipt
+  filename from receipt_id, task_id, or embedded receipt data, preserves it after
+  success, and shows a See Receipt link for successful deposits. Clicking the
+  link calls /api/wallets/receipts with the Default wallet path and renders the
+  returned receipt JSON inline in the Add Funds dialog.
+
+-------------------------------------------------------------------------------
+BUG-74 - Add Funds file picker blocks supported CloudCoin file types
+  File:     electron.cjs,
+            src/api/qmailApiServices.js,
+            src/qmail/screens/WalletActionModal.jsx
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The main dashboard Add Funds dialog let users open the Files picker, but the
+  native picker only showed .bin files. CloudCoin deposits may also be stored in
+  .stack, .zip, and .png files, so valid deposit files were hidden or rejected.
+
+  FIX:
+  Update the wallet coin file picker to allow .bin, .stack, .zip, and .png.
+  Update the QMail deposit helper validation to accept the same four extensions,
+  and update Add Funds messages/hints so the UI tells users the correct supported
+  file types.
+-------------------------------------------------------------------------------
+BUG-75 - Received mail shows sender serial instead of QMail address
+  File:     C/rest_core/include/qmail/qmail_types.h,
+            C/rest_core/src/qmail/qmail_db.c,
+            C/rest_core/src/qmail/qmail_receive.c,
+            C/rest_core/api_src/api_handlers_qmail_inbox.c,
+            C/rest_core/api_src/api_handlers_qmail_messages.c,
+            C/rest_core/api_src/api_handlers_qmail_tells.c,
+            src/api/qmailApiServices.js,
+            src/qmail/screens/QMailDashboard.jsx
+  Severity: HIGH
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Received messages displayed the sender mailbox serial number instead of a
+  QMail address. Reply also resolved numeric senders with the receiver's local
+  denomination fallback, so SN 32486 could be addressed as @torch.bay.byte when
+  the sender mailbox was actually @torch.bay.kilo.
+
+  FIX:
+  Persist sender_denomination with received tells and stored email rows, copy it
+  from the encrypted CBDF From mailbox during receive, and return derived
+  sender_address fields from inbox, read, search, notification, and download
+  APIs. Normalize sender fields in the GUI so list rows, reading pane headers,
+  pending rows, and Reply/Reply All prefer the derived QMail address, and pass
+  the sender denomination into the SN-to-address fallback lookup.
+-------------------------------------------------------------------------------
+BUG-76 - Wallet total hides coins pre-funded into locker codes
+  File:     C/rest_core/include/qmail/qmail_db.h,
+            C/rest_core/include/qmail/qmail_locker_pool.h,
+            C/rest_core/src/qmail/qmail_db.c,
+            C/rest_core/api_src/qmail_locker_pool.c,
+            C/rest_core/api_src/api_handlers_qmail_misc.c,
+            src/api/qmailApiServices.js,
+            src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The main dashboard left-pane Wallet total only showed spendable coins still
+  in the Default wallet folders. Coins already uploaded into pre-funded locker
+  codes were tracked in SQLite but not added to the visible wallet total, making
+  funds appear to disappear after locker pool replenishment.
+
+  FIX:
+  Add a locker-pool funded-value SUM helper and include available, reserved, and
+  limbo locker rows in the local locker-pool status response as locked_value and
+  related breakdown fields. The GUI now fetches that status alongside the
+  Default wallet balance, shows the Wallet amount as spendable plus locked
+  value, and adds an In Lockers line under Wallet for the locked amount.
+
+-------------------------------------------------------------------------------
+BUG-77 - RAIDA stats CSV is written beside executable instead of Client_Data
+  File:     C/rest_core/src/transport.c
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual startup inspection)
+
+  On startup, rest_core created raida_stats.csv in the executable directory
+  such as E:\Adrian\raida_stats.csv. The file belongs under the owned client
+  data directory, such as E:\Adrian\Client_Data\raida_stats.csv.
+
+  FIX:
+  Build the RAIDA stats path with platform_get_client_data_dir() before loading
+  or saving transport stats. In the REST startup path, Client_Data is already
+  resolved and created before transport_init() runs, so this was a relative-path
+  bug rather than a too-early file creation bug.
+
+-------------------------------------------------------------------------------
+BUG-78 - In Lockers balance is cramped under Wallet label
+  File:     src/qmail/screens/NavigationPane.jsx,
+            src/qmail/screens/NavigationPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The left-pane In Lockers amount was rendered as a smaller sublabel inside the
+  Wallet row. With the Wallet warning icon and total on the right, the line was
+  cramped and did not match the surrounding navigation rows.
+
+  FIX:
+  Render In Lockers as its own static navigation-style row below Wallet, using a
+  key icon before the label and an aligned locked-coin total on the right.
+
+-------------------------------------------------------------------------------
+BUG-79 - Sent mail missing and drafts created automatically
+  File:     src/qmail/screens/ComposeModal.jsx,
+            src/qmail/screens/QMailDashboard.jsx,
+            C/rest_core/include/qmail/qmail_db.h,
+            C/rest_core/src/qmail/qmail_db.c,
+            C/rest_core/src/qmail/qmail_upload_orchestrator.c
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Sending a QMail left the Sent folder empty, while composing a message could
+  create Drafts rows automatically without the user choosing Save Draft.
+
+  FIX:
+  Disable automatic draft creation by making the compose autosave scheduler a
+  timer-clear-only path; explicit Save Draft remains unchanged. Persist sent
+  messages into qmail_emails with folder=Sent, sender SN/denomination, and the
+  existing recipient contact rows. Refresh Sent immediately after sending when
+  Sent is active, and backfill legacy qmail_sent_emails rows
+  into qmail_emails on database open.
+
+-------------------------------------------------------------------------------
+BUG-80 - Received attachments lose filenames and extensions
+  File:     C/rest_core/include/qmail/qmail_cbdf.h,
+            C/rest_core/src/qmail/qmail_cbdf.c,
+            C/rest_core/api_src/api_handlers_qmail_messages_send.c,
+            C/rest_core/src/qmail/qmail_receive.c
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Received messages could contain attachment data, but the receiver only saw
+  placeholder names and generic extensions because the `.qmail` CBDF metadata did
+  not carry the original attachment filenames.
+
+  FIX:
+  Write one repeated CBDF key 0x03 entry per attachment filename in the same
+  order as attachment file types, capped at 255 bytes. Parse those entries during
+  receive, sanitize the filename, derive the extension, and store both values in
+  qmail_attachments so the GUI can display and download files with their original
+  names.
+
+-------------------------------------------------------------------------------
+BUG-81 - Received mail requires manual download prompt
+  File:     src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/ReadingPane.jsx,
+            src/qmail/screens/ReadingPane.css,
+            src/qmail/screens/EmailListItem.jsx,
+            src/qmail/screens/EmailListPane.css
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Clicking a newly received QMail opened a manual download prompt and later
+  showed a green success toast after decrypting. New mail should begin
+  downloading/decrypting in the background when the GUI sees the notification,
+  and clicking the row should show decryption progress instead of asking another
+  question.
+
+  FIX:
+  Start background decrypts from the pending-notification merge path, de-dupe
+  concurrent decrypt attempts by message id, and render pending messages with a
+  Seven Stripe Decode animation in the reading pane. Remove the manual Download
+  Message button and the successful-decrypt toast, while keeping failure toasts
+  for user-initiated opens. Guard background inbox-row updates so decrypted mail
+  does not appear in Sent, Drafts, or other active folder lists.
+-------------------------------------------------------------------------------
+BUG-82 - Received payment reject/refund and bulk delete actions
+  File:     C/rest_core/api_src/api_handlers_qmail_payments.c,
+            C/rest_core/api_src/api_handlers.c,
+            C/rest_core/api_src/api_handlers.h,
+            C/rest_core/api_src/api_handlers_qmail_inbox.c,
+            C/rest_core/include/qmail/qmail_db.h,
+            src/api/qmailApiServices.js,
+            src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/ReadingPane.jsx,
+            src/qmail/screens/ReadingPane.css,
+            src/qmail/screens/EmailListPane.jsx,
+            src/qmail/screens/EmailListPane.css,
+            src/qmail/screens/EmailListItem.jsx
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  Receivers could not reject a received CloudCoin locker payment and return the
+  original locker key to the sender. The list also had no normal-message
+  checkboxes for bulk Delete, Refund only, or Delete and Refund actions.
+
+  FIX:
+  Add a local refunded payment status and a backend mark-refunded endpoint. The
+  GUI now exposes Reject on refundable received mail, sends the original locker
+  key back to the derived sender QMail address with a rejection note, and marks
+  the local payment refunded after send succeeds. Message rows outside Trash are
+  selectable, with a bulk action bar for Delete, Refund only, and Delete and
+  Refund. Delete moves selected messages to Trash without confirmation.
+-------------------------------------------------------------------------------
+BUG-83 - New mail toast loop and decrypt animation on read/local mail
+  File:     C/rest_core/api_src/api_handlers_qmail_inbox.c,
+            src/qmail/screens/QMailDashboard.jsx,
+            src/qmail/screens/ReadingPane.jsx,
+            src/qmail/screens/EmailListItem.jsx
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing)
+
+  The GUI repeatedly showed green new-mail toast notifications, marked mail read
+  during background decrypt hydration, and showed the decrypt animation for
+  already-read messages and non-Inbox folders.
+
+  FIX:
+  Stop creating new-mail toasts, remember seen notification GUIDs, and avoid
+  duplicate pending/download work for the same tell. Remove the backend
+  message-get auto mark-read side effect; read state is now changed only through
+  the explicit mark-read endpoint. Treat local DB list/search rows as downloaded
+  and limit decrypt animation to unread Inbox pending rows. Pending unread mail
+  now shows a closed envelope while queued.
+-------------------------------------------------------------------------------
+BUG-84 - Message-row delete action is hidden until hover
+  File:     src/qmail/screens/EmailListItem.jsx,
+            src/qmail/screens/EmailListPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG A)
+
+  Message rows require hovering before the trash action is visible. The delete
+  action should be visible at all times so users can delete a message without
+  discovering a hidden hover affordance.
+  FIX:
+  Keep each normal row's trash icon visible at all times instead of revealing it
+  only on hover or selection.
+-------------------------------------------------------------------------------
+BUG-85 - Message-row checkboxes create needless bulk-delete clicks
+  File:     src/qmail/screens/EmailListPane.jsx,
+            src/qmail/screens/EmailListItem.jsx,
+            src/qmail/screens/EmailListPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG B)
+
+  The list exposes checkboxes for mass actions, but the practical mass action is
+  delete. Selecting each row before deleting costs as many clicks as clicking each
+  row trash button. Remove the checkboxes from the message list.
+  FIX:
+  Remove message-list checkbox state, checkbox rendering, and the bulk action
+  bar. Row delete remains a direct one-click action.
+-------------------------------------------------------------------------------
+BUG-86 - Message rows need an action menu instead of checkboxes
+  File:     src/qmail/screens/EmailListPane.jsx,
+            src/qmail/screens/EmailListItem.jsx,
+            src/qmail/screens/QMailDashboard.jsx
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG C)
+
+  Message rows should replace the checkbox slot with a hamburger actions menu.
+  The menu should support Add this person to contacts, Add this person to
+  favorites, Refund, Refund and Delete, Delete all QMails from this user, and
+  Archive all QMails from this user, without confirmation prompts.
+  FIX:
+  Add a hamburger row menu with sender/contact, favorite, refund, refund and
+  delete, delete-from-sender, and archive-from-sender actions. Sender-wide
+  actions fetch the full current folder before applying changes, so they are not
+  limited to the visible page.
+-------------------------------------------------------------------------------
+BUG-87 - Sent folder badge shows meaningless count
+  File:     src/qmail/screens/NavigationPane.jsx
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG D)
+
+  The Sent folder displays a red numeric badge even when the count has no useful
+  meaning. Remove the number badge from Sent.
+  FIX:
+  Suppress Sent folder count badges in the navigation pane while leaving useful
+  badges on Inbox, Drafts, Archive, and other folders.
+-------------------------------------------------------------------------------
+BUG-88 - Unread sort/filter still shows read messages
+  File:     src/qmail/screens/EmailListPane.jsx,
+            src/qmail/screens/QMailDashboard.jsx
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG E)
+
+  Choosing Unread should show only unread messages. The current behavior still
+  leaves read messages in the list.
+  FIX:
+  Preserve read state from list/search API rows and apply a frontend unread
+  filter when the Unread mode is active, so read rows are excluded from the
+  displayed list.
+-------------------------------------------------------------------------------
+BUG-89 - Reading-pane toolbar is too long and duplicates list actions
+  File:     src/qmail/screens/ReadingPane.jsx,
+            src/qmail/screens/ReadingPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG F)
+
+  The message detail toolbar is too long and duplicates actions available in the
+  left message list. Remove Delete, Mark as Unread, and Move To Trash from the
+  top toolbar.
+  FIX:
+  Remove Delete, Mark as Unread, and Move To controls from the reading-pane
+  toolbar. Deleting and read-state changes remain available from the message
+  list row controls.
+-------------------------------------------------------------------------------
+BUG-90 - Reply toolbar buttons should be icon-only
+  File:     src/qmail/screens/ReadingPane.jsx,
+            src/qmail/screens/ReadingPane.css
+  Severity: LOW
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG G)
+
+  The Reply, Reply All, and Forward buttons should use icons only with hover
+  titles/tooltips instead of showing full text labels.
+  FIX:
+  Render Reply, Reply All, and Forward as fixed-size icon-only toolbar buttons
+  with hover titles and screen-reader labels.
+-------------------------------------------------------------------------------
+BUG-91 - Edit menu needs mailbox cleanup commands
+  File:     electron.cjs,
+            preload.cjs,
+            src/qmail/screens/QMailDashboard.jsx,
+            src/api/qmailApiServices.js
+  Severity: MEDIUM
+  Status:   fixed - uncommitted batch pending
+  Found by: Sean (manual GUI testing; docs/bugswithMenu.txt BUG H)
+
+  The application menu's Edit dropdown should include Empty Trash, Empty Drafts,
+  Empty Inbox, and Mark all as read. These commands should perform their named
+  mailbox actions when selected.
+  FIX:
+  Add Electron Edit menu commands for Empty Trash, Empty Drafts, Empty Inbox,
+  and Mark all as read. Preload forwards the commands to the dashboard, which
+  fetches the relevant mailbox rows and calls the existing REST helpers.
+-------------------------------------------------------------------------------
+BUG-92 - SSE init partial thread failure can leak startup resources
+  File:     C/rest_core/api_src/sse_server.c
+  Severity: LOW
+  Status:   deferred
+  Found by: GPT-5 (Opus SSE review follow-up)
+
+  If one SSE helper thread starts but the second thread creation fails,
+  sse_server_init sets s_running=false, closes the listener, and returns an
+  error without joining the started thread, closing its handle, or destroying
+  the initialized mutexes. s_threads_started remains false, and sse_server_stop
+  exits early when s_running is false, so the normal cleanup path is skipped.
+  This is unlikely during normal startup, but it can leak handles/resources and
+  may make a later same-process SSE restart unreliable.

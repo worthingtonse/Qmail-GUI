@@ -7,13 +7,19 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
+  /* `align-items: center` previously combined with `contain: layout` and
+     the tall scroll height of the dashboard after a Reply caused the modal
+     to be anchored below the visible viewport (only the header was
+     visible at the bottom). Switching to flex-start + a controlled top
+     padding keeps the modal near the visible top regardless of how tall
+     the overlay's containing block ends up. */
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: var(--space-lg);
+  padding: 5vh var(--space-lg) var(--space-lg);
+  overflow-y: auto;
   background: color-mix(in srgb, var(--secondary-bg) 72%, transparent);
   backdrop-filter: var(--glass-blur);
-  contain: layout style;
 }
 
 .compose-modal {
@@ -24,7 +30,7 @@
   overflow: hidden;
   border: var(--glass-border);
   border-radius: var(--radius-xl);
-  background: var(--glass-bg-strong);
+  background: var(--secondary-bg);
   box-shadow: var(--shadow-xl);
   animation: compose-modal-enter calc(250ms * var(--motion-scale)) ease both;
 }

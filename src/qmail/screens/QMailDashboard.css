@@ -68,7 +68,7 @@
 }
 
 .qmail-dashboard .spinning {
-  animation: qmail-dashboard-spin 1s linear infinite;
+  animation: qmail-dashboard-spin calc(1s * var(--motion-scale)) linear infinite;
 }
 
 /* Shared button styling in QMail uses the repository `.btn` /

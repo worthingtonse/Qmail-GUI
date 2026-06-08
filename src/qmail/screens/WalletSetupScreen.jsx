@@ -5,16 +5,11 @@ import {
   CheckCircle,
   ArrowRight,
   RefreshCw,
-  Search,
   User,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import {
-  healWallet,
-  prepareChange,
-  lookupMailWalletPath,
-} from '../../api/qmailApiServices';
+import { healWallet } from '../../api/qmailApiServices';
 import './WalletSetupScreen.css';
 
 /* eslint-disable react/prop-types -- accountData is a free-form
@@ -32,18 +27,9 @@ import './WalletSetupScreen.css';
 // pretty_address.
 //
 // FIX-36-0B: Heal Identity is only rendered when status === 'fracked'.
-//
-// gpt-batch4 #1: the action formerly called "Make Change" is reframed
-// as "Check Change" because the backend endpoint /coins/prepare-change
-// is read-only — it returns a denomination breakdown, it does NOT
-// mutate coins. The old "Change prepared." success toast was a lie.
-// The actual mutating make-change flow needs /coins/break and a
-// denomination-selection UI; that's a separate ticket.
-//
-// gpt-batch4 #2: prepareChange now targets the Mail wallet (the one
-// the user just imported credentials into) rather than defaulting to
-// the backend's Default wallet. Pulled from accountData.mailWalletPath
-// when present; falls back to lookupMailWalletPath() if not.
+// BUG-62: Check Change is temporarily hidden from the first-run welcome
+// screen, so this screen now only offers Heal Identity when needed and
+// Go to Dashboard.
 const WalletSetupScreen = ({ accountData, onProceed }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   // Shared feedback line for the result of the last action. Success
@@ -51,8 +37,6 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
   // action so the user has time to read and act on them.
   // (gpt-batch4 reviewer-question accepted.)
   const [feedback, setFeedback] = useState(null);
-  // Denomination breakdown from the most recent Check Change.
-  const [changeReport, setChangeReport] = useState(null);
 
   useEffect(() => {
     if (!feedback || feedback.type !== 'success') return undefined;
@@ -70,24 +54,6 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
     ? (accountData?.needs_healing ? 'fracked' : 'healthy')
     : 'pending';
   const [status, setStatus] = useState(initialStatus);
-
-  const emailAddress = accountData?.email_address || accountData?.prettyAddress || prettyAddress;
-  const greetingName = emailAddress
-    ? emailAddress.split('@')[0]
-    : (accountData?.first_name || accountData?.firstName || "");
-
-  // Resolve the wallet path Check Change should target. Prefer the
-  // path that came through onboarding (the Mail wallet that received
-  // the imported credentials). Fall back to a live lookup if absent.
-  const resolveWalletPath = async () => {
-    const seeded =
-      accountData?.mailWalletPath ||
-      accountData?.mail_wallet_path ||
-      null;
-    if (seeded) return seeded;
-    const lookup = await lookupMailWalletPath();
-    return lookup.path;
-  };
 
   const handleHeal = async () => {
     setIsProcessing(true);
@@ -121,50 +87,6 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
     }
   };
 
-  // gpt-batch4 #1: Check Change replaces Make Change. Read-only — it
-  // reports what denominations are in the wallet so the user can see
-  // whether they have small-denomination coins ready for send-fees.
-  const handleCheckChange = async () => {
-    setIsProcessing(true);
-    setFeedback(null);
-    setChangeReport(null);
-    try {
-      const walletPath = await resolveWalletPath();
-      const result = await prepareChange(walletPath);
-      const ok = result && (result.success || result.status === "success");
-      if (ok) {
-        const denoms = Array.isArray(result.denominations) ? result.denominations : [];
-        setChangeReport({
-          walletPath: result.wallet_path || walletPath || "",
-          denominations: denoms,
-        });
-        const totalCoins = denoms.reduce((sum, d) => sum + (d.count || 0), 0);
-        const breakable = denoms.some((d) => d.can_break && d.count > 0);
-        setFeedback({
-          type: 'success',
-          text: totalCoins === 0
-            ? "Your wallet has no coins yet."
-            : breakable
-              ? `Found ${totalCoins} coin${totalCoins === 1 ? '' : 's'} across ${denoms.length} denomination${denoms.length === 1 ? '' : 's'}.`
-              : `Found ${totalCoins} coin${totalCoins === 1 ? '' : 's'}, but none can be broken into smaller change.`,
-        });
-      } else {
-        setFeedback({
-          type: 'error',
-          text: (result && (result.error || result.message))
-            || 'Could not check change right now.',
-        });
-      }
-    } catch (e) {
-      setFeedback({
-        type: 'error',
-        text: 'Check Change failed. ' + (e.message || 'Network unreachable.'),
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const showHealButton = status === 'fracked';
 
   return (
@@ -176,9 +98,8 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
         <header className="wallet-setup-screen__header">
           <User size={48} className="wallet-setup-screen__hero-icon" />
           <h1 id="wallet-setup-title" className="wallet-setup-screen__title">
-            {greetingName ? `Welcome, ${greetingName}!` : "Welcome!"}
+            Welcome!
           </h1>
-          <p className="wallet-setup-screen__address">{prettyAddress || "—"}</p>
         </header>
 
         <section className="wallet-setup-screen__status" aria-live="polite">
@@ -202,9 +123,16 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
           )}
         </section>
 
+        <p className="wallet-setup-screen__address">
+          <span className="wallet-setup-screen__address-label">
+            Your Qmail Address is:
+          </span>
+          <span>{prettyAddress || "—"}</span>
+        </p>
+
         <section className="wallet-setup-screen__actions" aria-label="Wallet setup actions">
-          <div className="wallet-setup-screen__action-row">
-            {showHealButton && (
+          {showHealButton && (
+            <div className="wallet-setup-screen__action-row">
               <button
                 className="wallet-setup-screen__button wallet-setup-screen__button--secondary"
                 onClick={handleHeal}
@@ -212,24 +140,19 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
               >
                 <RefreshCw className={isProcessing ? 'wallet-setup-screen__spinner' : ''} /> Heal Identity
               </button>
-            )}
-            <button
-              className="wallet-setup-screen__button wallet-setup-screen__button--secondary"
-              onClick={handleCheckChange}
-              disabled={isProcessing}
-              title="See which denominations are in your wallet. Smaller coins are used to pay fees when sending mail."
-            >
-              <Search /> Check Change
+            </div>
+          )}
+
+          {/* Check Change is hidden for now per BUG-62.
+          <div className="wallet-setup-screen__action-row">
+            <button className="wallet-setup-screen__button wallet-setup-screen__button--secondary">
+              Check Change
             </button>
           </div>
-
-          {/* FIX-37-0B / gpt-batch4: plain-language caption beneath
-              the action row. gpt requested the friendlier "fees when
-              sending mail" wording. */}
           <p className="wallet-setup-screen__hint">
             Check Change shows the denominations in your wallet. Smaller coins are used to pay fees when sending mail.
           </p>
-
+          */}
           {/* Feedback line. Success auto-clears after 4s; errors
               persist until the next action so the user can read them. */}
           {feedback && (
@@ -246,36 +169,6 @@ const WalletSetupScreen = ({ accountData, onProceed }) => {
                 : <AlertCircle size={18} />}
               <p>{feedback.text}</p>
             </div>
-          )}
-
-          {/* gpt-batch4 #1: render the denomination breakdown when
-              Check Change returns successfully. This is the honest
-              "what's in your wallet" view that replaces the old
-              fake "Change prepared." toast. */}
-          {changeReport && changeReport.denominations.length > 0 && (
-            <section
-              className="wallet-setup-screen__breakdown"
-              aria-label="Wallet denominations"
-            >
-              <div className="wallet-setup-screen__breakdown-header">
-                <span>Denomination</span>
-                <span>Coins</span>
-              </div>
-              {changeReport.denominations
-                .slice()
-                .sort((a, b) => (b.value || 0) - (a.value || 0))
-                .map((d) => (
-                  <div
-                    key={d.denomination}
-                    className="wallet-setup-screen__breakdown-row"
-                  >
-                    <span>
-                      {d.value} CC{d.can_break ? '' : ' (smallest)'}
-                    </span>
-                    <span>{d.count}</span>
-                  </div>
-                ))}
-            </section>
           )}
 
           <button

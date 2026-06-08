@@ -110,6 +110,9 @@ export function ThemeProvider({ children }) {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", effectiveDataTheme);
+    if (STANDARD_THEMES.includes(effectiveDataTheme)) {
+      window.electronAPI?.notifyThemeChanged?.(effectiveDataTheme);
+    }
   }, [effectiveDataTheme]);
 
   // On mount (and any switch INTO "custom"), fetch the saved override file
@@ -175,6 +178,16 @@ export function ThemeProvider({ children }) {
       fetchedOnceRef.current = false;
     }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onThemeSelect?.((next) => {
+      if (STANDARD_THEMES.includes(next)) {
+        setTheme(next);
+      }
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [setTheme]);
 
   const saveCustom = useCallback(async (themeObj) => {
     setCustomStatus("saving");

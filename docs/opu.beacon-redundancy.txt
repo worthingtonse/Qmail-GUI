@@ -1,0 +1,423 @@
+================================================================================
+QMail BEACON REDUNDANCY PLAN
+Dual-beacon monitoring (receive) + send-with-failover (send)
+================================================================================
+Author : Claude (Opus 4.8)
+Date   : 2026-06-04  (REV 2 — merged ideas from cod.beacon-redundancy.txt +
+         locked in the user's 4 answers)
+Repos  : Server/client core  D:\Code\src\C\rest_core   (the C backend, core.exe)
+         GUI                 D:\Code\src\JavaScript\Qmail-GUI
+Status : PLAN ONLY — no code changed yet.
+
+--------------------------------------------------------------------------------
+DECISIONS (locked by the user 2026-06-04 — these are authoritative)
+--------------------------------------------------------------------------------
+D1. Beacon pair for Phase 1 = PRIMARY 11, SECONDARY 14. BUT code for a FUTURE in
+    which each client CHOOSES its own beacon(s). => Do NOT bake 11/14 into logic.
+    Model the beacon pair as per-identity / per-recipient DATA (with 11/14 only as
+    the default), so a later release can let users pick their beacon without a
+    logic rewrite. Constants exist only as the DEFAULT seed.
+D2. Sender FALLBACK triggers on ANY non-success Tell result (transport failure,
+    timeout, OR a non-success command status) — UNLESS the status clearly means
+    the recipient identity is invalid (then do not bother the secondary).
+D3. Per-beacon last_tell_timestamp MUST be PERSISTED (local DB/config) so a
+    restart does not lose catchup state and re-scan from since=0 every boot.
+D4. Beacon assignment is a FIXED primary/secondary pair (11 primary, 14 fallback),
+    NOT derived from the serial number. (Combined with D1: fixed default today,
+    per-client-selectable later — never SN-derived.)
+
+These answers RESOLVE the old "Open Question 11" at the bottom; that section is
+superseded by D1-D4.
+
+--------------------------------------------------------------------------------
+WHAT THIS REV ABSORBED FROM cod.beacon-redundancy.txt (Codex)
+--------------------------------------------------------------------------------
+Codex's plan and mine agree on the core (primary+secondary, dual-monitor,
+send-failover, dedupe). I folded in the following Codex points that strengthen
+this plan; sections below are updated accordingly:
+  + Use the qmail_received_tells TABLE as the dedupe/merge layer, with
+    "refresh manifest if the second arrival has one" (better than a blind
+    INSERT-OR-IGNORE on the inbox row). [see 5]
+  + A lower-risk INTERIM receiver: keep primary PING on 11, add a periodic
+    secondary PEEK on 14 every 15-60 s, before committing to two long-poll
+    workers. [see 3]
+  + PER-RECIPIENT partial failover: when a primary beacon Tell succeeds for some
+    recipients and fails for others, fail over ONLY the failed recipients; never
+    re-send to an already-accepted recipient. [see 4.2]
+  + recipient_with_beacon_t carries BOTH beacons (primary + secondary). [see 4.1]
+  + PHASE 5 RECOVERY: after the receiver watches 14, restart Client5 to catch the
+    3 already-orphaned GUIDs still parked on RAIDA 14; if the server already
+    purged them, resend. [see new section 5b]
+  + Concurrency guard so two beacon workers can't process the same GUID at once
+    (DB state + process-local in-flight set). [see 5]
+  + qmail_users.csv directory remains the AUTHORITATIVE beacon source when a row
+    exists; the contacts DB is a cache synced to it. [see 2.3]
+
+--------------------------------------------------------------------------------
+0. WHY THIS PLAN EXISTS (the bug it must also fix)
+--------------------------------------------------------------------------------
+A live test on 2026-06-04 proved attachments now UPLOAD fine (status 0x22 is
+fixed server-side), but the RECIPIENT never received the mail. Root cause:
+
+  * A "beacon" is the RAIDA server that holds a mailbox's TELL notifications.
+  * The recipient (SN 32340) monitors beacon RAIDA 11
+    (QMAIL_BEACON_RAIDA_ID = 11, include/qmail/qmail_types.h:39).
+  * The sender resolved the recipient as a stored CONTACT and read the beacon
+    from the contacts DB, whose column DEFAULTS TO 14
+    (qmail_db.c:39  "beacon_raida INTEGER DEFAULT 14").
+  * So the sender delivered the TELL to RAIDA 14
+    ("TELL to beacon RAIDA 14: Success"), while the recipient long-polls RAIDA 11
+    ("Peek to RAIDA 11 -> tell_count=0"). The tell is orphaned. Mail never lands.
+
+So there are TWO independent beacon RAIDAs in play in the field already (11 and
+14). Rather than just "pick one and force both sides to agree", this plan makes
+the system ROBUST to that disagreement AND to a beacon going down:
+
+  RECEIVE: monitor BOTH 11 and 14 so a tell parked on either is collected, and so
+           that if one beacon RAIDA is down the other still delivers mail.
+  SEND:    try the primary beacon (11); if that fails, fail over to the secondary
+           (14) so the tell is still deposited somewhere the recipient watches.
+
+This both heals the current 11-vs-14 mismatch AND adds true redundancy.
+
+--------------------------------------------------------------------------------
+1. DESIGN PRINCIPLES
+--------------------------------------------------------------------------------
+P1. PRIMARY + SECONDARY, ordered, and DATA-DRIVEN (per D1). The pair is
+    per-identity / per-recipient data. The constants QMAIL_BEACON_RAIDA_ID (11)
+    and QMAIL_SECONDARY_BEACON_RAIDA_ID (14) are only the DEFAULT SEED used when a
+    record carries no explicit beacon. Logic must read the pair from the identity/
+    recipient record, NEVER hardcode 11/14 in send/receive code, so that a future
+    release can let a client choose its own beacon(s) with no logic change.
+P2. RECEIVER WATCHES BOTH. The receiver must collect tells from primary AND
+    secondary, because a sender may deposit on either (legacy default, failover,
+    or a future per-client-chosen pair).
+P3. SENDER TRIES PRIMARY THEN SECONDARY. A tell counts as delivered when ANY
+    beacon accepts it. Optionally deposit on BOTH for maximum reliability
+    (configurable; see 4.3).
+P3b. FAILOVER ON ANY NON-SUCCESS (per D2). The sender falls over to the secondary
+    on transport failure, timeout, OR any non-success Tell command status —
+    EXCEPT when the status clearly means the recipient identity is invalid (in
+    that case the secondary would fail identically, so skip it and mark failed).
+P4. DEDUPE BY GUID. With two beacons, the same email_id (file_guid) can arrive
+    twice. The receiver must dedupe by GUID at the qmail_received_tells layer (see
+    5) — and refresh the manifest if the second copy has one the first lacked.
+P5. IDEMPOTENT + BACKWARD COMPATIBLE. Existing single-beacon peers keep working.
+    A peer that only watches 11 still gets mail if we always (also) reach 11.
+    /api/qmail/local/status keeps the old single beacon_raida field (mapped to
+    primary) AND adds a beacons[] array.
+P6. NO SILENT FAILURE. Every beacon down / failover / dedupe-drop is logged.
+P7. PERSIST CATCHUP CURSORS (per D3). Each beacon's last_tell_timestamp is stored
+    locally (DB/config), so a restart resumes from the saved cursor instead of
+    re-scanning from since=0 every boot.
+
+--------------------------------------------------------------------------------
+2. CONSTANTS & DATA MODEL CHANGES (C core)
+--------------------------------------------------------------------------------
+2.1 Constants are DEFAULT SEEDS ONLY (per D1)  (include/qmail/qmail_types.h)
+    - Keep:   #define QMAIL_BEACON_RAIDA_ID            11   (default primary)
+    - Add:    #define QMAIL_SECONDARY_BEACON_RAIDA_ID  14   (default secondary)
+    - Add a default ordered list helper:
+        static const uint8_t QMAIL_DEFAULT_BEACON_RAIDAS[] = { 11, 14 };
+        #define QMAIL_BEACON_RAIDA_COUNT 2
+    - CRITICAL (D1): send/receive logic must NOT iterate these constants directly.
+      They are only the fallback used to POPULATE an identity's / recipient's
+      beacon pair when no explicit value exists. The actual monitor loop and the
+      send-failover loop iterate the pair carried on the identity/recipient
+      record (2.2 / 2.3). This is what makes "let a client pick its own beacon"
+      later a data change, not a code change.
+
+2.2 Identity beacon model + persisted state  (qmail_types.h: qmail_beacon_state_t,
+    ~line 548-571)
+    Today it holds a single `beacon_raida` and one poll loop. Extend so the
+    ACTIVE identity carries an ordered beacon pair and per-beacon runtime state:
+        struct {
+            uint8_t  beacon_raida;          /* from identity record, default 11/14 */
+            uint8_t  role;                  /* 0=primary, 1=secondary */
+            uint32_t last_tell_timestamp;   /* per-beacon "since" cursor (PERSISTED) */
+            int      backoff_seconds;
+            int      consecutive_errors;
+            bool     healthy;
+        } beacons[QMAIL_BEACON_RAIDA_COUNT];
+      - The pair VALUES come from the identity record (seeded from the constants
+        in 2.1), so a future per-client beacon choice flows straight through.
+      - Each beacon needs its OWN since-cursor/backoff so one slow/down beacon
+        does not stall the other.
+      - Keep the existing mutex; guard the per-beacon cursors with it.
+      - Keep the legacy single `beacon_raida` field as an alias of beacons[0]
+        (primary) for back-compat with existing status/readers.
+
+2.2b PERSIST per-beacon cursors (per D3)
+    - Store each beacon's last_tell_timestamp locally so restart resumes catchup
+      from the saved point, not since=0. Options:
+        * a tiny table  qmail_beacon_cursor(serial_number, beacon_raida,
+          last_tell_timestamp, updated_at), OR
+        * keys in the existing local config/DB keyed by (SN, beacon_raida).
+    - Load on beacon start; write after each successful PEEK/PING that advances
+      the cursor. On first run (no stored cursor) use since=0 (full catchup).
+    - This also enables PHASE 5 recovery (5b): a fresh client with no cursor does
+      a since=0 catchup on BOTH beacons and picks up already-parked tells.
+
+2.3 Contact / user model  (already partly present — REUSE it)
+    - qmail_contact_t / qmail_user_directory already have
+      `secondary_beacon_raida` (qmail_types.h:331, qmail_users.h:38) and the DB
+      column exists (qmail_db.c:40,356). Wire these through instead of adding new
+      fields.
+    - DIRECTORY IS AUTHORITATIVE (Codex): when a qmail_users.csv directory row
+      exists for an SN, its (primary, secondary) beacon is the source of truth;
+      the contacts DB is a CACHE that must be synced to it. This is exactly the
+      hook that lets a future per-client-chosen beacon (D1) propagate: a user
+      publishes their chosen beacon to the directory, and senders pick it up.
+    - FIX THE DEFAULTS/HEALING (root-cause cleanup):
+        * qmail_db.c: change the column defaults so a new row seeds the DEFAULT
+          pair: beacon_raida DEFAULT 11, secondary_beacon_raida DEFAULT 14
+          (currently both default to 14 — that is the bug). Fix the schema
+          (qmail_db.c:39-40), the ALTER-TABLE migration defaults
+          (qmail_db.c:340,356), AND qmail_db_contact_record_send() which stubs
+          new contacts with 14/14 -> make it 11/14.
+        * One-time data migration for already-stored stale rows:
+            UPDATE qmail_contacts
+              SET beacon_raida = 11, secondary_beacon_raida = 14
+              WHERE beacon_raida = 14
+                AND (secondary_beacon_raida = 14 OR secondary_beacon_raida IS NULL)
+                AND <no user-authored/directory beacon override>;
+          Only heal rows that look like the legacy DEFAULT artifact; PRESERVE any
+          row whose beacon was set from the directory or (future) user choice, so
+          the migration never clobbers an intentional per-client beacon (D1).
+
+--------------------------------------------------------------------------------
+3. RECEIVE PATH — MONITOR BOTH BEACONS  (qmail_beacon.c)
+--------------------------------------------------------------------------------
+Today: one catchup PEEK + one monitor PING long-poll loop against
+state->beacon_raida (qmail_beacon.c:206 peek, :282 ping).
+
+Change to monitor the ACTIVE IDENTITY'S beacon pair (state->beacons[], values
+from the identity record per 2.2 — NOT the raw constants, per D1). Two viable
+shapes, plus a lower-risk interim:
+
+  OPTION R-A (recommended): ONE beacon thread, ROUND-ROBIN over the beacon list.
+    - Catchup phase: for each beacon in QMAIL_BEACON_RAIDAS, PEEK with that
+      beacon's own since-cursor; process all returned tells; advance that
+      beacon's cursor.
+    - Monitor phase: rotate PING long-polls across beacons. Because PING is a
+      long-poll (blocks up to timeout), use a SHORTER per-beacon timeout
+      (e.g. total_longpoll / beacon_count) and round-robin, OR
+    - OPTION R-B: ONE THREAD PER BEACON. Spawn QMAIL_BEACON_RAIDA_COUNT poll
+      threads, each owning one beacon's peek/ping loop and cursor, all feeding the
+      same on_new_mail callback. Simpler concurrency reasoning; costs one extra
+      long-poll socket. Given only 2 beacons, R-B is clean and is the safer pick
+      if long-poll timeouts make round-robin laggy.
+
+    -> RECOMMEND R-B (one thread per beacon) for 2 beacons. Re-evaluate if the
+       beacon count grows.
+
+  OPTION R-C (LOWER-RISK INTERIM, from Codex): keep the existing primary PING
+    long-poll on beacon[0], and ADD a periodic secondary PEEK on beacon[1] every
+    15-60 s. Less responsive on the secondary, but a much smaller first patch and
+    avoids long-poll starvation. Ship R-C first if R-B is too invasive for the
+    initial change, then upgrade R-C -> R-B (dual PING workers).
+    Sequencing: R-C unblocks PHASE 5 recovery (catching the orphaned tells on 14)
+    with minimal risk; R-B follows for full real-time redundancy.
+
+  Per-beacon loop (any option) must:
+    1. PEEK/PING beacon b with state->beacons[b].last_tell_timestamp as `since`.
+    2. For each notification returned: pass to on_new_mail (existing callback).
+    3. DEDUPE by file_guid BEFORE storing (see 5).
+    4. Advance state->beacons[b].last_tell_timestamp to the newest tell ts.
+    5. On error/timeout: bump that beacon's backoff + consecutive_errors ONLY;
+       the other beacon keeps running. Log:
+         "beacon b=%d down (err=%d), still monitoring b=%d".
+    6. HEALTH: a beacon with N consecutive errors is marked unhealthy (for
+       status/UI) but keeps being retried with backoff. Mail still flows via the
+       healthy beacon.
+
+  Identity/status: /api/qmail/local/status should report BOTH beacons and each
+  one's healthy/last_ts so the UI can show "Beacons: 11 OK, 14 OK".
+
+--------------------------------------------------------------------------------
+4. SEND PATH — PRIMARY THEN SECONDARY FAILOVER  (qmail send/tell)
+--------------------------------------------------------------------------------
+Today: recipient beacon is resolved once (qmail_contacts.c:447 from DB; :313/:468
+fallback to the constant), and the tell is sent to that single beacon
+(qmail_upload_orchestrator.c tell loop ~1261, "TELL to beacon RAIDA N").
+
+4.1 recipient_with_beacon_t carries BOTH beacons (Codex), resolved from the
+    record (D1 — not raw constants):
+    - primary   = recipient.beacon_raida           (seeded default 11 if unset)
+    - secondary = recipient.secondary_beacon_raida (seeded default 14 if unset)
+    - Sentinel 0xFF = "no secondary". De-dup if primary == secondary -> single.
+    - IMPORTANT (heals the field bug pre-migration): do NOT trust a stored beacon
+      that is ONLY the legacy default. If the row is 14/14 (or 14/none) with no
+      directory/user-authored override, resolve the pair as [11, 14] so we cover
+      both even before the data migration (2.3) runs.
+
+4.2 SEND with per-recipient failover (per D2 + Codex partial-failover):
+    Group recipients by their PRIMARY beacon; send the Tell to each primary beacon
+    once. Then, for the recipients whose primary attempt did NOT succeed, retry
+    on THEIR secondary beacon — only those recipients, never the ones already
+    accepted:
+
+      send Tell(primary_beacon, recipients_on_primary)
+      accepted   = recipients the primary beacon confirmed (status 0xFA, accepted)
+      to_failover = recipients_on_primary - accepted
+      for r in to_failover:
+          if status clearly means RECIPIENT IDENTITY INVALID:   # D2 exception
+              mark r FAILED (secondary would fail identically); do NOT failover
+          else:                                                 # D2 default
+              send Tell(r.secondary_beacon, [r])
+              if accepted: mark r SENT, note "fallback beacon used"
+              else:        mark r FAILED -> tell-retry worker
+    FAILOVER TRIGGER (D2): transport failure, timeout, OR any non-success Tell
+    status — EXCEPT a status that proves the recipient identity is invalid.
+    Never send a duplicate Tell to a recipient the primary already accepted.
+    The existing tell-retry worker (qmail_beacon.c) retries FAILED recipients
+    later, primary-first unless primary is marked unhealthy, then secondary.
+
+4.3 OPTIONAL "deposit on BOTH" mode (highest reliability; config flag
+    qmail.tell_fanout = first-success | both):
+    - first-success (default): as 4.2.
+    - both: deposit the tell on primary AND secondary regardless, so the
+      recipient gets it even if it happens to be watching only one. Receiver
+      dedupes by GUID (5). Costs one extra tell per recipient.
+    Recommend shipping "first-success" first; add "both" as a config option.
+
+4.4 Receipts: the per-recipient receipt row already stores beacon_raida
+    (qmail_receipt.h:91, qmail_db.c:2066 record_tell). Extend it to store WHICH
+    beacon actually accepted (and whether failover was used) so the UI/receipt can
+    show "delivered via beacon 14 (failover)".
+
+--------------------------------------------------------------------------------
+5. DEDUPLICATION + MERGE (must-have once two beacons are watched / both-mode)
+--------------------------------------------------------------------------------
+The same email_id (file_guid) can be seen on BOTH beacons (retry, failover, or
+future dual-send). Dedupe at the qmail_received_tells TABLE, which already keys on
+file_guid (Codex) — this is better than a blind INSERT-OR-IGNORE on the inbox
+because the two arrivals may differ (one may carry the manifest, the other not):
+
+  On a tell arriving for file_guid G from beacon b:
+    - If NO row for G: insert it (with source beacon b).
+    - If a row for G EXISTS:
+        * if existing has NO manifest and the new one HAS a manifest:
+          UPDATE/refresh the manifest (so a later, richer copy completes it).
+        * if existing is NOT yet downloaded: keep downloaded=0 so receive retries.
+        * if existing is ALREADY downloaded: do nothing (drop), log
+          "duplicate email_id %s from beacon %d, ignoring".
+    - qmail_emails / inbox stays keyed by email_id/file_guid; keep that insert
+      idempotent (unique index on email_id) as a second safety net.
+
+  CONCURRENCY GUARD (two beacon workers, same GUID at once):
+    - Guard receive/reassembly so only ONE worker processes a given file_guid at
+      a time: a process-local in-flight GUID set AND/OR a DB "claimed" state on
+      the received_tells row. Release on completion/failure.
+    - Also dedupe the "mark tell downloaded" so both beacons converge to one
+      state and neither re-triggers reassembly.
+
+--------------------------------------------------------------------------------
+5b. RECOVERY of the 3 already-orphaned messages on RAIDA 14 (Codex Phase 5)
+--------------------------------------------------------------------------------
+After the receiver watches beacon 14 (R-C interim is enough), restart Client5
+(@torch.glen.kilo, SN 32340). Its catchup PEEK on 14 (since=0, or the persisted
+cursor if first run) should discover the three orphaned tells from 2026-06-04:
+    9E004E754F508A428A9B2F6DA8D05EE0   (5 KB attachment send)
+    635163ED44CE48C6DA1B3E16ADEED60A   (10 KB attachment send)
+    F3A28C33CF524C91E5E7EABFBEF41FF6   (168 KB attachment send)
+If RAIDA 14 already purged them (e.g. a prior PEEK/PING consumed/expired them),
+RESEND the three messages after the failover+dual-monitor changes are installed.
+This is the concrete proof that dual-monitor recovers misrouted mail.
+
+--------------------------------------------------------------------------------
+6. GUI CHANGES (Qmail-GUI)
+--------------------------------------------------------------------------------
+6.1 Status display: surface both beacons from /api/qmail/local/status.
+    - src/qmail/screens/ (status/diagnostics component): show
+      "Beacons: 11 ●  14 ●" with green/red per beacon health.
+6.2 No change required to compose/send UX — failover is backend-internal.
+6.3 Optional: a small "delivered via beacon N" note on the Sent/receipt view,
+    fed by the receipt's accepted-beacon field (4.4).
+6.4 qmailApiServices.js: extend the status parser to read the beacons[] array
+    (additive; tolerate the old single-beacon shape for older backends).
+
+--------------------------------------------------------------------------------
+7. CONFIG
+--------------------------------------------------------------------------------
+rest_core.conf (additive, all optional with safe defaults):
+    qmail.beacon_primary    = 11
+    qmail.beacon_secondary  = 14
+    qmail.tell_fanout       = first-success   # or "both"
+    qmail.beacon_backoff_max_seconds = <existing default>
+These config keys are the DEFAULT SEED for THIS client's own identity beacon pair
+(D1). Defaults reproduce today's intended behavior (primary 11) PLUS secondary 14
+coverage, so an un-configured client is automatically redundant. In a FUTURE
+release a client could set its own pair here (or via the directory), and senders
+would pick it up from the published directory record (2.3) — no logic change.
+
+--------------------------------------------------------------------------------
+8. BUILD / DEPLOY
+--------------------------------------------------------------------------------
+8.1 C core: cmake --build D:\Code\src\C\rest_core\build
+    (mirrors core.exe to the client backends, including Qmail-GUI\backend).
+8.2 GUI portable: npm run build-portable  -> release\QMail.exe
+8.3 Copy release\QMail.exe to each test client dir (E:\Client4, E:\Client5 — the
+    build does not auto-mirror there).
+
+--------------------------------------------------------------------------------
+9. TEST PLAN (must pass before calling it done)
+--------------------------------------------------------------------------------
+T1. HAPPY PATH, both beacons up:
+    - Sender -> recipient. Confirm sender logs "TELL to beacon RAIDA 11: Success".
+    - Recipient PEEK on 11 returns tell_count>=1; email + attachment in inbox.
+T2. PRIMARY DOWN (simulate beacon 11 unreachable for the sender):
+    - Sender logs "TELL to beacon 11 failed; trying next" then
+      "TELL to beacon RAIDA 14: Success".
+    - Recipient (watching BOTH) collects it from beacon 14. Inbox shows it.
+T3. RECEIVER PRIMARY DOWN (recipient's 11 poll failing):
+    - Recipient logs beacon 11 unhealthy but beacon 14 still polling; mail
+      deposited on 14 still arrives.
+T4. DUPLICATE SUPPRESSION ("both" mode or tell present on both beacons):
+    - Exactly ONE inbox row; log shows "duplicate email_id ... ignoring".
+T5. LEGACY PEER: a contact row with only beacon_raida=14 (pre-migration):
+    - Sender's [11,14] list still delivers; recipient watching both still gets
+      it. Then run the migration; reconfirm.
+T6. REGRESSION: attachments still upload 7/7 (B2 stays fixed); the 3-size send
+    (5 KB / 10 KB / 168 KB) all land in the recipient inbox WITH attachments.
+
+--------------------------------------------------------------------------------
+10. ROLLOUT ORDER (smallest-risk first)
+--------------------------------------------------------------------------------
+S1. Constants(as DEFAULT SEED) + DB default fix(11/14) + record_send stub fix +
+    data migration of stale 14/14 rows (2.3). Heals the immediate 11-vs-14 bug.
+S2. SEND per-recipient failover (4.1-4.2, D2). Re-test the 3 sends -> recipient
+    receives. After S1+S2 the user's CURRENT failure is already fixed.
+S3a. RECEIVE interim R-C (primary PING on 11 + periodic secondary PEEK on 14) +
+     persisted cursors (2.2b) + received_tells dedupe/merge (5). Lower risk; also
+     enables PHASE 5 recovery (5b) of the 3 orphaned messages.
+S3b. Upgrade R-C -> R-B (one PING worker per beacon) for full real-time
+     redundancy + concurrency guard (5).
+S4. Status/UI for both beacons (6).
+S5. Optional "deposit on both" mode (4.3) + receipt accepted-beacon field (4.4).
+S3+ add true redundancy; S5 is reliability-vs-traffic, ship only if needed.
+
+--------------------------------------------------------------------------------
+11. FUTURE: PER-CLIENT BEACON CHOICE (designed-for now, per D1)
+--------------------------------------------------------------------------------
+RESOLVED by the user (see DECISIONS D1-D4): the pair is a FIXED default of
+primary 11 / secondary 14 today — NOT SN-derived. But the architecture above is
+deliberately data-driven so a later release can let each client choose its own
+beacon(s) with NO logic rewrite. The seams that make this cheap:
+  - The active identity carries its beacon pair as DATA (2.2); the monitor loop
+    reads it, not the constants.
+  - Recipients carry their pair too (4.1), sourced from the directory which is
+    AUTHORITATIVE (2.3). A user publishes a chosen pair to qmail_users.csv; the
+    sender's contacts DB syncs to it.
+  - The constants (2.1) and config keys (7) are only the DEFAULT SEED.
+When per-client choice ships, the only NEW work is: a UI/endpoint to set a
+client's own pair, publishing it to the directory, and (optionally) supporting
+>2 beacons. The send/receive/dedupe machinery here is unchanged.
+
+Remaining minor questions (do NOT block S1-S3):
+  - Should the public directory ever allow >2 beacons per user? (If yes, replace
+    the fixed primary/secondary fields with a small ordered list; the loops here
+    already iterate a list, so this is mostly a schema change.)
+  - Receiver per-beacon cursor retention: persisted in local DB/config (D3) — TTL
+    is "keep indefinitely; it's just the last-seen timestamp per (SN, beacon)".
+================================================================================

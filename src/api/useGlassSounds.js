@@ -19,18 +19,10 @@ const useGlassSounds = () => {
       const x = e.clientX - rect.left - size / 2;
       const y = e.clientY - rect.top - size / 2;
       
-      ripple.style.cssText = `
-        position: absolute;
-        width: ${size}px;
-        height: ${size}px;
-        left: ${x}px;
-        top: ${y}px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
-        pointer-events: none;
-        animation: glass-ripple 0.6s ease-out;
-        z-index: 1000;
-      `;
+      ripple.style.width = `${size}px`;
+      ripple.style.height = `${size}px`;
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
       
       element.style.position = 'relative';
       element.style.overflow = 'hidden';
