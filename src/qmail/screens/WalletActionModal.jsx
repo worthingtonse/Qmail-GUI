@@ -395,6 +395,7 @@ const WalletActionModal = ({
     isWorking || !Number.isInteger(Number(withdrawAmount)) || Number(withdrawAmount) <= 0;
 
   return (
+    <>
     <div className="compose-modal__overlay wallet-action-modal__overlay">
       <section
         className="compose-modal wallet-action-modal"
@@ -553,33 +554,6 @@ const WalletActionModal = ({
             </div>
           )}
 
-          {isReceiptVisible && (
-            <section className="wallet-action-modal__receipt-panel" aria-label="Deposit receipt">
-              <header className="wallet-action-modal__receipt-header">
-                <div>
-                  <strong>Receipt</strong>
-                  <span>{receiptFilename}</span>
-                </div>
-                <button
-                  type="button"
-                  className="wallet-action-modal__receipt-close"
-                  onClick={() => setIsReceiptVisible(false)}
-                  aria-label="Close receipt"
-                >
-                  <X size={14} />
-                </button>
-              </header>
-              {isReceiptLoading ? (
-                <div className="wallet-action-modal__receipt-loading" role="status">
-                  <Loader2 size={16} className="spinning" />
-                  <span>Loading receipt...</span>
-                </div>
-              ) : (
-                <pre className="wallet-action-modal__receipt-content">{formatReceiptContent(receiptContent)}</pre>
-              )}
-            </section>
-          )}
-
           {receiptError && (
             <div className="compose-modal__error wallet-action-modal__receipt-error" role="alert">
               <AlertCircle size={16} />
@@ -629,6 +603,45 @@ const WalletActionModal = ({
         </form>
       </section>
     </div>
+
+    {isReceiptVisible && (
+      <div
+        className="compose-modal__overlay wallet-action-modal__overlay wallet-action-modal__receipt-overlay"
+        onClick={() => setIsReceiptVisible(false)}
+      >
+        <section
+          className="compose-modal wallet-action-modal wallet-action-modal__receipt-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Deposit receipt"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <header className="compose-modal__header wallet-action-modal__receipt-header">
+            <div>
+              <strong>Receipt</strong>
+              <span>{receiptFilename}</span>
+            </div>
+            <button
+              type="button"
+              className="compose-modal__close-button"
+              onClick={() => setIsReceiptVisible(false)}
+              aria-label="Close receipt"
+            >
+              <X size={20} />
+            </button>
+          </header>
+          {isReceiptLoading ? (
+            <div className="wallet-action-modal__receipt-loading" role="status">
+              <Loader2 size={16} className="spinning" />
+              <span>Loading receipt...</span>
+            </div>
+          ) : (
+            <pre className="wallet-action-modal__receipt-content">{formatReceiptContent(receiptContent)}</pre>
+          )}
+        </section>
+      </div>
+    )}
+    </>
   );
 };
 

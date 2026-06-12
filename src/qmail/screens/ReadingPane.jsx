@@ -1,5 +1,4 @@
 /* eslint-disable react/prop-types */
-import { useState } from "react";
 import {
   Mail,
   Reply,
@@ -16,8 +15,13 @@ import {
   Users,
   RotateCcw,
   Loader2,
+  X,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
+import {
+  formatByteProgress,
+  formatProgressPercentage,
+} from "../transferProgress";
 import "./ReadingPane.css";
 
 const DECRYPT_STRIPES = [
@@ -108,23 +112,41 @@ const ReadingPane = ({
   onRejectPayment,
   isRejectingPayment = false,
   attachments = [],
+  attachmentDownloadProgress = null,
+  downloadLocation = null,
+  onOpenDownloadLocation,
   onDownloadAttachment,
+  onCancelAttachmentDownload,
+  onResumeAttachmentDownload,
 }) => {
-  // Which attachment is currently downloading on demand (its bytes are fetched
-  // the first time the user clicks it). Shows a per-attachment spinner +
-  // "Downloading / Decrypting" while the on-demand fetch runs.
-  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState(null);
+  const emailId = email?.id || email?.guid;
+  const activeAttachmentDownload =
+    attachmentDownloadProgress != null &&
+    String(attachmentDownloadProgress.emailId) === String(emailId);
+  const attachmentTransferRunning =
+    activeAttachmentDownload &&
+    ["running", "cancelling"].includes(attachmentDownloadProgress.status);
+  const attachmentTransferResumable =
+    activeAttachmentDownload &&
+    ["cancelled", "failed", "paused"].includes(
+      attachmentDownloadProgress.status,
+    ) &&
+    attachmentDownloadProgress.transferError?.canRetry !== false;
 
   const handleDownloadAttachment = async (attachmentId, attachment) => {
-    if (!onDownloadAttachment || downloadingAttachmentId != null) return;
-    setDownloadingAttachmentId(attachmentId);
+    if (
+      attachmentTransferResumable &&
+      String(attachmentDownloadProgress.attachmentId) === String(attachmentId)
+    ) {
+      await onResumeAttachmentDownload?.();
+      return;
+    }
+    if (!onDownloadAttachment || attachmentDownloadProgress != null) return;
     try {
       await onDownloadAttachment(email.id || email.guid, attachmentId, attachment);
     } catch (err) {
-      // The handler reports its own errors; just clear the spinner.
+      // The dashboard handler reports its own errors.
       console.error("Attachment download failed:", err);
-    } finally {
-      setDownloadingAttachmentId(null);
     }
   };
 
@@ -281,6 +303,27 @@ const ReadingPane = ({
                 ? "Receiving stripes, reassembling the payload, and unlocking the message."
                 : "The message is queued for background decryption."}
             </p>
+            {downloadLocation && (
+              <div className="reading-pane__download-location">
+                <div className="reading-pane__download-location-row">
+                  <span className="reading-pane__download-location-label">
+                    Download location
+                  </span>
+                  {onOpenDownloadLocation && (
+                    <button
+                      type="button"
+                      className="reading-pane__download-location-button"
+                      onClick={onOpenDownloadLocation}
+                    >
+                      Open folder
+                    </button>
+                  )}
+                </div>
+                <code className="reading-pane__download-location-path">
+                  {downloadLocation}
+                </code>
+              </div>
+            )}
             <SevenStripeDecryptAnimation active={isDecrypting} />
           </section>
         </div>
@@ -420,12 +463,83 @@ const ReadingPane = ({
               <Paperclip size={16} />
               Attachments ({attachments.length})
             </h3>
-            {downloadingAttachmentId != null && (
+            {activeAttachmentDownload && (
               <div className="reading-pane__attachment-decrypt-panel">
-                <SevenStripeDecryptAnimation active />
+                <SevenStripeDecryptAnimation active={attachmentTransferRunning} />
                 <p className="reading-pane__attachment-decrypt-notice">
-                  Downloading and decrypting attachment…
+                  {attachmentTransferRunning
+                    ? attachmentDownloadProgress.status === "cancelling"
+                      ? "Cancelling attachment download"
+                      : "Downloading and decrypting attachment"
+                    : attachmentDownloadProgress.transferError?.title
+                      ? attachmentDownloadProgress.transferError.title
+                    : attachmentDownloadProgress.status === "failed"
+                      ? "Attachment download interrupted"
+                      : attachmentDownloadProgress.status === "paused"
+                        ? "Attachment download paused"
+                        : "Attachment download cancelled"}
                 </p>
+                <div
+                  className="reading-pane__transfer-progress-track"
+                  role="progressbar"
+                  aria-label="Attachment download progress"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow={Math.round(
+                    attachmentDownloadProgress.percentage,
+                  )}
+                >
+                  <span
+                    className="reading-pane__transfer-progress-fill"
+                    style={{
+                      width: `${Math.min(100, Math.max(0, attachmentDownloadProgress.percentage))}%`,
+                    }}
+                  />
+                </div>
+                <p className="reading-pane__transfer-progress-bytes">
+                  {formatByteProgress(attachmentDownloadProgress)}
+                </p>
+                {attachmentDownloadProgress.error && (
+                  <p className="reading-pane__transfer-progress-error">
+                    {attachmentDownloadProgress.transferError?.message ||
+                      attachmentDownloadProgress.error}
+                  </p>
+                )}
+                {attachmentDownloadProgress.transferError?.detail && (
+                  <p className="reading-pane__transfer-progress-detail">
+                    {attachmentDownloadProgress.transferError.detail}
+                  </p>
+                )}
+                <div className="reading-pane__transfer-controls">
+                  {attachmentTransferRunning ? (
+                    <button
+                      type="button"
+                      className="reading-pane__transfer-control reading-pane__transfer-control--danger"
+                      onClick={onCancelAttachmentDownload}
+                      disabled={
+                        attachmentDownloadProgress.status === "cancelling"
+                      }
+                      title="Cancel attachment download"
+                    >
+                      <X size={14} />
+                      Cancel
+                    </button>
+                  ) : (
+                    attachmentTransferResumable && (
+                      <button
+                        type="button"
+                        className="reading-pane__transfer-control"
+                        onClick={onResumeAttachmentDownload}
+                        title="Resume attachment download"
+                      >
+                        <RotateCcw size={14} />
+                        {attachmentDownloadProgress.status === "failed"
+                          ? "Retry"
+                          : "Resume"}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
             )}
             <div className="reading-pane__attachments-list">
@@ -438,7 +552,14 @@ const ReadingPane = ({
                 // PENDING (storage_mode 2): bytes haven't been downloaded yet;
                 // they're fetched on demand the first time the user clicks.
                 const isPending = attachment.isDownloaded === false;
-                const isDownloading = downloadingAttachmentId === attachmentId;
+                const isDownloading =
+                  attachmentTransferRunning &&
+                  String(attachmentDownloadProgress.attachmentId) ===
+                    String(attachmentId);
+                const isResumable =
+                  attachmentTransferResumable &&
+                  String(attachmentDownloadProgress.attachmentId) ===
+                    String(attachmentId);
 
                 return (
                   <article
@@ -492,7 +613,11 @@ const ReadingPane = ({
                         )}
                         {isDownloading ? (
                           <span className="reading-pane__attachment-status reading-pane__attachment-status--decrypting">
-                            Decrypting…
+                            Downloading{" "}
+                            {formatProgressPercentage(
+                              attachmentDownloadProgress.percentage,
+                            )}
+                            %
                           </span>
                         ) : (
                           isPending && (
@@ -510,9 +635,14 @@ const ReadingPane = ({
                           event.stopPropagation();
                           handleDownloadAttachment(attachmentId, attachment);
                         }}
-                        disabled={isDownloading}
+                        disabled={
+                          isDownloading &&
+                          attachmentDownloadProgress.status === "cancelling"
+                        }
                         title={
-                          isPending
+                          isResumable
+                            ? "Resume attachment download"
+                            : isPending
                             ? "Download attachment"
                             : "Save attachment"
                         }
@@ -523,6 +653,8 @@ const ReadingPane = ({
                             size={14}
                             className="reading-pane__attachment-spinner"
                           />
+                        ) : isResumable ? (
+                          <RotateCcw size={14} />
                         ) : (
                           <Download size={14} />
                         )}

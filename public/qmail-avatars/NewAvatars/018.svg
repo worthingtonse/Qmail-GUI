@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-
-    <circle cx="50" cy="40" r="12" fill="#f4edd1" />
-    <path d="M54.1 28.7 L59.6 13.7" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M58.2 31.3 L69.2 19.6" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M61.0 35.2 L75.7 28.9" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M62.0 40.0 L78.0 40.0" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M61.0 44.8 L75.7 51.1" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M58.2 48.7 L69.2 60.4" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" /><path d="M54.1 51.3 L59.6 66.3" stroke="#f4edd1" stroke-width="4.2" stroke-linecap="round" />
-    <rect x="44" y="52" width="12" height="20" rx="6" fill="#f4edd1" />
-  
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" width="64" height="64" viewBox="0 0 24 24" style="color: #e052bc;"><path fill="currentColor" d="m21.41 12.09l-3.91-1.74V5c0-.4-.23-.75-.59-.91l-4.5-2a.96.96 0 0 0-.81 0l-4.5 2c-.36.16-.59.52-.59.91v5.35L2.6 12.09c-.36.16-.59.52-.59.91v6c0 .4.23.75.59.91l4.5 2a.98.98 0 0 0 .82 0l4.09-1.82l4.09 1.82a.98.98 0 0 0 .82 0l4.5-2c.36-.16.59-.52.59-.91v-6c0-.4-.23-.75-.59-.91Zm-5.91-1.74L13 11.46V8.65l2.5-1.11zm-8 1.74l.44.19l2.72 1.21L7.5 14.9l-3.16-1.41zm1 4.56l2.5-1.11v2.81l-2.5 1.11zm8-1.74l-3.16-1.41l2.72-1.21l.44-.19l3.16 1.4zM12 4.1l3.16 1.4L12 6.91L8.84 5.5zm5.5 15.37v-2.81l2.5-1.11v2.81z"></path></svg>

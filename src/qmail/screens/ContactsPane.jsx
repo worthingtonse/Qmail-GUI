@@ -23,6 +23,7 @@ import {
   setContactFavorite,
 } from "../../api/qmailApiServices";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
+import { parseQmailAddress } from "../address/qmailAddress";
 
 const SERIAL_NUMBER_PATTERN = /^\d+$/;
 const CONTACT_AVATAR_TONE_COUNT = 12;
@@ -299,10 +300,44 @@ useEffect(() => {
         return;
       }
 
+      // A full QMail address ("51.254@bit", "51.254.0", "0.51.254.0")
+      // resolves locally to a serial number + denomination.
+      const parsedAddress = parseQmailAddress(value);
+      if (parsedAddress.ok) {
+        const result = await convertSnToEmail(
+          parsedAddress.serialNumber,
+          parsedAddress.denominationCode,
+        );
+        if (result.success) {
+          setLookupResult({
+            type: "remote",
+            message: "Address resolved by the local QMail service.",
+            contacts: [
+              {
+                id: String(parsedAddress.serialNumber),
+                name:
+                  `${result.firstName || ""} ${result.lastName || ""}`.trim() ||
+                  parsedAddress.canonical,
+                email: result.email || parsedAddress.canonical,
+                source: "lookup",
+              },
+            ],
+          });
+          return;
+        }
+
+        setLookupResult({
+          type: "empty",
+          message:
+            "No local contact matched, and the local service did not return a name for that address.",
+        });
+        return;
+      }
+
       setLookupResult({
         type: "empty",
         message:
-          "No local contact matched. Address-to-serial lookup is not available yet, and this helper does not query the DRD.",
+          "No local contact matched. Enter a QMail address (like 51.254@bit) or a serial number.",
       });
     } catch (err) {
       setLookupResult({
@@ -328,6 +363,13 @@ useEffect(() => {
       success: true,
       data: {
         serial_number: resolved.data.serial_number,
+        // Present when the input was a full QMail address (e.g.
+        // "51.254@bit"); absent for a bare serial number, in which case
+        // the backend default applies.
+        ...(resolved.data.denomination !== undefined && {
+          denomination: resolved.data.denomination,
+        }),
+        ...(resolved.data.class_name && { class_name: resolved.data.class_name }),
         first_name: firstName,
         last_name: lastName,
         description: (description || "").trim(),

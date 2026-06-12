@@ -126,13 +126,14 @@ const AddContactModal = ({ isOpen, onClose, onAddContact }) => {
                 setAddressOrSn(e.target.value);
                 setError("");
               }}
-              placeholder="e.g., 1234567"
+              placeholder="e.g., 51.254@bit"
               disabled={isSaving}
               aria-invalid={Boolean(error)}
               aria-describedby={error ? "add-contact-error" : "contact-address-help"}
             />
             <p id="contact-address-help" className="add-contact-modal__field-hint">
-              Serial numbers work now. QMail address lookup is not available yet.
+              A QMail address like 51.254@bit or 51.254.0, or a bare serial
+              number.
             </p>
             </div>
           </section>

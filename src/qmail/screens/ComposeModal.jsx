@@ -15,16 +15,34 @@ import {
   getDrafts,
   sendEmail,
   getTaskStatus,
+  getObjectTransferStatus,
+  cancelObjectTransfer,
+  resumeObjectTransfer,
   getContacts,
   getPopularContacts,
   getServers,
   saveDraft,
   updateDraft,
 } from "../../api/qmailApiServices";
+import { parseQmailAddress } from "../address/qmailAddress";
+import {
+  deriveUploadByteProgress,
+  extractTransferOperationIds,
+  extractTransferState,
+  formatByteProgress,
+  formatProgressPercentage,
+} from "../transferProgress";
+import { normalizeTransferError } from "../transferErrors";
+import {
+  forgetActiveTransfer,
+  rememberActiveTransfer,
+} from "../activeTransferRegistry";
 
 const MIN_RAIDA_FOR_SEND = 6;
 const SEND_POLL_TIMEOUT_MS = 60000;
 const MAX_SEND_POLL_FAILURES = 3;
+const utf8ByteLength = (value) =>
+  new TextEncoder().encode(String(value || "")).length;
 const COMPOSE_ADVANCED_STORAGE_KEY = "qmail.compose.showAdvanced";
 
 const readStoredShowAdvanced = () => {
@@ -103,28 +121,14 @@ const getEmailList = (...values) => {
   return [];
 };
 
-// Valid QMail denomination TLDs. The address must end in one of these.
-const QMAIL_ADDRESS_TLDS = ["bit", "byte", "kilo", "mega", "giga"];
-
 // Client-side mirror of the backend's qmail_address_validate() rules so the
-// user gets immediate feedback before a network round-trip. A valid QMail
-// address starts with '@', ends in a denomination TLD, and has at least two
-// '.' separators (e.g. @torch.glen.kilo). The backend remains the
-// authoritative validator and word-list check.
+// user gets immediate feedback before a network round-trip. Valid forms are
+// dotted decimal: "0.51.254.0", "51.254.0" or "51.254@bit" (see
+// src/qmail/address/qmailAddress.js — same rules and error strings as the
+// backend, which remains the authoritative validator).
 const validateQmailAddress = (address) => {
-  const value = String(address || "").trim();
-  if (!value) return "Address is empty";
-  if (!value.startsWith("@")) {
-    return "must start with '@' (e.g. @torch.glen.kilo)";
-  }
-  if ((value.match(/\./g) || []).length < 2) {
-    return "must contain at least two '.' (e.g. @torch.glen.kilo)";
-  }
-  const tld = value.split(".").pop().toLowerCase();
-  if (!QMAIL_ADDRESS_TLDS.includes(tld)) {
-    return "must end in .bit, .byte, .kilo, .mega or .giga";
-  }
-  return null;
+  const result = parseQmailAddress(address);
+  return result.ok ? null : result.error;
 };
 
 // Validate a parsed list of addresses; returns a user-facing message for the
@@ -201,10 +205,21 @@ const ComposeModal = ({
   const [, setTaskId] = useState(null);
   const [sendingStatus, setSendingStatus] = useState(null); // 'sending', 'completed', 'failed'
   const [progress, setProgress] = useState(0);
+  const [uploadByteProgress, setUploadByteProgress] = useState(null);
+  const [transferOperationIds, setTransferOperationIds] = useState([]);
+  const [transferState, setTransferState] = useState("");
+  const [transferControlPending, setTransferControlPending] = useState("");
+  const [transferFailure, setTransferFailure] = useState(null);
   const [error, setError] = useState(null);
+  // Invalid recipient-address modal: { message } when an address fails
+  // format validation on send. Unlike the inline `error` banner, this
+  // opens a dialog that also explains what a valid address looks like.
+  const [invalidAddress, setInvalidAddress] = useState(null);
 
   // BUG-04 FIX: Cancellation ref for polling loop
   const cancelledRef = useRef(false);
+  const uploadCancellationRequestedRef = useRef(false);
+  const transferOperationIdsRef = useRef([]);
   const autosaveTimerRef = useRef(null);
   const draftSavedTimerRef = useRef(null);
   const saveDraftInFlightRef = useRef(false);
@@ -402,6 +417,13 @@ const ComposeModal = ({
       setTaskId(null);
       setSendingStatus(null);
       setProgress(0);
+      setUploadByteProgress(null);
+      setTransferOperationIds([]);
+      transferOperationIdsRef.current = [];
+      setTransferState("");
+      setTransferControlPending("");
+      setTransferFailure(null);
+      uploadCancellationRequestedRef.current = false;
       setError(null);
       setIsSavingDraft(false);
       setDraftSaved(false);
@@ -668,7 +690,10 @@ const ComposeModal = ({
       setAttachments((prev) => {
         const known = new Set(prev.map((a) => a.path));
         const out = prev.slice();
-        let usedBytes = prev.reduce((sum, a) => sum + (a.path?.length || 0) + 1, 0);
+        let usedBytes = prev.reduce(
+          (sum, a) => sum + utf8ByteLength(a.path) + 1,
+          0,
+        );
 
         for (const entry of picked) {
           if (!entry || !entry.path) continue;
@@ -693,7 +718,7 @@ const ComposeModal = ({
             });
             continue;
           }
-          const wouldUse = usedBytes + entry.path.length + 1;
+          const wouldUse = usedBytes + utf8ByteLength(entry.path) + 1;
           if (wouldUse > MAX_ATTACHMENT_PATH_BYTES) {
             rejected.push({
               name,
@@ -964,12 +989,14 @@ const ComposeModal = ({
 
     // Validate every recipient address format before sending so the user
     // gets immediate, specific feedback (the backend also enforces this).
+    // Format problems open an explanatory modal rather than the inline
+    // error banner, so the user sees what a valid address looks like.
     const addressError =
       findInvalidRecipient(toList, "To") ||
       findInvalidRecipient(ccList, "Cc") ||
       findInvalidRecipient(bccList, "Bcc");
     if (addressError) {
-      setError(addressError);
+      setInvalidAddress({ message: addressError });
       return;
     }
 
@@ -982,15 +1009,124 @@ const ComposeModal = ({
       return;
     }
 
+    if (attachments.length > 0) {
+      if (typeof window.electronAPI?.statAttachments !== "function") {
+        setAttachError("Attachments can only be verified by the desktop app.");
+        return;
+      }
+      let currentFiles;
+      try {
+        currentFiles = await window.electronAPI.statAttachments(
+          attachments.map((attachment) => attachment.path),
+        );
+      } catch {
+        setAttachError("Could not verify the selected attachments.");
+        return;
+      }
+      if (!Array.isArray(currentFiles)) {
+        setAttachError("Could not verify the selected attachments.");
+        return;
+      }
+      const currentByPath = new Map(
+        currentFiles.map((entry) => [entry.path, entry]),
+      );
+      const changed = attachments.some((attachment) => {
+        const current = currentByPath.get(attachment.path);
+        return !current?.success || Number(current.size) !== Number(attachment.size);
+      });
+      if (changed) {
+        setAttachments((currentAttachments) =>
+          currentAttachments.map((attachment) => {
+            const current = currentByPath.get(attachment.path);
+            return current?.success ? { ...attachment, ...current } : attachment;
+          }),
+        );
+        setAttachError(
+          "An attachment was removed or changed after selection. Review the attachment list and send again.",
+        );
+        return;
+      }
+    }
+
     clearAutosaveTimer();
     setIsSending(true);
     setSendingStatus("sending");
     setSendProgress("Preparing email...");
+    setTransferOperationIds([]);
+    transferOperationIdsRef.current = [];
+    setTransferState("");
+    setTransferControlPending("");
+    setTransferFailure(null);
+    uploadCancellationRequestedRef.current = false;
+    const attachmentTotalBytes = attachments.reduce(
+      (total, attachment) =>
+        total +
+        (Number.isFinite(Number(attachment.size))
+          ? Math.max(0, Math.trunc(Number(attachment.size)))
+          : 0),
+      0,
+    );
+    setUploadByteProgress(
+      attachmentTotalBytes > 0
+        ? {
+            completedBytes: "0",
+            totalBytes: String(attachmentTotalBytes),
+            percentage: 0,
+            estimated: true,
+          }
+        : null,
+    );
     setError(null);
+    const knownOperationIds = new Set();
+    const uploadLabel =
+      attachments.length === 1
+        ? attachments[0].name || "Email attachment"
+        : attachments.length > 1
+          ? `${attachments.length} email attachments`
+          : subject.trim() || "Email send";
+    const rememberUploadOperations = (
+      operationIds,
+      state,
+      currentTaskId = null,
+      errorMessage = null,
+    ) => {
+      operationIds.forEach((operationId) => {
+        knownOperationIds.add(operationId);
+        rememberActiveTransfer({
+          operationId,
+          direction: "upload",
+          taskId: currentTaskId,
+          label: uploadLabel,
+          totalBytes: String(attachmentTotalBytes),
+          state,
+          error: errorMessage,
+        });
+      });
+      transferOperationIdsRef.current = [
+        ...new Set([...transferOperationIdsRef.current, ...operationIds]),
+      ];
+    };
 
-    const markSendFailed = (message) => {
-      const failureMessage = message || "Failed to send email";
+    const markSendFailed = (message, source = null) => {
+      const normalizedFailure =
+        source?.transferError ||
+        normalizeTransferError(source || {
+          state: "failed",
+          error: message,
+        }, {
+          fallbackMessage: message || "Failed to send email",
+          terminal: true,
+        });
+      const failureMessage =
+        normalizedFailure?.message || message || "Failed to send email";
+      rememberUploadOperations(
+        [...knownOperationIds],
+        "failed",
+        null,
+        failureMessage,
+      );
       setSendingStatus("failed");
+      setTransferFailure(normalizedFailure);
       setError(failureMessage);
       setSendProgress(failureMessage);
       setIsSending(false);
@@ -998,6 +1134,26 @@ const ComposeModal = ({
       if (onSendFailure) {
         onSendFailure(failureMessage);
       }
+    };
+
+    const markSendCancelled = () => {
+      rememberUploadOperations(
+        [...knownOperationIds],
+        "cancelled",
+        null,
+        "Upload cancelled.",
+      );
+      setSendingStatus("cancelled");
+      setTransferState("cancelled");
+      setTransferFailure(
+        normalizeTransferError({
+          state: "cancelled",
+          error: "Upload cancelled.",
+        }),
+      );
+      setSendProgress("Upload cancelled.");
+      setIsSending(false);
+      setTaskId(null);
     };
 
     try {
@@ -1016,6 +1172,20 @@ const ComposeModal = ({
       };
 
       const result = await sendEmail(emailData);
+      const initialOperationIds = extractTransferOperationIds(result.data);
+      const initialTransferState = extractTransferState(result.data);
+      rememberUploadOperations(
+        initialOperationIds,
+        initialTransferState || "queued",
+        result.data?.taskId || null,
+      );
+      if (initialOperationIds.length > 0) {
+        setTransferOperationIds(initialOperationIds);
+        transferOperationIdsRef.current = initialOperationIds;
+      }
+      if (initialTransferState) {
+        setTransferState(initialTransferState);
+      }
 
       if (result.success && result.data.taskId) {
         const currentTaskId = result.data.taskId;
@@ -1046,16 +1216,84 @@ const ComposeModal = ({
           if (taskResult.success) {
             consecutivePollFailures = 0;
             const { state, progress: currentProgress, message, isFinished, isSuccessful, error: taskError } = taskResult.data;
+            const discoveredOperationIds =
+              extractTransferOperationIds(taskResult.data);
+            const observedTransferState =
+              extractTransferState(taskResult.data);
+
+            if (discoveredOperationIds.length > 0) {
+              rememberUploadOperations(
+                discoveredOperationIds,
+                observedTransferState || state || "running",
+                currentTaskId,
+                taskResult.data.error,
+              );
+              setTransferOperationIds((current) => [
+                ...new Set([...current, ...discoveredOperationIds]),
+              ]);
+              transferOperationIdsRef.current = [
+                ...new Set([
+                  ...transferOperationIdsRef.current,
+                  ...discoveredOperationIds,
+                ]),
+              ];
+            }
+            if (observedTransferState) {
+              setTransferState(observedTransferState);
+              if (observedTransferState === "paused") {
+                const pausedFailure =
+                  taskResult.data.transferError ||
+                  normalizeTransferError({
+                    ...taskResult.data.result,
+                    state: "paused",
+                    error: taskResult.data.error || message,
+                  });
+                setTransferFailure(pausedFailure);
+                setSendingStatus("paused");
+                setSendProgress(
+                  pausedFailure?.message ||
+                    taskResult.data.error ||
+                    message ||
+                    "Upload paused. Resume when the connection is available.",
+                );
+              } else if (
+                observedTransferState === "cancelled" ||
+                observedTransferState === "cancelling"
+              ) {
+                setSendingStatus(observedTransferState);
+              } else {
+                setTransferFailure(null);
+                setSendingStatus("sending");
+              }
+            }
             
             setProgress(currentProgress || 0);
-            setSendProgress(message || "Processing...");
+            if (observedTransferState !== "paused") {
+              setSendProgress(message || "Processing...");
+            }
+            setUploadByteProgress(
+              deriveUploadByteProgress(
+                taskResult.data,
+                attachmentTotalBytes,
+              ),
+            );
             
             if (isFinished) {
               taskFinished = true; // Break the loop
               
               if (isSuccessful || state === "completed") {
+                knownOperationIds.forEach((operationId) =>
+                  forgetActiveTransfer(operationId),
+                );
                 setSendingStatus("completed");
+                setTransferFailure(null);
                 setSendProgress("Email sent successfully!");
+                setUploadByteProgress(
+                  deriveUploadByteProgress(
+                    { ...taskResult.data, isSuccessful: true },
+                    attachmentTotalBytes,
+                  ),
+                );
                 setTimeout(() => {
                   if (cancelledRef.current) return;
                   onSend(emailData);
@@ -1064,8 +1302,16 @@ const ComposeModal = ({
                   setSendProgress("");
                   setTaskId(null);
                 }, 1500);
+              } else if (
+                uploadCancellationRequestedRef.current ||
+                observedTransferState === "cancelled"
+              ) {
+                markSendCancelled();
               } else {
-                markSendFailed(taskError || message || "Failed to send email");
+                markSendFailed(
+                  taskError || message || "Failed to send email",
+                  taskResult.data,
+                );
               }
             }
           } else {
@@ -1076,20 +1322,46 @@ const ComposeModal = ({
 
             if (consecutivePollFailures >= MAX_SEND_POLL_FAILURES) {
               taskFinished = true;
-              markSendFailed(taskResult.error || "Failed to track email status");
+              if (uploadCancellationRequestedRef.current) {
+                markSendCancelled();
+              } else {
+                markSendFailed(
+                  taskResult.error || "Failed to track email status",
+                  taskResult,
+                );
+              }
             }
           }
         }
 
         if (!taskFinished && !cancelledRef.current) {
-          markSendFailed(
-            "Send is taking longer than expected. Check Sent in a few minutes.",
-          );
+          if (uploadCancellationRequestedRef.current) {
+            markSendCancelled();
+          } else {
+            markSendFailed(
+              "Send is taking longer than expected. Check Sent in a few minutes.",
+            );
+          }
         }
       } else if (result.success) {
         // Fallback if no taskId is provided but success is true
+        knownOperationIds.forEach((operationId) =>
+          forgetActiveTransfer(operationId),
+        );
         setSendingStatus("completed");
+        setTransferFailure(null);
         setSendProgress("Email sent successfully!");
+        setProgress(100);
+        setUploadByteProgress(
+          attachmentTotalBytes > 0
+            ? {
+                completedBytes: String(attachmentTotalBytes),
+                totalBytes: String(attachmentTotalBytes),
+                percentage: 100,
+                estimated: true,
+              }
+            : null,
+        );
         setTimeout(() => {
           if (cancelledRef.current) return;
           onSend(emailData);
@@ -1098,12 +1370,200 @@ const ComposeModal = ({
           setSendProgress("");
         }, 1500);
       } else {
-        throw new Error(result.error || "Failed to send email");
+        const sendError = new Error(result.error || "Failed to send email");
+        sendError.transferError = result.transferError || null;
+        throw sendError;
       }
     } catch (error) {
       console.error("Send error:", error);
-      markSendFailed(error.message || "Failed to send email");
+      markSendFailed(error.message || "Failed to send email", error);
     }
+  };
+
+  const handleCancelUpload = async () => {
+    const operationIds = [...transferOperationIdsRef.current];
+    if (
+      operationIds.length === 0 ||
+      transferControlPending
+    ) {
+      return;
+    }
+
+    setTransferControlPending("cancel");
+    uploadCancellationRequestedRef.current = true;
+    setSendingStatus("cancelling");
+    setTransferState("cancelling");
+    setSendProgress("Requesting upload cancellation...");
+    operationIds.forEach((operationId) =>
+      rememberActiveTransfer({
+        operationId,
+        direction: "upload",
+        state: "cancelling",
+      }),
+    );
+
+    const results = await Promise.all(
+      operationIds.map((operationId) =>
+        cancelObjectTransfer(operationId),
+      ),
+    );
+    const successfulIds = operationIds.filter(
+      (_operationId, index) => results[index]?.success,
+    );
+    const failedResults = results.filter((result) => !result.success);
+
+    if (successfulIds.length === 0) {
+      const cancellationError = results.find((result) => result.error);
+      uploadCancellationRequestedRef.current = false;
+      setSendingStatus("sending");
+      setTransferState("");
+      setTransferFailure(cancellationError?.transferError || null);
+      setError(
+        cancellationError?.error ||
+          "Could not cancel the upload.",
+      );
+      setSendProgress("Upload cancellation failed.");
+    } else {
+      successfulIds.forEach((operationId) =>
+        rememberActiveTransfer({
+          operationId,
+          direction: "upload",
+          state: "cancelling",
+        }),
+      );
+      if (failedResults.length > 0) {
+        const cancellationError = failedResults.find((result) => result.error);
+        setTransferFailure(cancellationError?.transferError || null);
+        setError(
+          cancellationError?.error ||
+            "Some upload transfers could not be cancelled.",
+        );
+        setSendProgress(
+          `Cancellation requested for ${successfulIds.length} of ${operationIds.length} transfers.`,
+        );
+      } else {
+        setSendProgress("Cancellation requested. Finishing active requests...");
+      }
+    }
+    setTransferControlPending("");
+  };
+
+  const handleResumeUpload = async () => {
+    const operationIds = [...transferOperationIdsRef.current];
+    if (
+      operationIds.length === 0 ||
+      transferControlPending
+    ) {
+      return;
+    }
+
+    setTransferControlPending("resume");
+    uploadCancellationRequestedRef.current = false;
+    setSendProgress("Resuming upload...");
+
+    const results = await Promise.all(
+      operationIds.map((operationId) =>
+        resumeObjectTransfer(operationId),
+      ),
+    );
+    const successfulIds = operationIds.filter(
+      (_operationId, index) => results[index]?.success,
+    );
+
+    if (successfulIds.length === 0) {
+      const resumeError = results.find((result) => result.error);
+      setTransferFailure(resumeError?.transferError || null);
+      setError(
+        resumeError?.error ||
+          "Could not resume the upload.",
+      );
+      setSendProgress("Upload remains paused.");
+    } else {
+      successfulIds.forEach((operationId) =>
+        rememberActiveTransfer({
+          operationId,
+          direction: "upload",
+          state: "uploading",
+          error: "",
+        }),
+      );
+      setSendingStatus("sending");
+      setTransferState("uploading");
+      setIsSending(true);
+      setTransferFailure(null);
+      setError(null);
+      setSendProgress("Upload resumed.");
+
+      void (async () => {
+        const deadline = Date.now() + SEND_POLL_TIMEOUT_MS;
+        while (!cancelledRef.current && Date.now() < deadline) {
+          const statuses = [];
+          for (const operationId of successfulIds) {
+            statuses.push(await getObjectTransferStatus(operationId));
+          }
+          const successfulStatuses = statuses
+            .filter((status) => status.success)
+            .map((status) => status.data);
+          if (successfulStatuses.length > 0) {
+            const completedBytes = successfulStatuses.reduce(
+              (total, status) => total + BigInt(status.completedBytes || "0"),
+              0n,
+            );
+            const totalBytes = successfulStatuses.reduce(
+              (total, status) => total + BigInt(status.totalBytes || "0"),
+              0n,
+            );
+            const percentage =
+              totalBytes > 0n
+                ? Number((completedBytes * 1000n) / totalBytes) / 10
+                : 0;
+            setUploadByteProgress({
+              completedBytes: completedBytes.toString(),
+              totalBytes: totalBytes.toString(),
+              percentage,
+              estimated: false,
+            });
+
+            const failedStatus = successfulStatuses.find(
+              (status) => status.isFinished && !status.isSuccessful,
+            );
+            if (failedStatus) {
+              const failure =
+                failedStatus.transferError ||
+                normalizeTransferError(failedStatus, { terminal: true });
+              setSendingStatus("failed");
+              setTransferState(failedStatus.state);
+              setTransferFailure(failure);
+              setError(failure?.message || failedStatus.error);
+              setSendProgress(
+                failure?.message || failedStatus.error || "Upload failed.",
+              );
+              setIsSending(false);
+              return;
+            }
+            if (
+              successfulStatuses.length === successfulIds.length &&
+              successfulStatuses.every((status) => status.isSuccessful)
+            ) {
+              setTransferState("completed");
+              setSendingStatus("sending");
+              setSendProgress(
+                "Attachment upload completed. Finalizing the email in the background.",
+              );
+              return;
+            }
+            if (successfulStatuses.some((status) => status.state === "paused")) {
+              setTransferState("paused");
+              setSendingStatus("paused");
+              setSendProgress("Upload paused again.");
+              return;
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      })();
+    }
+    setTransferControlPending("");
   };
   
   // Enhanced progress indicator
@@ -1122,6 +1582,8 @@ const ComposeModal = ({
             />
           );
         case "failed":
+        case "cancelled":
+        case "paused":
           return (
             <AlertCircle
               size={16}
@@ -1136,10 +1598,82 @@ const ComposeModal = ({
     return (
       <div className="compose-modal__send-progress">
         {getIcon()}
-        <span>{sendProgress}</span>
-        {progress > 0 && progress < 100 && (
-          <span>({Math.round(progress)}%)</span>
-        )}
+        <div className="compose-modal__send-progress-content">
+          <div className="compose-modal__send-progress-summary">
+            <span>{transferFailure?.title || sendProgress}</span>
+            {sendingStatus === "sending" && (
+              <strong>{formatProgressPercentage(progress)}%</strong>
+            )}
+          </div>
+          {transferFailure && (
+            <span className="compose-modal__transfer-error-message">
+              {transferFailure.message}
+            </span>
+          )}
+          {transferFailure?.detail && (
+            <span className="compose-modal__transfer-error-detail">
+              {transferFailure.detail}
+            </span>
+          )}
+          {uploadByteProgress && (
+            <>
+              <div
+                className="compose-modal__transfer-progress-track"
+                role="progressbar"
+                aria-label="Attachment upload progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={Math.round(uploadByteProgress.percentage)}
+              >
+                <span
+                  className="compose-modal__transfer-progress-fill"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, uploadByteProgress.percentage))}%`,
+                  }}
+                />
+              </div>
+              <span className="compose-modal__transfer-progress-bytes">
+                {uploadByteProgress.estimated ? "Approximately " : ""}
+                {formatByteProgress(uploadByteProgress)}
+              </span>
+            </>
+          )}
+          {transferOperationIds.length > 0 && (
+            <div className="compose-modal__transfer-controls">
+              {transferState === "paused" ? (
+                <button
+                  type="button"
+                  className="compose-modal__transfer-control"
+                  onClick={handleResumeUpload}
+                  disabled={Boolean(transferControlPending)}
+                  title="Resume upload"
+                >
+                  <RefreshCw
+                    size={14}
+                    className={
+                      transferControlPending === "resume" ? "spinning" : ""
+                    }
+                  />
+                  Resume
+                </button>
+              ) : (
+                isSending &&
+                transferState !== "cancelling" && (
+                  <button
+                    type="button"
+                    className="compose-modal__transfer-control compose-modal__transfer-control--danger"
+                    onClick={handleCancelUpload}
+                    disabled={Boolean(transferControlPending)}
+                    title="Cancel upload"
+                  >
+                    <X size={14} />
+                    Cancel
+                  </button>
+                )
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1217,16 +1751,19 @@ const ComposeModal = ({
         aria-labelledby="compose-modal-title"
       >
         <header className="compose-modal__header">
-          <h3 id="compose-modal-title" className="compose-modal__title">
-            {(() => {
-              const mode = composeContext?.mode;
-              if (mode === "draft") return "Edit Draft";
-              if (mode === "reply") return "Reply";
-              if (mode === "replyAll") return "Reply All";
-              if (mode === "forward") return "Forward";
-              return "Compose Email";
-            })()}
-          </h3>
+          <div className="compose-modal__header-main">
+            <h3 id="compose-modal-title" className="compose-modal__title">
+              {(() => {
+                const mode = composeContext?.mode;
+                if (mode === "draft") return "Edit Draft";
+                if (mode === "reply") return "Reply";
+                if (mode === "replyAll") return "Reply All";
+                if (mode === "forward") return "Forward";
+                return "Compose Email";
+              })()}
+            </h3>
+            {renderProgressIndicator()}
+          </div>
           <button
             type="button"
             className="compose-modal__close-button"
@@ -1423,9 +1960,6 @@ const ComposeModal = ({
             )}
           </div>
 
-          {/* Enhanced Progress indicator */}
-          {renderProgressIndicator()}
-
           {/* gpt-batch5 #3: attachments aren't persisted with drafts
               (backend ticket CORE-N). Without this warning, a user
               who attached files and clicked Save Draft would expect
@@ -1512,6 +2046,62 @@ const ComposeModal = ({
           </button>
         </footer>
       </section>
+
+      {/* Invalid QMail address explainer modal */}
+      {invalidAddress && (
+        <div
+          className="compose-modal__address-error-overlay"
+          role="presentation"
+          onClick={() => setInvalidAddress(null)}
+        >
+          <div
+            className="compose-modal__address-error-dialog glass-container"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="compose-invalid-address-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h4 id="compose-invalid-address-title">
+              <AlertCircle size={18} />
+              Invalid QMail address
+            </h4>
+            <p className="compose-modal__address-error-reason">
+              {invalidAddress.message}
+            </p>
+            <div className="compose-modal__address-error-help">
+              <p>A valid QMail address looks like one of these:</p>
+              <ul>
+                <li>
+                  <code>51.254@bit</code> — serial number, then{" "}
+                  <code>@</code> and the denomination word (
+                  <code>bit</code>, <code>byte</code>, <code>kilo</code>,{" "}
+                  <code>mega</code> or <code>giga</code>)
+                </li>
+                <li>
+                  <code>51.254.0</code> — all numbers, the last one is the
+                  denomination code (0–4)
+                </li>
+                <li>
+                  <code>0.51.254.0</code> — the same, with leading zeros
+                  written out
+                </li>
+              </ul>
+              <p>
+                Each number is 0–255. Separate multiple recipients with
+                commas.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="compose-modal__address-error-button"
+              onClick={() => setInvalidAddress(null)}
+              autoFocus
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -8,8 +8,8 @@ const SenderAvatar = ({ sender, email, status, senderSn, senderDenominationCode 
     if (!name) return "?";
     // Show "?" for unknown/unresolved senders
     if (name === "Unknown Sender" || name === "Unknown" || name.startsWith("Unknown")) return "?";
-    // Addresses are "@torch.bay.kilo" — skip the leading "@" (and any other
-    // leading punctuation/whitespace) and show the first real letter/digit.
+    // Addresses are dotted decimal ("51.254@bit") — show the first
+    // letter/digit (a contact name gives a letter, an address a digit).
     const match = name.match(/[A-Za-z0-9]/);
     return match ? match[0].toUpperCase() : "?";
   };

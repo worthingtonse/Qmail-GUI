@@ -697,6 +697,143 @@
   text-align: center;
 }
 
+.reading-pane__transfer-progress-track {
+  position: relative;
+  width: 100%;
+  height: 0.4375rem;
+  margin-top: var(--space-sm);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--tertiary-bg);
+}
+
+.reading-pane__transfer-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-primary);
+  transition: width calc(180ms * var(--motion-scale)) linear;
+}
+
+.reading-pane__transfer-progress-bytes {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.reading-pane__transfer-progress-error {
+  margin: var(--space-xs) 0 0;
+  color: var(--status-error);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+.reading-pane__transfer-progress-detail {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.reading-pane__transfer-controls {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+.reading-pane__transfer-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-height: 2rem;
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reading-pane__transfer-control:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.reading-pane__transfer-control--danger:hover:not(:disabled) {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.reading-pane__transfer-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.reading-pane__download-location {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-xs) / 2);
+  margin-top: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--tertiary-bg);
+}
+
+.reading-pane__download-location-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.reading-pane__download-location-label {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.reading-pane__download-location-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--space-xs) / 1.5) var(--space-sm);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color calc(250ms * var(--motion-scale)) ease,
+    border-color calc(250ms * var(--motion-scale)) ease,
+    color calc(250ms * var(--motion-scale)) ease;
+}
+
+.reading-pane__download-location-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.reading-pane__download-location-path {
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* On-demand attachment states: PENDING (not yet downloaded) + downloading. */
 .reading-pane__attachment--pending {
   border-style: dashed;
@@ -779,6 +916,15 @@
   .reading-pane__folder-select-wrap {
     justify-content: center;
   }
+
+  .reading-pane__download-location-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .reading-pane__download-location-button {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -801,5 +947,9 @@
 
   .reading-pane__decrypt-scan {
     display: none;
+  }
+
+  .reading-pane__transfer-progress-fill {
+    transition: none;
   }
 }

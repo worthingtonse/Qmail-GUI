@@ -186,23 +186,6 @@
   cursor: wait;
 }
 
-.wallet-action-modal__receipt-panel {
-  overflow: hidden;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  background: var(--card-bg);
-}
-
-.wallet-action-modal__receipt-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
 .wallet-action-modal__receipt-header div {
   display: flex;
   min-width: 0;
@@ -224,27 +207,6 @@
   white-space: nowrap;
 }
 
-.wallet-action-modal__receipt-close {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-}
-
-.wallet-action-modal__receipt-close:hover {
-  border-color: var(--border-medium);
-  background: var(--card-hover);
-  color: var(--text-primary);
-}
-
 .wallet-action-modal__receipt-loading {
   display: inline-flex;
   align-items: center;
@@ -255,17 +217,47 @@
 }
 
 .wallet-action-modal__receipt-content {
-  max-height: 18rem;
+  flex: 1;
+  min-height: 0;
   margin: 0;
   overflow: auto;
-  padding: var(--space-md);
+  padding: var(--space-lg);
   background: var(--secondary-bg);
   color: var(--text-secondary);
   font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Receipt shown as its own modal on top of the wallet action modal. */
+.wallet-action-modal__receipt-overlay {
+  z-index: 1100;
+}
+
+.wallet-action-modal__receipt-modal {
+  display: flex;
+  width: min(640px, 92vw);
+  max-height: 80vh;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wallet-action-modal__receipt-modal .wallet-action-modal__receipt-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.wallet-action-modal__receipt-modal .wallet-action-modal__receipt-loading {
+  flex: 1;
 }
 
 .wallet-action-modal__footer {
@@ -309,8 +301,7 @@
 @media (prefers-reduced-motion: reduce) {
   .wallet-action-modal__method-tab,
   .wallet-action-modal__picker-button,
-  .wallet-action-modal__locker-result button,
-  .wallet-action-modal__receipt-close {
+  .wallet-action-modal__locker-result button {
     transition: none;
   }
 }

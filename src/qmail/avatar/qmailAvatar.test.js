@@ -2,40 +2,40 @@ import { describe, expect, it } from "vitest";
 import {
   getQmailAvatarAssetHref,
   getQmailAvatarModel,
+  getQmailAvatarSymbolIndices,
   getQmailAvatarTierName,
-  getQmailAvatarWordIndices,
 } from "./qmailAvatar";
 
-describe("getQmailAvatarWordIndices", () => {
-  it("splits the serial number into adjective and noun bytes", () => {
-    expect(getQmailAvatarWordIndices(0x1234)).toEqual({
-      numberPrefix: 0,
-      adjectiveIndex: 0x12,
-      nounIndex: 0x34,
-    });
+describe("getQmailAvatarSymbolIndices", () => {
+  it("returns one symbol per significant serial byte (zeros dropped)", () => {
+    // Mirrors the address forms: 51.254@bit / 1.0.254@giga / 254@byte
+    expect(getQmailAvatarSymbolIndices(0x0033fe)).toEqual([51, 254]);
+    expect(getQmailAvatarSymbolIndices(0x0100fe)).toEqual([1, 0, 254]);
+    expect(getQmailAvatarSymbolIndices(0x0000fe)).toEqual([254]);
   });
 
-  it("accepts numeric strings", () => {
-    expect(getQmailAvatarWordIndices("4660")).toEqual({
-      numberPrefix: 0,
-      adjectiveIndex: 0x12,
-      nounIndex: 0x34,
-    });
+  it("keeps inner zero bytes (only LEADING zeros are dropped)", () => {
+    expect(getQmailAvatarSymbolIndices(0x010000)).toEqual([1, 0, 0]);
+    expect(getQmailAvatarSymbolIndices(0x00ff00)).toEqual([255, 0]);
   });
 
-  it("extracts the third byte as a numeric prefix for 3-byte serials", () => {
-    // 0x01DFFF = 122879 -> prefix 1, adjective 0xDF, noun 0xFF (@1.silk.square.kilo)
-    expect(getQmailAvatarWordIndices(0x01dfff)).toEqual({
-      numberPrefix: 0x01,
-      adjectiveIndex: 0xdf,
-      nounIndex: 0xff,
-    });
+  it("covers the full 3-byte range", () => {
+    expect(getQmailAvatarSymbolIndices(0xffffff)).toEqual([255, 255, 255]);
+    expect(getQmailAvatarSymbolIndices(1)).toEqual([1]);
   });
 
-  it("rejects empty or non-positive values", () => {
-    expect(getQmailAvatarWordIndices(0)).toBeNull();
-    expect(getQmailAvatarWordIndices(null)).toBeNull();
-    expect(getQmailAvatarWordIndices("")).toBeNull();
+  it("accepts numeric strings (API responses often carry strings)", () => {
+    expect(getQmailAvatarSymbolIndices("13310")).toEqual([51, 254]);
+  });
+
+  it("rejects serial 0 (reserved) and out-of-range values", () => {
+    expect(getQmailAvatarSymbolIndices(0)).toBeNull();
+    expect(getQmailAvatarSymbolIndices(0x1000000)).toBeNull();
+    expect(getQmailAvatarSymbolIndices(-1)).toBeNull();
+    expect(getQmailAvatarSymbolIndices(1.5)).toBeNull();
+    expect(getQmailAvatarSymbolIndices(null)).toBeNull();
+    expect(getQmailAvatarSymbolIndices(undefined)).toBeNull();
+    expect(getQmailAvatarSymbolIndices("")).toBeNull();
   });
 });
 
@@ -48,34 +48,56 @@ describe("getQmailAvatarTierName", () => {
     expect(getQmailAvatarTierName(4)).toBe("giga");
   });
 
+  it("accepts numeric strings", () => {
+    expect(getQmailAvatarTierName("2")).toBe("kilo");
+  });
+
   it("rejects out-of-range denomination codes", () => {
     expect(getQmailAvatarTierName(-1)).toBeNull();
     expect(getQmailAvatarTierName(5)).toBeNull();
+    expect(getQmailAvatarTierName(0xff)).toBeNull(); // fractional denominations
     expect(getQmailAvatarTierName("banana")).toBeNull();
-  });
-});
-
-describe("getQmailAvatarModel", () => {
-  it("returns a complete avatar model for valid sender data", () => {
-    expect(getQmailAvatarModel({ serialNumber: 0x1337, denominationCode: 4 })).toEqual({
-      numberPrefix: 0,
-      adjectiveIndex: 0x13,
-      nounIndex: 0x37,
-      tierName: "giga",
-    });
-  });
-
-  it("returns null when either serial number or denomination code is missing", () => {
-    expect(getQmailAvatarModel({ serialNumber: null, denominationCode: 2 })).toBeNull();
-    expect(getQmailAvatarModel({ serialNumber: 0x1337, denominationCode: null })).toBeNull();
+    expect(getQmailAvatarTierName(null)).toBeNull();
+    expect(getQmailAvatarTierName("")).toBeNull();
   });
 });
 
 describe("getQmailAvatarAssetHref", () => {
-  it("builds stable asset paths", () => {
-    expect(getQmailAvatarAssetHref("adjectives", 7)).toContain("/qmail-avatars/adjectives/007.svg");
-    expect(getQmailAvatarAssetHref("nouns", 42)).toContain("/qmail-avatars/nouns/042.svg");
-    expect(getQmailAvatarAssetHref("frame", "mega")).toContain("/qmail-avatars/frames/mega.svg");
+  it("builds frame hrefs from the tier name", () => {
+    expect(getQmailAvatarAssetHref("frame", "mega")).toContain(
+      "/qmail-avatars/frames/mega.svg",
+    );
+  });
+
+  it("builds zero-padded symbol hrefs from NewAvatars", () => {
+    expect(getQmailAvatarAssetHref("symbol", 7)).toContain(
+      "/qmail-avatars/NewAvatars/007.svg",
+    );
+    expect(getQmailAvatarAssetHref("symbol", 254)).toContain(
+      "/qmail-avatars/NewAvatars/254.svg",
+    );
+  });
+
+  it("returns null for unknown layer kinds (old word layers are gone)", () => {
+    expect(getQmailAvatarAssetHref("adjectives", 7)).toBeNull();
+    expect(getQmailAvatarAssetHref("nouns", 42)).toBeNull();
   });
 });
 
+describe("getQmailAvatarModel", () => {
+  it("combines tier name and symbol indices", () => {
+    expect(
+      getQmailAvatarModel({ serialNumber: 0x0033fe, denominationCode: 0 }),
+    ).toEqual({
+      tierName: "bit",
+      symbolIndices: [51, 254],
+    });
+  });
+
+  it("returns null when either part is invalid", () => {
+    expect(getQmailAvatarModel({ serialNumber: 0, denominationCode: 0 })).toBeNull();
+    expect(getQmailAvatarModel({ serialNumber: 0x1337, denominationCode: 9 })).toBeNull();
+    expect(getQmailAvatarModel({ serialNumber: null, denominationCode: 2 })).toBeNull();
+    expect(getQmailAvatarModel({ serialNumber: 0x1337, denominationCode: null })).toBeNull();
+  });
+});

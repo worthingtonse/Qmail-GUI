@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-
-      <path d="M26 80 V48 C26 30, 74 30, 74 48 V80" fill="#f4edd1" />
-      <path d="M38 80 V58 C38 48, 62 48, 62 58 V80" fill="#23364b" />
-      <path d="M34 42 H66" stroke="#fff4bf" stroke-width="4" stroke-linecap="round" />
-    
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" width="64" height="64" viewBox="0 0 16 16" style="color: #e0e052;"><g fill="none"><g clip-path="url(#iconifyReact2335)"><path fill="currentColor" d="M5.879.929a3 3 0 0 1 4.242 0l4.95 4.95a3 3 0 0 1 0 4.242l-4.95 4.95a3 3 0 0 1-4.242 0l-4.95-4.95a3 3 0 0 1 0-4.242z"></path></g><defs><clipPath id="iconifyReact2335"><path fill="currentColor" d="M0 0h16v16H0z"></path></clipPath></defs></g></svg>

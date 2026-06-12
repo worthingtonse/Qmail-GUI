@@ -13,12 +13,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filename) => ipcRenderer.invoke('read-file', filename),
   // BUG-08 FIX: Get home directory for path expansion
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
+  getDownloadsDir: () => ipcRenderer.invoke('get-downloads-dir'),
+  getBackendDataDir: () => ipcRenderer.invoke('get-backend-data-dir'),
+  revealPath: (targetPath) => ipcRenderer.invoke('reveal-path', targetPath),
+  getApiToken: () => ipcRenderer.invoke('get-api-token'),
+  listSoundFiles: () => ipcRenderer.invoke('list-sound-files'),
   // FIX-02 (Batch 5): open a multi-select file picker for ComposeModal
   // attachments. Resolves to an Array<{path, name, size}>, or [] if
   // the user cancels. ComposeModal checks for window.electronAPI
   // before calling — falls back to a disabled-button state in the
   // browser/Vite build.
   pickAttachments: () => ipcRenderer.invoke('compose:pickFiles'),
+  statAttachments: (filePaths) => ipcRenderer.invoke('compose:statFiles', filePaths),
   pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
   pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
   onThemeSelect: (callback) => {

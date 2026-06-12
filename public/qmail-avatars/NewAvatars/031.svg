@@ -1,9 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-
-    <rect x="24" y="38" width="52" height="34" rx="4" fill="#f4edd1" />
-    <rect x="34" y="48" width="32" height="16" rx="3" fill="#23364b" />
-    <circle cx="34" cy="44" r="2.8" fill="#fff4bf" />
-    <circle cx="42" cy="44" r="2.8" fill="#fff4bf" />
-    <path d="M42 34 C40 28, 40 24, 42 20 M50 34 C48 28, 48 24, 50 20 M58 34 C56 28, 56 24, 58 20" stroke="#fff4bf" stroke-width="3.2" stroke-linecap="round" />
-  
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" width="64" height="64" viewBox="0 0 48 48" style="color: #e052da;"><defs><mask id="iconifyReact1227"><g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"><rect width="36" height="36" x="6" y="6" fill="#fff" stroke="#fff" rx="3"></rect><path fill="#000" stroke="#000" d="M14 14h20v20H14z"></path><path stroke="#000" d="M34 23L23 34m2-20L14 25m20-11L14 34m0-12v12h12m-4-20h12v12"></path></g></mask></defs><path fill="currentColor" d="M0 0h48v48H0z" mask="url(#iconifyReact1227)"></path></svg>

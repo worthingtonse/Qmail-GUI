@@ -11,6 +11,11 @@ import {
   LogOut,
   AlertTriangle,
   Server,
+  Bell,
+  BellOff,
+  Music2,
+  Volume2,
+  Play,
   // Heart, <--- REMOVED with FIX-05 (Server Status section gone)
   Wifi,
   WifiOff,
@@ -20,6 +25,7 @@ import {
   // healWallet, <--- REMOVED with FIX-10 interim (gpt-batch1)
   getServers,
 } from "../../api/qmailApiServices";
+import soundService from "../../api/soundService";
 import { isLocalStorageAvailable } from "../skipAutoRestore";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { ThemePicker } from "../../theme/ThemePicker";
@@ -70,6 +76,188 @@ const ComingSoonToggle = ({ title, description }) => (
     </div>
   </div>
 );
+
+const DEFAULT_SOUND_FILE = "ding-80828.mp3";
+const FALLBACK_SOUND_FILES = [
+  DEFAULT_SOUND_FILE,
+  "floraphonic-arcade-ui-1-229498.mp3",
+  "driken5482-retro-coin-3-236679.mp3",
+  "u_jlnmxtfupk-notice-313085.mp3",
+];
+
+const buildSoundLabel = (filename) => {
+  const base = String(filename || "").replace(/\.[^.]+$/, "");
+  const cleaned = base.replace(/[._-]+/g, " ").trim();
+  if (!cleaned) return filename || "Sound";
+  return cleaned.replace(/\b\w/g, (match) => match.toUpperCase());
+};
+
+const SoundSettings = () => {
+  const initialSettings = soundService.getSettings();
+  const [enabled, setEnabled] = useState(initialSettings.isEnabled);
+  const [volume, setVolume] = useState(Math.round(initialSettings.volume * 100));
+  const [availableSounds, setAvailableSounds] = useState([]);
+  const [selectedSoundFile, setSelectedSoundFile] = useState(
+    soundService.getMailSoundFile(),
+  );
+  const [soundLoading, setSoundLoading] = useState(true);
+
+  const handleToggle = () => {
+    const next = !enabled;
+    setEnabled(next);
+    soundService.setEnabled(next);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSounds = async () => {
+      try {
+        const remoteSounds = window.electronAPI?.listSoundFiles
+          ? await window.electronAPI.listSoundFiles()
+          : [];
+        if (cancelled) return;
+
+        const sounds = Array.isArray(remoteSounds) && remoteSounds.length > 0
+          ? remoteSounds
+          : FALLBACK_SOUND_FILES.map((filename) => ({
+              filename,
+              label: buildSoundLabel(filename),
+              src: `/sounds/${encodeURIComponent(filename)}`,
+            }));
+
+        setAvailableSounds(sounds);
+
+        const current = soundService.getMailSoundFile();
+        const next = sounds.some((sound) => sound.filename === current)
+          ? current
+          : sounds[0]?.filename || DEFAULT_SOUND_FILE;
+
+        if (next && next !== current) {
+          soundService.setMailSoundFile(next);
+        }
+        setSelectedSoundFile(next);
+      } catch (error) {
+        if (!cancelled) {
+          const fallbackSounds = FALLBACK_SOUND_FILES.map((filename) => ({
+            filename,
+            label: buildSoundLabel(filename),
+            src: `/sounds/${encodeURIComponent(filename)}`,
+          }));
+          setAvailableSounds(fallbackSounds);
+          const next = fallbackSounds[0]?.filename || DEFAULT_SOUND_FILE;
+          soundService.setMailSoundFile(next);
+          setSelectedSoundFile(next);
+        }
+      } finally {
+        if (!cancelled) {
+          setSoundLoading(false);
+        }
+      }
+    };
+
+    loadSounds();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleVolumeChange = (event) => {
+    const next = Number(event.target.value);
+    setVolume(next);
+    soundService.setVolume(next / 100);
+  };
+
+  const handleSoundChange = (event) => {
+    const next = event.target.value;
+    setSelectedSoundFile(next);
+    soundService.setMailSoundFile(next);
+  };
+
+  const handlePreview = () => {
+    soundService.playMailReceived({ force: true });
+  };
+
+  return (
+    <div className="account-pane__setting-item">
+      <div className="account-pane__setting-info">
+        <div className="account-pane__setting-title">Mail Sound Alerts</div>
+        <div className="account-pane__setting-description">
+          Play a chime when QMail detects a newly received message.
+        </div>
+      </div>
+
+      <div className="account-pane__setting-control account-pane__sound-control">
+        <div className="account-pane__sound-actions">
+          <button
+            type="button"
+            className={
+              "account-pane__toggle account-pane__sound-toggle" +
+              (enabled ? " account-pane__toggle--active" : "")
+            }
+            onClick={handleToggle}
+            aria-pressed={enabled}
+            aria-label={enabled ? "Disable mail sound alerts" : "Enable mail sound alerts"}
+            title={enabled ? "Mail sound alerts enabled" : "Mail sound alerts disabled"}
+          >
+            {enabled ? <Bell size={14} /> : <BellOff size={14} />}
+          </button>
+          <span className="account-pane__sound-state">
+            {enabled ? "On" : "Off"}
+          </span>
+          <button
+            type="button"
+            className="btn btn--secondary account-pane__sound-preview"
+            onClick={handlePreview}
+            title="Play a preview sound"
+          >
+            <Play size={14} />
+            Preview
+          </button>
+        </div>
+
+        <label className="account-pane__sound-picker" htmlFor="mail-sound-file">
+          <span className="account-pane__sound-picker-label">
+            <Music2 size={16} />
+            Sound
+          </span>
+          <select
+            id="mail-sound-file"
+            className="account-pane__sound-select"
+            value={selectedSoundFile}
+            onChange={handleSoundChange}
+            disabled={soundLoading || availableSounds.length === 0}
+          >
+            {availableSounds.map((sound) => (
+              <option key={sound.filename} value={sound.filename}>
+                {sound.label || buildSoundLabel(sound.filename)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="account-pane__sound-volume" htmlFor="mail-sound-volume">
+          <span className="account-pane__sound-volume-label">
+            <Volume2 size={16} />
+            Volume
+          </span>
+          <input
+            id="mail-sound-volume"
+            className="account-pane__sound-range"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={volume}
+            onChange={handleVolumeChange}
+            aria-label="Mail sound volume"
+          />
+          <span className="account-pane__sound-volume-value">{volume}%</span>
+        </label>
+      </div>
+    </div>
+  );
+};
 
 const buildQmailServerStats = (servers) => {
   const onlineCount = servers.filter((s) => s.is_available === true).length;
@@ -496,10 +684,7 @@ const AccountPane = ({ userAccount, onSignOut }) => {
 
           <div className="account-pane__settings-grid">
             <ThemePicker />
-            <ComingSoonToggle
-              title="Email Notifications"
-              description="Receive email alerts for account activities"
-            />
+            <SoundSettings />
             <ComingSoonToggle
               title="Auto-Sync"
               description="Automatically sync CloudCoin balance with RAIDA network"

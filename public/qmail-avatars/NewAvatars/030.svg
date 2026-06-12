@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-
-    <path d="M28 64 C28 48, 38 40, 54 40 H64 V50 H56 V62 C56 70, 50 76, 42 76 H32 Z" fill="#f4edd1" />
-    <path d="M56 60 H72" stroke="#fff4bf" stroke-width="4" stroke-linecap="round" />
-    <circle cx="76" cy="60" r="6" stroke="#fff4bf" stroke-width="3" />
-    <path d="M30 76 H44" stroke="#fff4bf" stroke-width="4" stroke-linecap="round" />
-  
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" width="64" height="64" viewBox="0 0 256 256" style="color: #52e0bd;"><path fill="currentColor" d="m211.84 134.81l-59.79 60.47a15.75 15.75 0 0 1-11.2 4.68H75.32l-29.66 29.7a8 8 0 0 1-11.32-11.32l22.59-22.58L124.7 128H209a4 4 0 0 1 2.84 6.81m4.86-104.24a64 64 0 0 0-85.9 4.14l-9.6 9.48A4 4 0 0 0 120 47v63l55-55a8 8 0 0 1 11.31 11.31L140.71 112h88.38a4 4 0 0 0 3.56-2.16a64.08 64.08 0 0 0-15.95-79.27M62.83 167.23L104 126.06v-55.3a4 4 0 0 0-6.81-2.84L60.69 104A15.9 15.9 0 0 0 56 115.31v49.09a4 4 0 0 0 6.83 2.83"></path></svg>

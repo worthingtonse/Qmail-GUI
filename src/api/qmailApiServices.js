@@ -1,6 +1,12 @@
 // --- src/api/qmailApiServices.js ---
 // This file contains all QMail-specific API call functions.
 
+import {
+  formatQmailAddress,
+  parseQmailAddress,
+} from "../qmail/address/qmailAddress";
+import { normalizeTransferError } from "../qmail/transferErrors";
+
 // Port resolution priority:
 //   1. ?backendPort=N in the URL — set by Electron at boot to support
 //      multi-instance (every QMail.exe picks its own free port).
@@ -85,7 +91,10 @@ const handleResponse = async (response) => {
       data,
       `Server responded with ${response.status}`,
     );
-    throw new Error(backendError);
+    const error = new Error(backendError);
+    error.httpStatus = response.status;
+    error.apiData = data;
+    throw error;
   }
 
   return data;
@@ -169,8 +178,17 @@ const getSenderAddress = (source = {}, fallback = "Unknown Sender") => {
 
   if (address) return address.trim();
 
+  // No text address from the backend: synthesize the canonical
+  // dotted-decimal form ("51.254@bit") when we know both the serial
+  // number and the denomination code; fall back to the bare SN.
   const senderSn = getSenderSerialNumber(source);
-  if (senderSn) return String(senderSn);
+  if (senderSn) {
+    const canonical = formatQmailAddress(
+      senderSn,
+      getSenderDenominationCode(source),
+    );
+    return canonical || String(senderSn);
+  }
 
   const serialText = [source.senderEmail, source.from, source.sender].find(
     (value) => typeof value === "string" && isSerialNumberText(value),
@@ -229,7 +247,8 @@ const withRecipientFields = (source = {}) => {
     source.recipient_address.trim().length > 0
       ? source.recipient_address.trim()
       : recipientSn
-      ? String(recipientSn)
+      ? formatQmailAddress(recipientSn, recipientDenominationCode) ||
+        String(recipientSn)
       : "";
   const recipientCount = readNumericApiField(source.recipient_count) ?? 0;
 
@@ -353,8 +372,12 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0, sort
         subject: email.subject || "No Subject",
         ...withSenderFields(email),
         ...withRecipientFields(email),
-        // API-FIX: email.ReceivedTimestamp → email.received_timestamp, removed SentTimestamp
-        timestamp: email.received_timestamp,
+        // The inbox time should be when the SENDER sent the mail (sent_timestamp,
+        // carried in the tell from PING/PEEK), not when we downloaded it. Older
+        // mail received before the backend stored this has sent_timestamp = 0;
+        // fall back to received_timestamp for those.
+        timestamp: email.sent_timestamp || email.received_timestamp,
+        sentTimestamp: email.sent_timestamp || null,
         receivedTimestamp: email.received_timestamp,
         isRead: email.is_read || false,
         isStarred: email.is_starred || false,
@@ -655,6 +678,16 @@ export const getTaskStatus = async (taskId) => {
       const taskStatus = p.status || '';
       const isTerminal = ['completed', 'success', 'failed', 'error', 'cancelled', 'timeout'].includes(taskStatus);
       const isSuccess = ['completed', 'success'].includes(taskStatus);
+      const transferError = isSuccess
+        ? null
+        : normalizeTransferError(
+            {
+              ...(p.data && typeof p.data === "object" ? p.data : {}),
+              state: taskStatus,
+              error: p.message || null,
+            },
+            { terminal: isTerminal },
+          );
       return {
         success: true,
         data: {
@@ -664,7 +697,10 @@ export const getTaskStatus = async (taskId) => {
           progress: p.progress || 0,
           message: p.message || '',
           result: p.data || null,
-          error: isSuccess ? null : (p.message || null),
+          error: isSuccess
+            ? null
+            : transferError?.message || p.message || null,
+          transferError,
           isFinished: isTerminal,
           isSuccessful: isSuccess,
         },
@@ -677,6 +713,382 @@ export const getTaskStatus = async (taskId) => {
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch task status.`;
     return { success: false, error: errorMessage };
   }
+};
+
+const OBJECT_TRANSFER_ID_PATTERN = /^[0-9a-f]{32}$/i;
+
+// R-2 hardening: the object-transfer endpoints require the per-session token
+// the Electron main process generated and gave to core.exe at spawn. Cached
+// after the first IPC round-trip; empty in browser/Vite builds, where the
+// backend has no token configured and accepts the requests without it.
+let cachedApiSessionToken = null;
+const getObjectTransferAuthHeaders = async () => {
+  if (cachedApiSessionToken === null) {
+    try {
+      cachedApiSessionToken =
+        (await window.electronAPI?.getApiToken?.()) || "";
+    } catch {
+      cachedApiSessionToken = "";
+    }
+  }
+  return cachedApiSessionToken
+    ? { Authorization: `Bearer ${cachedApiSessionToken}` }
+    : {};
+};
+const OBJECT_TRANSFER_TERMINAL_STATES = new Set([
+  "completed",
+  "cancelled",
+  "failed",
+  "error",
+  "timeout",
+  "aborted",
+]);
+
+const normalizeUnsignedDecimalString = (value) => {
+  const text = String(value ?? "0").trim();
+  return /^\d+$/.test(text) ? text : "0";
+};
+
+const normalizeObjectTransferStatus = (data, requestedOperationId) => {
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid object transfer status response");
+  }
+  if (data.success === false) {
+    const error = new Error(
+      extractApiErrorMessage(data, "Object transfer status lookup failed"),
+    );
+    error.apiData = data;
+    throw error;
+  }
+
+  const state = String(data.state || "").trim().toLowerCase();
+  if (!state) {
+    throw new Error("Object transfer status response is missing state");
+  }
+
+  const progressValue = Number(data.progress);
+  const progress = Number.isFinite(progressValue)
+    ? Math.min(100, Math.max(0, Math.trunc(progressValue)))
+    : 0;
+  const isFinished = OBJECT_TRANSFER_TERMINAL_STATES.has(state);
+  const isSuccessful = state === "completed";
+  const transferError = isSuccessful
+    ? null
+    : normalizeTransferError(data, {
+        terminal: isFinished,
+      });
+
+  return {
+    ...data,
+    operationId: data.operation_id || requestedOperationId,
+    taskId: data.task_id || null,
+    transferId: data.transfer_id || null,
+    objectId: data.object_id || null,
+    sourcePath: data.source_path || null,
+    destinationPath: data.destination_path || null,
+    temporaryPath: data.temporary_path || null,
+    totalBytes: normalizeUnsignedDecimalString(data.total_bytes),
+    completedBytes: normalizeUnsignedDecimalString(data.completed_bytes),
+    generation: normalizeUnsignedDecimalString(data.generation),
+    targetGeneration: normalizeUnsignedDecimalString(data.target_generation),
+    expiresAt: normalizeUnsignedDecimalString(data.expires_at),
+    chunkBytes: readNumericApiField(data.chunk_bytes) ?? 0,
+    maxParallel: readNumericApiField(data.max_parallel) ?? 0,
+    cancelRequested: isTruthyApiFlag(data.cancel_requested),
+    lastResult: readNumericApiField(data.last_result) ?? 0,
+    lastStatus: readNumericApiField(data.last_status) ?? 0,
+    state,
+    progress,
+    isFinished,
+    isSuccessful,
+    transferError,
+    error: isSuccessful
+      ? null
+      : transferError?.message || data.error || null,
+  };
+};
+
+const waitForObjectTransferPoll = (delayMs, signal) =>
+  new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+
+    let timer = null;
+    const handleAbort = () => {
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener("abort", handleAbort);
+      resolve(false);
+    };
+
+    timer = setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve(true);
+    }, delayMs);
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
+
+/**
+ * Gets the durable status of one Object Transfer v1 operation.
+ * Uint64 fields remain decimal strings so large objects do not lose precision.
+ * @param {string} operationId - 16-byte operation ID encoded as 32 hex chars
+ * @param {{signal?: AbortSignal}} options
+ * @returns {Promise<{success: boolean, data?: any, error?: string, status?: string, httpStatus?: number}>}
+ */
+export const getObjectTransferStatus = async (
+  operationId,
+  { signal } = {},
+) => {
+  let httpStatus = null;
+
+  try {
+    const normalizedOperationId = String(operationId || "").trim();
+    if (!OBJECT_TRANSFER_ID_PATTERN.test(normalizedOperationId)) {
+      throw new Error(
+        "Operation ID must be a 32-character hexadecimal string",
+      );
+    }
+    if (signal?.aborted) {
+      return {
+        success: false,
+        status: "aborted",
+        error: "Object transfer status polling was cancelled.",
+      };
+    }
+
+    const query = new URLSearchParams({
+      operation_id: normalizedOperationId,
+    });
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/net/object-transfers/status?${query.toString()}`,
+      { signal, headers: await getObjectTransferAuthHeaders() },
+    );
+    httpStatus = response.status;
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: normalizeObjectTransferStatus(data, normalizedOperationId),
+    };
+  } catch (error) {
+    const aborted = signal?.aborted || error?.name === "AbortError";
+    const transferError = aborted
+      ? null
+      : normalizeTransferError(error?.apiData || error, {
+          fallbackMessage: error.message,
+        });
+    if (!aborted) {
+      console.error("Get object transfer status failed:", error);
+    }
+    return {
+      success: false,
+      status: aborted ? "aborted" : "error",
+      error: aborted
+        ? "Object transfer status polling was cancelled."
+        : transferError?.message || error.message,
+      ...(transferError ? { transferError } : {}),
+      ...(error?.httpStatus || httpStatus !== null
+        ? { httpStatus: error?.httpStatus || httpStatus }
+        : {}),
+    };
+  }
+};
+
+const controlObjectTransfer = async (
+  action,
+  operationId,
+  { signal } = {},
+) => {
+  let httpStatus = null;
+
+  try {
+    const normalizedOperationId = String(operationId || "").trim();
+    if (!OBJECT_TRANSFER_ID_PATTERN.test(normalizedOperationId)) {
+      throw new Error(
+        "Operation ID must be a 32-character hexadecimal string",
+      );
+    }
+    if (signal?.aborted) {
+      return {
+        success: false,
+        status: "aborted",
+        error: `Object transfer ${action} was cancelled.`,
+      };
+    }
+
+    const query = new URLSearchParams({
+      operation_id: normalizedOperationId,
+    });
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/net/object-transfers/${action}?${query.toString()}`,
+      {
+        method: "POST",
+        signal,
+        headers: await getObjectTransferAuthHeaders(),
+      },
+    );
+    httpStatus = response.status;
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: normalizeObjectTransferStatus(data, normalizedOperationId),
+    };
+  } catch (error) {
+    const aborted = signal?.aborted || error?.name === "AbortError";
+    const transferError = aborted
+      ? null
+      : normalizeTransferError(error?.apiData || error, {
+          fallbackMessage: error.message,
+        });
+    if (!aborted) {
+      console.error(`Object transfer ${action} failed:`, error);
+    }
+    return {
+      success: false,
+      status: aborted ? "aborted" : "error",
+      error: aborted
+        ? `Object transfer ${action} was cancelled.`
+        : transferError?.message || error.message,
+      ...(transferError ? { transferError } : {}),
+      ...(error?.httpStatus || httpStatus !== null
+        ? { httpStatus: error?.httpStatus || httpStatus }
+        : {}),
+    };
+  }
+};
+
+/**
+ * Requests cancellation of one durable Object Transfer v1 operation.
+ */
+export const cancelObjectTransfer = (operationId, options = {}) =>
+  controlObjectTransfer("cancel", operationId, options);
+
+/**
+ * Resumes one durable Object Transfer v1 operation in the paused state.
+ */
+export const resumeObjectTransfer = (operationId, options = {}) =>
+  controlObjectTransfer("resume", operationId, options);
+
+/**
+ * Polls a durable Object Transfer v1 operation until it reaches a terminal
+ * state. A timeout of 0 keeps polling until completion or cancellation.
+ * @param {string} operationId - 16-byte operation ID encoded as 32 hex chars
+ * @param {{
+ *   intervalMs?: number,
+ *   timeoutMs?: number,
+ *   maxConsecutiveErrors?: number,
+ *   onUpdate?: Function,
+ *   onPollError?: Function,
+ *   signal?: AbortSignal
+ * }} options
+ * @returns {Promise<{success: boolean, data?: any, error?: string, status?: string}>}
+ */
+export const pollObjectTransferStatus = async (
+  operationId,
+  {
+    intervalMs = 1000,
+    timeoutMs = 0,
+    maxConsecutiveErrors = 5,
+    onUpdate,
+    onPollError,
+    signal,
+  } = {},
+) => {
+  const normalizedOperationId = String(operationId || "").trim();
+  if (!OBJECT_TRANSFER_ID_PATTERN.test(normalizedOperationId)) {
+    return {
+      success: false,
+      error: "Operation ID must be a 32-character hexadecimal string",
+    };
+  }
+  if (!Number.isFinite(intervalMs) || intervalMs < 0) {
+    return { success: false, error: "Polling interval must be non-negative." };
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    return { success: false, error: "Polling timeout must be non-negative." };
+  }
+  if (
+    !Number.isInteger(maxConsecutiveErrors) ||
+    maxConsecutiveErrors < 1
+  ) {
+    return {
+      success: false,
+      error: "Maximum consecutive polling errors must be a positive integer.",
+    };
+  }
+
+  const startedAt = Date.now();
+  let consecutiveErrors = 0;
+  let lastStatus = null;
+
+  while (!signal?.aborted) {
+    if (timeoutMs > 0 && Date.now() - startedAt >= timeoutMs) {
+      return {
+        success: false,
+        status: "timeout",
+        error: "The object transfer is still running.",
+        ...(lastStatus ? { data: lastStatus } : {}),
+      };
+    }
+
+    const result = await getObjectTransferStatus(normalizedOperationId, {
+      signal,
+    });
+    if (result.success) {
+      consecutiveErrors = 0;
+      lastStatus = result.data;
+
+      if (typeof onUpdate === "function") {
+        await onUpdate(lastStatus);
+      }
+
+      if (lastStatus.isFinished) {
+        if (lastStatus.isSuccessful) {
+          return { success: true, data: lastStatus };
+        }
+        return {
+          success: false,
+          status: lastStatus.state,
+          error:
+            lastStatus.error ||
+            `Object transfer ${lastStatus.state}.`,
+          ...(lastStatus.transferError
+            ? { transferError: lastStatus.transferError }
+            : {}),
+          data: lastStatus,
+        };
+      }
+    } else {
+      if (result.status === "aborted") return result;
+
+      consecutiveErrors += 1;
+      if (typeof onPollError === "function") {
+        await onPollError(result, consecutiveErrors);
+      }
+
+      const isPermanentHttpError =
+        result.httpStatus >= 400 && result.httpStatus < 500 &&
+        result.httpStatus !== 408 && result.httpStatus !== 429;
+      if (isPermanentHttpError || consecutiveErrors >= maxConsecutiveErrors) {
+        return {
+          ...result,
+          ...(lastStatus ? { data: lastStatus } : {}),
+        };
+      }
+    }
+
+    const shouldContinue = await waitForObjectTransferPoll(intervalMs, signal);
+    if (!shouldContinue) break;
+  }
+
+  return {
+    success: false,
+    status: "aborted",
+    error: "Object transfer status polling was cancelled.",
+    ...(lastStatus ? { data: lastStatus } : {}),
+  };
 };
 
 /**
@@ -1029,19 +1441,22 @@ export const getEmailAttachments = async (emailId) => {
  * Error shown when a contact input cannot be resolved to a real serial number.
  */
 export const CONTACT_ADDRESS_OR_SN_ERROR =
-  "Please enter a serial number (or a QMail address once the lookup service is available).";
+  "Please enter a QMail address (like 51.254@bit or 51.254.0) or a bare serial number.";
 
 const SERIAL_NUMBER_PATTERN = /^\d+$/;
-const EMAIL_LIKE_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Resolves the Add Contact address field into backend contact fields.
- * @param {string} input - Serial number today; QMail address after CORE-C lands.
+ * Accepts a QMail address in any of the three dotted-decimal forms
+ * ("0.51.254.0", "51.254.0", "51.254@bit") or a bare serial number.
+ * @param {string} input
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
 export const resolveAddressOrSn = async (input) => {
   const value = String(input || "").trim();
 
+  // A bare serial number has no dots and no '@'. The denomination is
+  // unknown in that case; the backend's default applies.
   if (SERIAL_NUMBER_PATTERN.test(value)) {
     return {
       success: true,
@@ -1055,11 +1470,28 @@ export const resolveAddressOrSn = async (input) => {
     };
   }
 
-  const looksLikeEmail = EMAIL_LIKE_PATTERN.test(value) || value.includes("@");
-  if (looksLikeEmail) {
-    // CORE-C will add address -> SN lookup. Until then, reject email-shaped
-    // input instead of creating an unusable serial_number=0 contact.
-    return { success: false, error: CONTACT_ADDRESS_OR_SN_ERROR };
+  // Anything with a '.' or '@' must be a full QMail address; parse it to
+  // serial number + denomination (parseQmailAddress carries the same
+  // user-facing error messages as the backend validator).
+  if (value.includes(".") || value.includes("@")) {
+    const parsed = parseQmailAddress(value);
+    if (!parsed.ok) {
+      return { success: false, error: parsed.error };
+    }
+    return {
+      success: true,
+      data: {
+        serial_number: String(parsed.serialNumber),
+        serialNumber: String(parsed.serialNumber),
+        denomination: String(parsed.denominationCode),
+        denominationCode: parsed.denominationCode,
+        class_name: parsed.denominationName,
+        className: parsed.denominationName,
+        auto_address: parsed.canonical,
+        autoAddress: parsed.canonical,
+        source: "address",
+      },
+    };
   }
 
   return { success: false, error: CONTACT_ADDRESS_OR_SN_ERROR };
@@ -1110,9 +1542,15 @@ export const getContacts = async (query = "") => {
           contact.auto_address ||
           contact.autoAddress ||
           contact.email ||
-          (serialNumber ? String(serialNumber) : ""),
+          // No stored address: synthesize the canonical dotted-decimal
+          // form when the row carries a denomination code, else bare SN.
+          (serialNumber
+            ? formatQmailAddress(Number(serialNumber), contact.denomination) ||
+              String(serialNumber)
+            : ""),
         description: contact.description || "",
-        denomination: contact.denomination || "",
+        // Denomination code 0 (= bit) is valid and falsy — use ?? not ||.
+        denomination: contact.denomination ?? "",
         className: contact.class_name || "",
         trustLevel: contact.trust_level ?? 0,
         userNotes: contact.user_notes || "",
@@ -1167,7 +1605,12 @@ export const addContact = async (contactData) => {
   try {
     const params = new URLSearchParams();
     if (contactData.serial_number) params.append('serial_number', contactData.serial_number);
-    if (contactData.denomination) params.append('denomination', contactData.denomination);
+    // Denomination code 0 (= bit) is valid and falsy — compare explicitly.
+    if (contactData.denomination !== undefined &&
+        contactData.denomination !== null &&
+        contactData.denomination !== "") {
+      params.append('denomination', contactData.denomination);
+    }
     if (contactData.first_name) params.append('first_name', contactData.first_name);
     if (contactData.last_name) params.append('last_name', contactData.last_name);
     if (contactData.description) params.append('description', contactData.description);
@@ -1649,6 +2092,10 @@ export const sendEmail = async (emailData) => {
           // file_guid is the email identifier, NOT a pollable task.
           taskId: data.task_id || null,
           fileGuid: data.file_guid || null,
+          operationId: data.operation_id || null,
+          operationIds: Array.isArray(data.operation_ids)
+            ? data.operation_ids
+            : [],
           timestamp: data.timestamp,
         },
       };
@@ -1672,8 +2119,14 @@ export const sendEmail = async (emailData) => {
 export const convertSnToEmail = async (sn, denomination = null) => {
   try {
     const params = new URLSearchParams({ sn: String(sn) });
-    const denominationValue = Number(denomination);
-    if (Number.isFinite(denominationValue) && denominationValue > 0) {
+    // Denomination code 0 (= bit) is valid and falsy — send the param
+    // whenever the caller explicitly provided a denomination (Number(null)
+    // is 0, so check for absence before coercing).
+    const denominationValue =
+      denomination === null || denomination === undefined || denomination === ""
+        ? NaN
+        : Number(denomination);
+    if (Number.isFinite(denominationValue) && denominationValue >= 0) {
       params.set("denomination", String(denominationValue));
     }
 
@@ -2349,15 +2802,31 @@ export const downloadMailAttachment = async (
   guid,
   n,
   defaultFilename = "downloaded_file",
+  { expectedBytes = 0, onProgress, signal } = {},
 ) => {
   try {
     // API-FIX: Changed /api/mail/{guid}/attachment/{n} → /api/qmail/db/attachments/get?email_id={guid}&attachment_id={n}
     const response = await fetch(
       `${API_BASE_URL}/qmail/db/attachments/get?email_id=${guid}&attachment_id=${n}`,
+      { signal },
     );
 
     if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}`);
+      let errorData = null;
+      try {
+        errorData = await response.json();
+      } catch {
+        // Some transport failures return no JSON body.
+      }
+      const error = new Error(
+        extractApiErrorMessage(
+          errorData,
+          `Server responded with ${response.status}`,
+        ),
+      );
+      error.httpStatus = response.status;
+      error.apiData = errorData;
+      throw error;
     }
 
     // 1. Try to read the filename from the CORS-exposed header we just fixed!
@@ -2372,8 +2841,49 @@ export const downloadMailAttachment = async (
       }
     }
 
-    // 2. Convert the raw binary data into a Blob
+    const contentLength = response.headers.get("Content-Length");
+    const operationIdHeader = response.headers.get("X-QMail-Operation-Id");
+    const operationId =
+      operationIdHeader &&
+      OBJECT_TRANSFER_ID_PATTERN.test(operationIdHeader.trim())
+        ? operationIdHeader.trim()
+        : null;
+    const headerBytes =
+      contentLength && /^\d+$/.test(contentLength)
+        ? Number(contentLength)
+        : 0;
+    const expectedByteCount = Number(expectedBytes);
+    const totalBytes =
+      Number.isFinite(headerBytes) && headerBytes > 0
+        ? headerBytes
+        : Number.isFinite(expectedByteCount) && expectedByteCount > 0
+          ? expectedByteCount
+          : 0;
+    const reportProgress = (completed, done = false) => {
+      if (typeof onProgress !== "function") return;
+      const boundedCompleted =
+        totalBytes > 0 ? Math.min(completed, totalBytes) : completed;
+      const percentage =
+        totalBytes > 0
+          ? Math.min(100, (boundedCompleted / totalBytes) * 100)
+          : done
+            ? 100
+            : 0;
+      onProgress({
+        completedBytes: String(Math.max(0, Math.trunc(boundedCompleted))),
+        totalBytes: String(Math.max(0, Math.trunc(totalBytes))),
+        percentage: Math.round(percentage * 10) / 10,
+        done,
+        operationId,
+      });
+    };
+
+    reportProgress(0);
+
+    // Let Chromium's blob storage spill large responses to disk instead of
+    // retaining every response chunk in the renderer's V8 heap.
     const blob = await response.blob();
+    reportProgress(blob.size, true);
 
     // 3. Create a temporary URL pointing to the Blob
     const url = window.URL.createObjectURL(blob);
@@ -2393,10 +2903,34 @@ export const downloadMailAttachment = async (
       document.body.removeChild(a);
     }, 200);
 
-    return { success: true };
+    return {
+      success: true,
+      data: {
+        filename,
+        sizeBytes: String(blob.size),
+        operationId,
+      },
+    };
   } catch (error) {
-    console.error("Attachment download failed:", error);
-    return { success: false, error: error.message };
+    const aborted = signal?.aborted || error?.name === "AbortError";
+    const transferError = aborted
+      ? null
+      : normalizeTransferError(error?.apiData || error, {
+          fallbackMessage: error.message,
+          terminal: true,
+        });
+    if (!aborted) {
+      console.error("Attachment download failed:", error);
+    }
+    return {
+      success: false,
+      status: aborted ? "aborted" : "error",
+      error: aborted
+        ? "Attachment download was cancelled."
+        : transferError?.message || error.message,
+      ...(transferError ? { transferError } : {}),
+      ...(error?.httpStatus ? { httpStatus: error.httpStatus } : {}),
+    };
   }
 };
 

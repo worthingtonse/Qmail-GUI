@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const net = require('net');
+const crypto = require('crypto');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 
@@ -11,12 +12,47 @@ let splashWindow = null;
 let backendProcess = null;
 let backendPort = 0; // resolved before the backend is spawned
 let activeThemeMenuItem = 'dark';
+let backendDataDir = null;
+const selectedAttachmentPaths = new Set();
+
+// R-2 hardening: per-session random token. core.exe requires it as a bearer
+// credential on the object-transfer endpoints (the ones that accept arbitrary
+// filesystem paths), so other local processes cannot drive them. Passed to
+// the backend via env (QMAIL_API_TOKEN) so it never appears on the visible
+// command line, and handed to the renderer over IPC.
+const apiSessionToken = crypto.randomBytes(32).toString('hex');
 
 const THEME_MENU_ITEMS = [
   { id: 'dark', label: 'Dark' },
   { id: 'light', label: 'Light' },
   { id: 'high-contrast', label: 'High Contrast' },
 ];
+
+const SOUND_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac']);
+
+function isPathInside(rootPath, candidatePath) {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function resolveSoundLibraryDir() {
+  const candidates = [
+    path.join(app.getAppPath(), 'dist', 'sounds'),
+    path.join(app.getAppPath(), 'public', 'sounds'),
+  ];
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
+        return dir;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return candidates[0];
+}
 
 function isStandardTheme(themeId) {
   return THEME_MENU_ITEMS.some((item) => item.id === themeId);
@@ -145,6 +181,8 @@ function startBackend(port) {
       || path.dirname(app.getPath('exe'));
   }
 
+  backendDataDir = dataDir;
+
   log('Backend dir: ' + backendDir);
   log('Backend path: ' + backendPath);
   log('Data dir (cwd): ' + dataDir);
@@ -178,6 +216,7 @@ function startBackend(port) {
   try {
     backendProcess = spawn(backendPath, coreArgs, {
       cwd: dataDir,
+      env: { ...process.env, QMAIL_API_TOKEN: apiSessionToken },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
       windowsHide: true
@@ -618,9 +657,11 @@ ipcMain.handle('compose:pickFiles', async () => {
     result.filePaths.map(async (filePath) => {
       try {
         const stat = await fs.promises.stat(filePath);
+        const resolvedPath = path.resolve(filePath);
+        selectedAttachmentPaths.add(resolvedPath);
         return {
-          path: filePath,
-          name: path.basename(filePath),
+          path: resolvedPath,
+          name: path.basename(resolvedPath),
           size: stat.size,
         };
       } catch (error) {
@@ -631,6 +672,45 @@ ipcMain.handle('compose:pickFiles', async () => {
   );
 
   return enriched.filter((entry) => entry !== null);
+});
+
+ipcMain.handle('compose:statFiles', async (_event, filePaths) => {
+  if (!Array.isArray(filePaths)) return [];
+
+  return Promise.all(
+    filePaths.map(async (filePath) => {
+      const resolvedPath = path.resolve(String(filePath || ''));
+      if (!selectedAttachmentPaths.has(resolvedPath)) {
+        return {
+          path: resolvedPath,
+          success: false,
+          error: 'File was not selected through the attachment picker.',
+        };
+      }
+      try {
+        const stat = await fs.promises.stat(resolvedPath);
+        if (!stat.isFile()) {
+          return {
+            path: resolvedPath,
+            success: false,
+            error: 'Attachment is no longer a regular file.',
+          };
+        }
+        return {
+          path: resolvedPath,
+          name: path.basename(resolvedPath),
+          size: stat.size,
+          success: true,
+        };
+      } catch (error) {
+        return {
+          path: resolvedPath,
+          success: false,
+          error: error.message,
+        };
+      }
+    }),
+  );
 });
 
 ipcMain.handle('wallet:pickCoinFiles', async () => {
@@ -690,6 +770,58 @@ ipcMain.handle('wallet:pickCoinFolder', async () => {
     path: folderPath,
     name: path.basename(folderPath) || folderPath,
   };
+});
+
+ipcMain.handle('get-downloads-dir', async () => app.getPath('downloads'));
+
+ipcMain.handle('get-backend-data-dir', async () => backendDataDir || null);
+
+ipcMain.handle('get-api-token', async () => apiSessionToken);
+
+ipcMain.handle('reveal-path', async (_event, targetPath) => {
+  try {
+    const requestedPath = String(targetPath || '').trim();
+    if (!requestedPath) return { success: false, error: 'Path is empty.' };
+
+    const resolvedPath = await fs.promises.realpath(path.resolve(requestedPath));
+    const allowedRoots = [app.getPath('downloads'), backendDataDir]
+      .filter(Boolean)
+      .map((rootPath) => path.resolve(rootPath));
+    if (!allowedRoots.some((rootPath) => isPathInside(rootPath, resolvedPath))) {
+      return { success: false, error: 'Opening this path is not permitted.' };
+    }
+
+    const stat = await fs.promises.stat(resolvedPath);
+    if (stat.isDirectory()) {
+      const result = await shell.openPath(resolvedPath);
+      if (result) return { success: false, error: result };
+    } else {
+      shell.showItemInFolder(resolvedPath);
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('list-sound-files', async () => {
+  const dir = resolveSoundLibraryDir();
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => SOUND_FILE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+      .sort((a, b) => a.localeCompare(b))
+      .map((filename) => ({
+        filename,
+        label: filename.replace(/\.[^.]+$/, '').replace(/[._-]+/g, ' ').trim(),
+        src: `/sounds/${encodeURIComponent(filename)}`,
+      }));
+  } catch (error) {
+    log('list-sound-files failed for ' + dir + ': ' + error.message);
+    return [];
+  }
 });
 // Boot sequence:
 //   1. Pick a free port for the backend (OS-assigned, supports multi-instance).

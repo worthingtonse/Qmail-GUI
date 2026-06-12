@@ -8,6 +8,8 @@ import AccountPane from "./AccountPane";
 import NavigationPane from "./NavigationPane";
 import EmailListPane from "./EmailListPane";
 import ReadingPane from "./ReadingPane";
+import ActiveTransfersPanel from "./ActiveTransfersPanel";
+import soundService from "../../api/soundService";
 import {
   getMailList,
   searchEmails,
@@ -27,6 +29,9 @@ import {
   getMailNotifications,
   downloadEmailContent,
   downloadMailAttachment,
+  getObjectTransferStatus,
+  cancelObjectTransfer,
+  resumeObjectTransfer,
   sendEmail,
   getQMailPaymentInfo,
   markQMailPaymentRefunded,
@@ -36,6 +41,7 @@ import {
   convertSnToEmail,
   getIdentity,
   normalizeIdentityForUi,
+  lookupMailWalletPath,
   SSE_URL,
 } from "../../api/qmailApiServices";
 import { formatTimestamp } from "./formatTimestamp";
@@ -43,6 +49,15 @@ import {
   clearQmailLocalStorageExceptSkip,
   setSkipAutoRestore,
 } from "../skipAutoRestore";
+import {
+  formatTransferErrorNotification,
+  normalizeTransferError,
+} from "../transferErrors";
+import {
+  forgetActiveTransfer,
+  readActiveTransferRegistry,
+  rememberActiveTransfer,
+} from "../activeTransferRegistry";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 
 import "./QMailDashboard.css";
@@ -64,6 +79,15 @@ const normalizeMailIdentifier = (identifier) => {
   if (!identifier) return "";
   const value = String(identifier);
   return value.startsWith("pending-") ? value.slice("pending-".length) : value;
+};
+
+const joinDisplayPath = (dir, name) => {
+  const folder = String(dir || "").trim().replace(/[\\/]+$/, "");
+  const file = String(name || "").trim().replace(/^[\\/]+/, "");
+  if (!folder) return file;
+  if (!file) return folder;
+  const separator = folder.includes("\\") || /^[A-Za-z]:/.test(folder) ? "\\" : "/";
+  return `${folder}${separator}${file}`;
 };
 
 const getEmailDownloadIdentifier = (email = {}) =>
@@ -386,8 +410,20 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const [decryptingMailIds, setDecryptingMailIds] = useState(() => new Set());
   const [refundingEmailIds, setRefundingEmailIds] = useState(() => new Set());
   const [emailAttachments, setEmailAttachments] = useState([]);
+  const [attachmentDownloadProgress, setAttachmentDownloadProgress] =
+    useState(null);
+  const [restoredTransfers, setRestoredTransfers] = useState(() =>
+    readActiveTransferRegistry().map((entry) => ({
+      ...entry,
+      status: null,
+      lookupError: null,
+    })),
+  );
+  const [restoredTransferControlPending, setRestoredTransferControlPending] =
+    useState("");
   const [pendingDangerousAttachment, setPendingDangerousAttachment] =
     useState(null);
+  const [mailWalletPath, setMailWalletPath] = useState(null);
   // FIX-04: track which draft row is currently being hydrated so
   // EmailListItem can show a spinner while we fetch the full draft
   // before opening ComposeModal. Hydrate-before-mount avoids the v3
@@ -411,6 +447,10 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const previousMailCountsRef = useRef({});
   const pendingMailsRef = useRef([]);
   const mailDownloadPromisesRef = useRef(new Map());
+  const attachmentDownloadAbortRef = useRef(null);
+  const attachmentDownloadInProgressRef = useRef(false);
+  const attachmentCancelPendingRef = useRef(false);
+  const restoredTransfersRef = useRef(restoredTransfers);
   // Serial queue for background tell downloads. The rest_core HTTP server is
   // single-threaded, so a slow cmd-74 download (30s when a RAIDA times out)
   // blocks every other request — including the inbox list query — until it
@@ -495,6 +535,75 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   useEffect(() => {
     pendingMailsRef.current = pendingMails;
   }, [pendingMails]);
+
+  useEffect(() => {
+    restoredTransfersRef.current = restoredTransfers;
+  }, [restoredTransfers]);
+
+  useEffect(() => {
+    let disposed = false;
+    let reconciling = false;
+
+    const reconcileRestoredTransfers = async () => {
+      if (reconciling || disposed) return;
+      const snapshot = restoredTransfersRef.current.filter(
+        (entry) => !entry.status?.isFinished,
+      );
+      if (snapshot.length === 0) return;
+
+      reconciling = true;
+      const results = [];
+      for (const entry of snapshot) {
+        if (disposed) break;
+        results.push({
+          operationId: entry.operationId,
+          result: await getObjectTransferStatus(entry.operationId),
+        });
+      }
+      reconciling = false;
+      if (disposed) return;
+
+      const resultsById = new Map(
+        results.map((item) => [item.operationId, item.result]),
+      );
+      setRestoredTransfers((current) =>
+        current.map((entry) => {
+          const result = resultsById.get(entry.operationId);
+          if (!result) return entry;
+          if (!result.success) {
+            return {
+              ...entry,
+              lookupError: result.error,
+              transferError: result.transferError || null,
+            };
+          }
+
+          const status = result.data;
+          rememberActiveTransfer({
+            ...entry,
+            state: status.state,
+            completedBytes: status.completedBytes,
+            totalBytes: status.totalBytes,
+            error: status.error,
+            destinationPath: status.destinationPath,
+          });
+          return {
+            ...entry,
+            status,
+            lookupError: null,
+            transferError: status.transferError || null,
+          };
+        }),
+      );
+    };
+
+    reconcileRestoredTransfers();
+    const interval = setInterval(reconcileRestoredTransfers, 5000);
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     currentFolderRef.current = currentFolder;
@@ -636,6 +745,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       if (identifier) enqueueTellDownload(identifier);
     });
 
+    if (notificationPollBaselineSeenRef.current && newNotifs.length > 0) {
+      soundService.playMailReceived();
+    }
+
+    notificationPollBaselineSeenRef.current = true;
+
     return newNotifs;
   };
 
@@ -648,6 +763,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const fetchNotificationsRef = useRef(null);
   const inboxRefreshPromiseRef = useRef(null);
   const handleNewMailEventRef = useRef(null);
+  const notificationPollBaselineSeenRef = useRef(false);
 
   fetchNotificationsRef.current = async () => {
     try {
@@ -664,8 +780,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     const guid = normalizeMailIdentifier(
       payload.guid || payload.file_guid || payload.email_id,
     );
+    let shouldPlaySound = false;
 
     if (guid) {
+      if (!seenNotificationIdsRef.current.has(guid)) {
+        shouldPlaySound = true;
+      }
       seenNotificationIdsRef.current.add(guid);
       setPendingMails((prev) => {
         const next = prev.filter(
@@ -674,6 +794,10 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         pendingMailsRef.current = next;
         return next;
       });
+    }
+
+    if (shouldPlaySound) {
+      soundService.playMailReceived();
     }
 
     if (inboxRefreshPromiseRef.current) {
@@ -821,6 +945,43 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   // message. See handleDownloadMail.
   useEffect(() => {
     selectedEmailRef.current = selectedEmail;
+  }, [selectedEmail]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedEmail || !selectedEmail.isPending) {
+      setMailWalletPath(null);
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const lookup = await lookupMailWalletPath();
+        if (cancelled) return;
+        if (lookup.success && lookup.path) {
+          setMailWalletPath(lookup.path);
+          return;
+        }
+        const backendDataDir = window.electronAPI?.getBackendDataDir
+          ? await window.electronAPI.getBackendDataDir()
+          : null;
+        if (!cancelled) {
+          setMailWalletPath(backendDataDir || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const backendDataDir = window.electronAPI?.getBackendDataDir
+            ? await window.electronAPI.getBackendDataDir()
+            : null;
+          setMailWalletPath(backendDataDir || null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedEmail]);
 
   // BUG-25 FIX: Sync document.title with state via useEffect
@@ -1013,16 +1174,19 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             subject: email.Subject || email.subject || "No Subject",
             body,
             ...previewState,
+            // Show the SENDER's send time (from the tell via PING/PEEK). Mail
+            // received before the backend stored sent_timestamp has no send
+            // time — show a dash rather than the (misleading) receive time.
             rawTimestamp: Number(
-              email.ReceivedTimestamp ||
-              email.receivedTimestamp ||
+              email.SentTimestamp ||
+              email.sentTimestamp ||
               email.timestamp
             ) || 0,
-            timestamp: formatTimestamp(
-              email.ReceivedTimestamp ||
-              email.receivedTimestamp ||
-              email.timestamp
-            ),
+            timestamp: (() => {
+              const sentTs =
+                email.SentTimestamp || email.sentTimestamp || email.timestamp;
+              return Number(sentTs) > 0 ? formatTimestamp(sentTs) : "—";
+            })(),
             isRead: readEmailReadFlag(email, folder !== "inbox"),
             // /messages/list returns local DB rows; only synthetic pending rows need decrypt UI.
             isDownloaded: true,
@@ -1102,8 +1266,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
               subject: email.Subject || email.subject || "No Subject",
               body,
               ...previewState,
-              rawTimestamp: Number(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp) || 0,
-              timestamp: formatTimestamp(email.ReceivedTimestamp || email.receivedTimestamp || email.timestamp),
+              // Show the sender's send time; dash when unknown (older mail). See loadEmails().
+              rawTimestamp: Number(email.SentTimestamp || email.sentTimestamp || email.timestamp) || 0,
+              timestamp: (() => {
+                const sentTs = email.SentTimestamp || email.sentTimestamp || email.timestamp;
+                return Number(sentTs) > 0 ? formatTimestamp(sentTs) : "—";
+              })(),
               isRead: readEmailReadFlag(email, currentFolder !== "inbox"),
               isDownloaded: true,
               tags: email.tags || [],
@@ -1168,9 +1336,11 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             subject: email.subject || "No Subject",
             body,
             ...previewState,
-            timestamp: formatTimestamp(
-              email.received_timestamp || email.timestamp || email.date
-            ),
+            // Sender's send time; dash when unknown (older mail). See loadEmails().
+            timestamp: (() => {
+              const sentTs = email.sent_timestamp || email.timestamp;
+              return Number(sentTs) > 0 ? formatTimestamp(sentTs) : "—";
+            })(),
             isRead: readEmailReadFlag(email, false),
             isDownloaded: true,
             tags: email.tags || [],
@@ -1582,6 +1752,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     interactiveDecryptIdsRef.current.clear();
     decryptRevealDeadlineRef.current.clear();
     seenNotificationIdsRef.current.clear();
+    notificationPollBaselineSeenRef.current = false;
     setDecryptingMailIds(new Set());
     setRefundingEmailIds(new Set());
     setWalletBalance(null);
@@ -1591,7 +1762,16 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     clearAllNotifications();
     setPendingMails([]);
     setEmailAttachments([]);
+    setAttachmentDownloadProgress(null);
+    restoredTransfersRef.current = [];
+    setRestoredTransfers([]);
+    setRestoredTransferControlPending("");
+    attachmentDownloadAbortRef.current?.controller?.abort();
+    attachmentDownloadAbortRef.current = null;
+    attachmentDownloadInProgressRef.current = false;
+    attachmentCancelPendingRef.current = false;
     setPendingDangerousAttachment(null);
+    setMailWalletPath(null);
     setLoadingDraftId(null);
     setUserAccount(null);
 
@@ -2590,22 +2770,320 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     emailId,
     attachmentId,
     attachmentName,
+    attachmentSize,
   }) => {
+    if (
+      attachmentDownloadInProgressRef.current ||
+      attachmentCancelPendingRef.current
+    ) {
+      return {
+        success: false,
+        error: "Another attachment download operation is still finishing.",
+      };
+    }
+    attachmentDownloadInProgressRef.current = true;
+    const transferKey = `${emailId}:${attachmentId}`;
+    const controller = new AbortController();
+    attachmentDownloadAbortRef.current = {
+      transferKey,
+      controller,
+    };
+    const expectedBytes =
+      Number.isFinite(Number(attachmentSize)) && Number(attachmentSize) > 0
+        ? Math.trunc(Number(attachmentSize))
+        : 0;
+    setAttachmentDownloadProgress({
+      transferKey,
+      emailId,
+      attachmentId,
+      completedBytes: "0",
+      totalBytes: String(expectedBytes),
+      percentage: 0,
+      status: "running",
+      operationId: null,
+      transferError: null,
+      request: {
+        emailId,
+        attachmentId,
+        attachmentName,
+        attachmentSize,
+      },
+    });
+
+    let completedSuccessfully = false;
+    let durableOperationId = null;
     try {
       showDashboardNotification(
         `Downloading ${attachmentName || "attachment"}...`,
         "info",
       );
-      await downloadMailAttachment(emailId, attachmentId, attachmentName);
+      const downloadResult = await downloadMailAttachment(
+        emailId,
+        attachmentId,
+        attachmentName,
+        {
+          expectedBytes,
+          signal: controller.signal,
+          onProgress: (nextProgress) => {
+            if (
+              nextProgress.operationId &&
+              durableOperationId !== nextProgress.operationId
+            ) {
+              durableOperationId = nextProgress.operationId;
+              rememberActiveTransfer({
+                operationId: durableOperationId,
+                direction: "download",
+                label: attachmentName || "Attachment download",
+                emailId,
+                attachmentId,
+                attachmentName,
+                totalBytes:
+                  nextProgress.totalBytes !== "0"
+                    ? nextProgress.totalBytes
+                    : String(expectedBytes),
+                completedBytes: nextProgress.completedBytes,
+                state: "downloading",
+              });
+            }
+            setAttachmentDownloadProgress((current) =>
+              current?.transferKey === transferKey
+                ? {
+                    ...current,
+                    completedBytes: nextProgress.completedBytes,
+                    totalBytes:
+                      nextProgress.totalBytes !== "0"
+                        ? nextProgress.totalBytes
+                        : current.totalBytes,
+                    percentage: nextProgress.percentage,
+                    operationId:
+                      nextProgress.operationId || current.operationId,
+                    status: "running",
+                  }
+                : current,
+            );
+          },
+        },
+      );
+      if (downloadResult?.status === "aborted") {
+        setAttachmentDownloadProgress((current) =>
+          current?.transferKey === transferKey
+            ? {
+                ...current,
+                status: "cancelled",
+                error: null,
+                transferError: normalizeTransferError({
+                  state: "cancelled",
+                  error: "Attachment download was cancelled.",
+                }),
+              }
+            : current,
+        );
+        showDashboardNotification("Attachment download cancelled.", "info");
+        return downloadResult;
+      }
+      if (!downloadResult?.success) {
+        const downloadError = new Error(
+          downloadResult?.error || "Attachment download failed",
+        );
+        downloadError.transferError =
+          downloadResult?.transferError || null;
+        throw downloadError;
+      }
+      const filename = downloadResult?.data?.filename || attachmentName || "attachment";
+      const completedOperationId =
+        downloadResult?.data?.operationId || durableOperationId;
+      if (completedOperationId) {
+        forgetActiveTransfer(completedOperationId);
+      }
+      const downloadsDir = window.electronAPI?.getDownloadsDir
+        ? await window.electronAPI.getDownloadsDir()
+        : null;
+      const savedPath = joinDisplayPath(downloadsDir, filename);
       showDashboardNotification(
-        `Download started for ${attachmentName || "attachment"}!`,
+        savedPath
+          ? `Saved ${filename} to ${savedPath}`
+          : `Saved ${filename} to your Downloads folder`,
         "success",
       );
+      completedSuccessfully = true;
       // The bytes now live on disk; reflect that in the open email.
-      await refreshEmailAttachments(emailId);
+      try {
+        await refreshEmailAttachments(emailId);
+      } catch (refreshError) {
+        console.warn(
+          "Attachment saved, but the attachment list could not be refreshed:",
+          refreshError,
+        );
+      }
+      return downloadResult;
     } catch (error) {
       console.error("Attachment download failed:", error);
-      showDashboardNotification("Failed to download attachment", "error");
+      const transferError =
+        error?.transferError ||
+        normalizeTransferError(error, {
+          fallbackMessage: error.message || "Attachment download failed",
+          terminal: true,
+          defaultCanRetry: true,
+        });
+      if (durableOperationId) {
+        rememberActiveTransfer({
+          operationId: durableOperationId,
+          direction: "download",
+          label: attachmentName || "Attachment download",
+          emailId,
+          attachmentId,
+          attachmentName,
+          totalBytes: String(expectedBytes),
+          state: "failed",
+          error:
+            transferError?.message ||
+            error.message ||
+            "Attachment download failed",
+        });
+      }
+      setAttachmentDownloadProgress((current) =>
+        current?.transferKey === transferKey
+          ? {
+              ...current,
+              status: "failed",
+              error:
+                transferError?.message ||
+                error.message ||
+                "Attachment download failed",
+              transferError,
+            }
+          : current,
+      );
+      showDashboardNotification(
+        formatTransferErrorNotification(
+          transferError,
+          error.message || "Failed to download attachment",
+        ),
+        "error",
+      );
+      return {
+        success: false,
+        error: transferError?.message || error.message,
+        transferError,
+      };
+    } finally {
+      if (attachmentDownloadAbortRef.current?.transferKey === transferKey) {
+        attachmentDownloadAbortRef.current = null;
+      }
+      attachmentDownloadInProgressRef.current = false;
+      if (completedSuccessfully) {
+        setAttachmentDownloadProgress((current) =>
+          current?.transferKey === transferKey ? null : current,
+        );
+      }
+    }
+  };
+
+  const handleCancelAttachmentDownload = async () => {
+    const current = attachmentDownloadProgress;
+    if (
+      !current ||
+      current.status !== "running" ||
+      attachmentCancelPendingRef.current
+    ) {
+      return;
+    }
+    attachmentCancelPendingRef.current = true;
+
+    setAttachmentDownloadProgress((progress) =>
+      progress
+        ? {
+            ...progress,
+            status: "cancelling",
+          }
+        : progress,
+    );
+
+    if (current.operationId) {
+      rememberActiveTransfer({
+        operationId: current.operationId,
+        direction: "download",
+        state: "cancelling",
+      });
+    }
+    attachmentDownloadAbortRef.current?.controller.abort();
+
+    try {
+      if (current.operationId) {
+        const cancelResult = await cancelObjectTransfer(current.operationId);
+        if (!cancelResult.success) {
+          console.warn(
+            "Durable attachment transfer cancellation failed:",
+            cancelResult.error,
+          );
+        }
+      }
+    } finally {
+      attachmentCancelPendingRef.current = false;
+    }
+  };
+
+  const handleResumeAttachmentDownload = async () => {
+    const current = attachmentDownloadProgress;
+    if (
+      !current ||
+      !["cancelled", "failed", "paused"].includes(current.status) ||
+      !current.request ||
+      attachmentDownloadInProgressRef.current ||
+      attachmentCancelPendingRef.current
+    ) {
+      return;
+    }
+
+    if (current.status === "paused" && current.operationId) {
+      const resumeResult = await resumeObjectTransfer(current.operationId);
+      if (!resumeResult.success) {
+        const transferError =
+          resumeResult.transferError ||
+          normalizeTransferError(resumeResult, {
+            fallbackMessage:
+              resumeResult.error || "Could not resume download",
+            terminal: true,
+          });
+        setAttachmentDownloadProgress((progress) =>
+          progress
+            ? {
+                ...progress,
+                error:
+                  transferError?.message ||
+                  resumeResult.error ||
+                  "Could not resume download",
+                transferError,
+              }
+            : progress,
+        );
+        showDashboardNotification(
+          formatTransferErrorNotification(
+            transferError,
+            resumeResult.error || "Could not resume attachment download.",
+          ),
+          "error",
+        );
+        return;
+      }
+      rememberActiveTransfer({
+        operationId: current.operationId,
+        direction: "download",
+        state: "downloading",
+      });
+    }
+
+    await performAttachmentDownload(current.request);
+  };
+
+  const handleOpenDownloadLocation = async () => {
+    if (!mailWalletPath || !window.electronAPI?.revealPath) return;
+    const result = await window.electronAPI.revealPath(mailWalletPath);
+    if (!result?.success) {
+      showDashboardNotification(
+        result?.error || "Could not open the download location.",
+        "error",
+      );
     }
   };
 
@@ -2616,6 +3094,10 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       emailId,
       attachmentId,
       attachmentName,
+      attachmentSize:
+        typeof attachment === "object" && attachment
+          ? attachment.size
+          : 0,
       warning:
         typeof attachment === "object" && attachment
           ? attachment.warning
@@ -2665,8 +3147,116 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     loadEmails("inbox");
   };
 
+  const updateRestoredTransferStatus = (operationId, status) => {
+    rememberActiveTransfer({
+      operationId,
+      direction: status.direction,
+      state: status.state,
+      completedBytes: status.completedBytes,
+      totalBytes: status.totalBytes,
+      error: status.error,
+      destinationPath: status.destinationPath,
+    });
+    setRestoredTransfers((current) =>
+      current.map((entry) =>
+        entry.operationId === operationId
+          ? {
+              ...entry,
+              status,
+              lookupError: null,
+              transferError: status.transferError || null,
+            }
+          : entry,
+      ),
+    );
+  };
+
+  const handleCancelRestoredTransfer = async (operationId) => {
+    if (restoredTransferControlPending) return;
+    setRestoredTransferControlPending(operationId);
+    const result = await cancelObjectTransfer(operationId);
+    if (result.success) {
+      updateRestoredTransferStatus(operationId, result.data);
+    } else {
+      setRestoredTransfers((current) =>
+        current.map((entry) =>
+          entry.operationId === operationId
+            ? {
+                ...entry,
+                lookupError: result.error,
+                transferError: result.transferError || null,
+              }
+            : entry,
+        ),
+      );
+      showDashboardNotification(
+        formatTransferErrorNotification(
+          result.transferError,
+          result.error || "Could not cancel transfer.",
+        ),
+        "error",
+      );
+    }
+    setRestoredTransferControlPending("");
+  };
+
+  const handleResumeRestoredTransfer = async (operationId) => {
+    if (restoredTransferControlPending) return;
+    setRestoredTransferControlPending(operationId);
+    const result = await resumeObjectTransfer(operationId);
+    if (result.success) {
+      updateRestoredTransferStatus(operationId, result.data);
+    } else {
+      setRestoredTransfers((current) =>
+        current.map((entry) =>
+          entry.operationId === operationId
+            ? {
+                ...entry,
+                lookupError: result.error,
+                transferError: result.transferError || null,
+              }
+            : entry,
+        ),
+      );
+      showDashboardNotification(
+        formatTransferErrorNotification(
+          result.transferError,
+          result.error || "Could not resume transfer.",
+        ),
+        "error",
+      );
+    }
+    setRestoredTransferControlPending("");
+  };
+
+  const handleDismissRestoredTransfer = (operationId) => {
+    forgetActiveTransfer(operationId);
+    setRestoredTransfers((current) =>
+      current.filter((entry) => entry.operationId !== operationId),
+    );
+  };
+
+  const handleOpenRestoredTransferPath = async (targetPath) => {
+    if (!targetPath || !window.electronAPI?.revealPath) return;
+    const result = await window.electronAPI.revealPath(targetPath);
+    if (!result?.success) {
+      showDashboardNotification(
+        result?.error || "Could not open the downloaded file.",
+        "error",
+      );
+    }
+  };
+
   return (
     <main className="qmail-dashboard">
+      <ActiveTransfersPanel
+        transfers={restoredTransfers}
+        pendingOperationId={restoredTransferControlPending}
+        onCancel={handleCancelRestoredTransfer}
+        onResume={handleResumeRestoredTransfer}
+        onDismiss={handleDismissRestoredTransfer}
+        onOpenPath={handleOpenRestoredTransferPath}
+      />
       {pendingDangerousAttachment && (
         <div
           className="qmail-dashboard__attachment-confirm-overlay"
@@ -2814,6 +3404,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
                 refundingEmailIds.has(String(getEmailId(selectedEmail)).toLowerCase())
               }
               attachments={emailAttachments}
+              attachmentDownloadProgress={attachmentDownloadProgress}
+              onCancelAttachmentDownload={handleCancelAttachmentDownload}
+              onResumeAttachmentDownload={handleResumeAttachmentDownload}
+              downloadLocation={mailWalletPath}
+              onOpenDownloadLocation={handleOpenDownloadLocation}
               onDownloadAttachment={handleDownloadAttachment}
             />
           )}

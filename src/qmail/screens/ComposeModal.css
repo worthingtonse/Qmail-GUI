@@ -52,12 +52,20 @@
 /* was: .compose-modal-header */
 .compose-modal__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
   padding: var(--space-xl);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--glass-bg);
+}
+
+.compose-modal__header-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-sm);
 }
 
 /* was: .compose-modal-header h3 */
@@ -71,6 +79,7 @@
 /* was: .close-modal-btn */
 .compose-modal__close-button {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   padding: var(--space-sm);
@@ -354,12 +363,106 @@
 
 .compose-modal__send-progress {
   align-items: center;
+  min-width: 0;
   background: var(--card-bg);
   color: var(--text-secondary);
 }
 
+.compose-modal__send-progress-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.compose-modal__send-progress-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.compose-modal__send-progress-summary strong {
+  flex: none;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 .compose-modal__send-progress span {
+  min-width: 0;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.compose-modal__transfer-error-message {
+  color: var(--status-error);
+}
+
+.compose-modal__transfer-error-detail {
+  font-size: var(--font-size-xs);
+}
+
+.compose-modal__transfer-progress-track {
+  position: relative;
+  width: 100%;
+  height: 0.375rem;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--tertiary-bg);
+}
+
+.compose-modal__transfer-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-primary);
+  transition: width calc(180ms * var(--motion-scale)) linear;
+}
+
+.compose-modal__transfer-progress-bytes {
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-modal__transfer-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.compose-modal__transfer-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-height: 1.875rem;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--tertiary-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.compose-modal__transfer-control:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.compose-modal__transfer-control--danger:hover:not(:disabled) {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.compose-modal__transfer-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .compose-modal__status-icon {
@@ -753,6 +856,10 @@
   .compose-modal__send-progress {
     animation: none;
   }
+
+  .compose-modal__transfer-progress-fill {
+    transition: none;
+  }
 }
 
 
@@ -792,4 +899,94 @@
   .compose-modal__error {
     border-width: 2px;
   }
+}
+
+/* ==================== INVALID ADDRESS MODAL ==================== */
+
+/* Nested above the compose modal: explains why a recipient address was
+   rejected and shows the valid dotted-decimal forms. */
+.compose-modal__address-error-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100; /* above .compose-modal__overlay (1000) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 72%, transparent);
+  backdrop-filter: var(--glass-blur);
+}
+
+.compose-modal__address-error-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: min(28rem, 100%);
+  padding: var(--space-xl);
+  border-radius: var(--radius-md);
+}
+
+.compose-modal__address-error-dialog h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  color: var(--status-error);
+  font-size: var(--font-size-md);
+}
+
+.compose-modal__address-error-reason {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius-md);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.compose-modal__address-error-help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.compose-modal__address-error-help p {
+  margin: 0;
+}
+
+.compose-modal__address-error-help ul {
+  margin: 0;
+  padding-left: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.compose-modal__address-error-help code {
+  color: var(--text-primary);
+  background: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-xs);
+}
+
+.compose-modal__address-error-button {
+  align-self: flex-end;
+  padding: var(--space-sm) var(--space-xl);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-md), var(--glow-primary);
+}
+
+.compose-modal__address-error-button:hover {
+  box-shadow: var(--shadow-lg), var(--glow-primary);
 }
