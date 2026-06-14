@@ -990,3 +990,82 @@
 .compose-modal__address-error-button:hover {
   box-shadow: var(--shadow-lg), var(--glow-primary);
 }
+
+/* ==================== SAVE-NEW-RECIPIENT PROMPT ==================== */
+
+/* Reuses the address-error overlay (z-index 1100). The dialog asks whether
+   to save a just-sent, unknown recipient as a named contact. */
+.compose-modal__new-recipient-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: min(28rem, 100%);
+  padding: var(--space-xl);
+  border-radius: var(--radius-md);
+}
+
+.compose-modal__new-recipient-dialog h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+}
+
+.compose-modal__new-recipient-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+.compose-modal__new-recipient-copy code {
+  color: var(--text-primary);
+  background: var(--card-bg);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-xs);
+  overflow-wrap: anywhere;
+}
+
+.compose-modal__new-recipient-progress {
+  color: var(--text-tertiary);
+}
+
+.compose-modal__new-recipient-fields {
+  display: flex;
+  gap: var(--space-md);
+}
+
+.compose-modal__new-recipient-fields label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.compose-modal__new-recipient-fields input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+}
+
+.compose-modal__new-recipient-fields input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: var(--card-hover);
+}
+
+.compose-modal__new-recipient-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+}

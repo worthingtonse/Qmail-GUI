@@ -1,15 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
 
-    
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="#23364b" stroke="#5fd1d8" stroke-width="3.6" />
+    <!-- .kilo is a "real copper" frame. Same metallic trick as silver/gold:
+         a diagonal gradient (dark copper -> bright rose-gold highlight ->
+         deep brown) plus a thin specular sheen makes the warm reddish metal
+         read as polished copper. -->
+    <defs>
+      <linearGradient id="kilo-rim" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%"   stop-color="#7a3b1d" />
+        <stop offset="24%"  stop-color="#d57b48" />
+        <stop offset="46%"  stop-color="#ffd2ab" />
+        <stop offset="62%"  stop-color="#c96a36" />
+        <stop offset="84%"  stop-color="#6e3417" />
+        <stop offset="100%" stop-color="#b1612f" />
+      </linearGradient>
+      <linearGradient id="kilo-bar" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%"   stop-color="#ffd9b8" />
+        <stop offset="40%"  stop-color="#d87a44" />
+        <stop offset="100%" stop-color="#6e3417" />
+      </linearGradient>
+    </defs>
+
+    <rect x="24" y="10" width="52" height="76" rx="16" fill="#23364b" stroke="url(#kilo-rim)" stroke-width="3.6" />
+    <!-- specular sheen on the upper-left rim -->
+    <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#ffe6cf" stroke-width="1.0" stroke-linecap="round" opacity="0.8" />
     <rect x="22" y="78" width="56" height="8" fill="#23364b" />
-    <rect x="28" y="14" width="44" height="66" rx="13" fill="none" stroke="#b9f3f5" stroke-width="1.2" />
-    
-    <rect x="16.8" y="81.2" width="66.4" height="8.7" rx="4" fill="#5fd1d8" />
-    <rect x="24" y="79.2" width="52" height="4.6" rx="3" fill="#b9f3f5" />
-    
-          <circle cx="22" cy="90" r="2.2" fill="#b9f3f5" />
-          <circle cx="78" cy="90" r="2.2" fill="#b9f3f5" />
-        
-  
+    <!-- inner highlight line: sits flush against the rim's inner edge so
+         there is no dark gap between the two borders -->
+    <rect x="26.4" y="12.4" width="47.2" height="71.2" rx="14" fill="none" stroke="#f3c9a8" stroke-width="1.2" />
+
+    <rect x="16.8" y="81.2" width="66.4" height="8.7" rx="4" fill="url(#kilo-bar)" />
+    <rect x="24" y="79.2" width="52" height="4.6" rx="3" fill="#ffd9b8" />
+
+          <circle cx="22" cy="90" r="2.2" fill="#ffd9b8" />
+          <circle cx="78" cy="90" r="2.2" fill="#ffd9b8" />
+
 </svg>

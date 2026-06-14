@@ -16,7 +16,11 @@ const CONTENT_HEIGHT = 64;
  * bottom in byte order — e.g. 51.254@bit shows symbol 051 above 254
  * inside the "bit" frame. Fewer symbols render larger.
  */
-const QmailCartoucheAvatar = ({ serialNumber, denominationCode }) => {
+const QmailCartoucheAvatar = ({
+  serialNumber,
+  denominationCode,
+  className = "email-list-pane__avatar-cartouche",
+}) => {
   const avatarModel = getQmailAvatarModel({ serialNumber, denominationCode });
   if (!avatarModel) return null;
 
@@ -25,7 +29,7 @@ const QmailCartoucheAvatar = ({ serialNumber, denominationCode }) => {
 
   return (
     <svg
-      className="email-list-pane__avatar-cartouche"
+      className={className}
       viewBox="0 0 100 100"
       aria-hidden="true"
       focusable="false"

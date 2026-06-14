@@ -23,8 +23,10 @@ import {
   getServers,
   saveDraft,
   updateDraft,
+  addContact,
 } from "../../api/qmailApiServices";
 import { parseQmailAddress } from "../address/qmailAddress";
+import { findUnknownRecipients } from "../address/newRecipients";
 import {
   deriveUploadByteProgress,
   extractTransferOperationIds,
@@ -215,9 +217,16 @@ const ComposeModal = ({
   // format validation on send. Unlike the inline `error` banner, this
   // opens a dialog that also explains what a valid address looks like.
   const [invalidAddress, setInvalidAddress] = useState(null);
+  // "Save this recipient as a contact?" prompt shown after a successful
+  // send to addresses the user typed by hand that aren't known contacts.
+  // { addresses: [string], index, firstName, lastName, saving }.
+  const [newRecipientPrompt, setNewRecipientPrompt] = useState(null);
 
   // BUG-04 FIX: Cancellation ref for polling loop
   const cancelledRef = useRef(false);
+  // Recipient addresses typed this send that aren't known contacts — set in
+  // handleSend, consumed on send success to offer saving them as contacts.
+  const unknownRecipientsRef = useRef([]);
   const uploadCancellationRequestedRef = useRef(false);
   const transferOperationIdsRef = useRef([]);
   const autosaveTimerRef = useRef(null);
@@ -253,6 +262,9 @@ const ComposeModal = ({
     if (isOpen) {
       setCanSend(null);
       setNetworkStatus(null);
+      setInvalidAddress(null);
+      setNewRecipientPrompt(null);
+      unknownRecipientsRef.current = [];
       // Load contacts when modal opens
       loadContacts();
       checkNetworkStatus();
@@ -799,6 +811,11 @@ const ComposeModal = ({
       "Unknown Contact",
     );
 
+  // Typed To: addresses that aren't known contacts (offered for saving
+  // after a successful send). Pure logic lives in ../address/newRecipients.
+  const collectUnknownRecipients = (toList) =>
+    findUnknownRecipients(toList, contacts, getContactAddress);
+
   const getRecipientSearchToken = (value) => {
     const tokens = String(value || "").split(",");
     return tokens[tokens.length - 1].trim();
@@ -895,6 +912,63 @@ const ComposeModal = ({
     scheduleAutosave();
     setContactSuggestionField(null);
     setContactQuery("");
+  };
+
+  // ---- first-time-recipient "save as contact?" prompt -------------------
+
+  // Close the prompt and complete the send (close the compose modal). Used
+  // by Skip and by Save once the contact is stored, and after the last
+  // recipient in a multi-recipient prompt is handled.
+  const dismissNewRecipientPrompt = (prompt) => {
+    const emailData = prompt?.emailData;
+    setNewRecipientPrompt(null);
+    unknownRecipientsRef.current = [];
+    if (emailData) onSend(emailData);
+  };
+
+  const handleSaveNewRecipient = async () => {
+    if (!newRecipientPrompt || newRecipientPrompt.saving) return;
+    const current = newRecipientPrompt.addresses[newRecipientPrompt.index];
+    const firstName = newRecipientPrompt.firstName.trim();
+    const lastName = newRecipientPrompt.lastName.trim();
+
+    if (!firstName && !lastName) {
+      // Nothing to save — treat as skip for this recipient.
+      advanceNewRecipientPrompt();
+      return;
+    }
+
+    setNewRecipientPrompt((prev) => ({ ...prev, saving: true }));
+    try {
+      await addContact({
+        serial_number: String(current.serialNumber),
+        denomination: String(current.denominationCode),
+        class_name: current.denominationName,
+        first_name: firstName,
+        last_name: lastName,
+      });
+      // Refresh the local contact list so the new name shows immediately
+      // and a repeat send to the same address won't re-prompt.
+      await loadContacts();
+    } catch (error) {
+      console.error("Failed to save new contact:", error);
+    }
+    advanceNewRecipientPrompt();
+  };
+
+  // Move to the next unknown recipient, or finish if this was the last one.
+  const advanceNewRecipientPrompt = () => {
+    setNewRecipientPrompt((prev) => {
+      if (!prev) return null;
+      const nextIndex = prev.index + 1;
+      if (nextIndex >= prev.addresses.length) {
+        const emailData = prev.emailData;
+        unknownRecipientsRef.current = [];
+        if (emailData) onSend(emailData);
+        return null;
+      }
+      return { ...prev, index: nextIndex, firstName: "", lastName: "", saving: false };
+    });
   };
 
   const toggleContactSuggestions = (field) => {
@@ -999,6 +1073,11 @@ const ComposeModal = ({
       setInvalidAddress({ message: addressError });
       return;
     }
+
+    // Remember which To: addresses aren't known contacts, so we can offer
+    // to save them once the send succeeds. Cc/Bcc are excluded — the prompt
+    // is about people you're actually addressing.
+    unknownRecipientsRef.current = collectUnknownRecipients(toList);
 
     if (!subject.trim()) {
       setError("Please enter a subject");
@@ -1156,6 +1235,30 @@ const ComposeModal = ({
       setTaskId(null);
     };
 
+    // Finish a successful send. If the user typed any To: addresses that
+    // aren't known contacts, open the "save as contact?" prompt and defer
+    // the modal close until they answer; otherwise close normally.
+    const finishSend = (emailData) => {
+      setIsSending(false);
+      setSendingStatus(null);
+      setSendProgress("");
+      setTaskId(null);
+
+      const unknown = unknownRecipientsRef.current;
+      if (unknown.length > 0) {
+        setNewRecipientPrompt({
+          addresses: unknown,
+          index: 0,
+          firstName: "",
+          lastName: "",
+          saving: false,
+          emailData,
+        });
+        return;
+      }
+      onSend(emailData);
+    };
+
     try {
       const emailData = {
         to: toList,
@@ -1296,11 +1399,7 @@ const ComposeModal = ({
                 );
                 setTimeout(() => {
                   if (cancelledRef.current) return;
-                  onSend(emailData);
-                  setIsSending(false);
-                  setSendingStatus(null);
-                  setSendProgress("");
-                  setTaskId(null);
+                  finishSend(emailData);
                 }, 1500);
               } else if (
                 uploadCancellationRequestedRef.current ||
@@ -1364,10 +1463,7 @@ const ComposeModal = ({
         );
         setTimeout(() => {
           if (cancelledRef.current) return;
-          onSend(emailData);
-          setIsSending(false);
-          setSendingStatus(null);
-          setSendProgress("");
+          finishSend(emailData);
         }, 1500);
       } else {
         const sendError = new Error(result.error || "Failed to send email");
@@ -2102,6 +2198,94 @@ const ComposeModal = ({
           </div>
         </div>
       )}
+
+      {/* First-time recipient: offer to save the address as a named contact */}
+      {newRecipientPrompt && (() => {
+        const total = newRecipientPrompt.addresses.length;
+        const current = newRecipientPrompt.addresses[newRecipientPrompt.index];
+        return (
+          <div
+            className="compose-modal__address-error-overlay"
+            role="presentation"
+          >
+            <div
+              className="compose-modal__new-recipient-dialog glass-container"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="compose-new-recipient-title"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h4 id="compose-new-recipient-title">
+                <Users size={18} />
+                Save this recipient?
+              </h4>
+              <p className="compose-modal__new-recipient-copy">
+                Your message was sent. Give{" "}
+                <code>{current.canonical}</code> a name to add them to your
+                contacts, so next time you can just type their name.
+                {total > 1 && (
+                  <span className="compose-modal__new-recipient-progress">
+                    {" "}({newRecipientPrompt.index + 1} of {total})
+                  </span>
+                )}
+              </p>
+              <div className="compose-modal__new-recipient-fields">
+                <label>
+                  First name
+                  <input
+                    type="text"
+                    value={newRecipientPrompt.firstName}
+                    disabled={newRecipientPrompt.saving}
+                    autoFocus
+                    onChange={(event) =>
+                      setNewRecipientPrompt((prev) => ({
+                        ...prev,
+                        firstName: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label>
+                  Last name
+                  <input
+                    type="text"
+                    value={newRecipientPrompt.lastName}
+                    disabled={newRecipientPrompt.saving}
+                    onChange={(event) =>
+                      setNewRecipientPrompt((prev) => ({
+                        ...prev,
+                        lastName: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="compose-modal__new-recipient-actions">
+                <button
+                  type="button"
+                  className="compose-modal__draft-button"
+                  onClick={() =>
+                    total > 1
+                      ? advanceNewRecipientPrompt()
+                      : dismissNewRecipientPrompt(newRecipientPrompt)
+                  }
+                  disabled={newRecipientPrompt.saving}
+                >
+                  {total > 1 ? "Skip" : "Not now"}
+                </button>
+                <button
+                  type="button"
+                  className="compose-modal__send-button"
+                  onClick={handleSaveNewRecipient}
+                  disabled={newRecipientPrompt.saving}
+                >
+                  {newRecipientPrompt.saving ? "Saving..." : "Save contact"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
