@@ -2742,7 +2742,10 @@ export const getMailNotifications = async () => {
           return {
             ...notification,
             ...senderFields,
+            id: notification.id ?? notification.notification_id ?? null,
+            notificationId: notification.notification_id ?? notification.id ?? null,
             guid: notification.file_guid,
+            fileGuid: notification.file_guid,
             sender_address:
               senderFields.sender_address ||
               notification.sender_name ||
@@ -2777,7 +2780,40 @@ export const downloadEmailContent = async (guid, { background = false } = {}) =>
     const data = await handleResponse(response);
     return { success: true, data };
   } catch (error) {
-    return { success: false, error: error.message };
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus,
+      data: error.apiData || null,
+      apiData: error.apiData || null,
+    };
+  }
+};
+
+export const dismissMailNotification = async ({ id, fileGuid, guid } = {}) => {
+  try {
+    const notificationId = id ?? null;
+    const notificationGuid = fileGuid || guid || "";
+    const query = notificationId
+      ? `id=${encodeURIComponent(notificationId)}`
+      : `file_guid=${encodeURIComponent(notificationGuid)}`;
+    if (!notificationId && !notificationGuid) {
+      throw new Error("Notification id or file GUID is required");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/db/notifications/dismiss?${query}`,
+      { method: "DELETE" },
+    );
+    const data = await handleResponse(response);
+    return { success: true, data };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus,
+      data: error.apiData || null,
+    };
   }
 };
 

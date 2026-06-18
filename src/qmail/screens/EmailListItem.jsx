@@ -28,7 +28,11 @@ const EmailListItem = ({
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const actionMenuRef = useRef(null);
   const isTrashItem = email.isTrashed || email.folder === "trash";
-  const deleteTitle = isTrashItem ? "Delete permanently" : "Move to trash";
+  const deleteTitle = email.isPending
+    ? "Delete pending encrypted message"
+    : isTrashItem
+      ? "Delete permanently"
+      : "Move to trash";
   const itemClassName = [
     "email-list-pane__item",
     isSelected ? "email-list-pane__item--selected" : "",
@@ -193,19 +197,31 @@ const EmailListItem = ({
           actionMenu
         )}
         {email.isPending ? (
-          email.isDecrypting ? (
-            <Loader2
-              size={16}
-              className="email-list-pane__pending-icon email-list-pane__pending-icon--decrypting spinning"
-              title="Decrypting message"
-            />
-          ) : (
-            <Mail
-              size={16}
-              className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
-              title="Unread message queued for background decryption"
-            />
-          )
+          <>
+            {email.isDecrypting ? (
+              <Loader2
+                size={16}
+                className="email-list-pane__pending-icon email-list-pane__pending-icon--decrypting spinning"
+                title="Decrypting message"
+              />
+            ) : (
+              <Mail
+                size={16}
+                className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
+                title="Unread message queued for background decryption"
+              />
+            )}
+            <div
+              className="email-list-pane__list-trash-indicator"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteEmail && onDeleteEmail(email, false);
+              }}
+              title={deleteTitle}
+            >
+              <Trash2 size={14} className="email-list-pane__list-trash-icon" />
+            </div>
+          </>
         ) : (
           <>
             {!email.isDraft && (

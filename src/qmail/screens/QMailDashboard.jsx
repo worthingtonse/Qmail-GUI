@@ -28,6 +28,7 @@ import {
   emptyTrashFolder,
   getMailNotifications,
   downloadEmailContent,
+  dismissMailNotification,
   downloadMailAttachment,
   getObjectTransferStatus,
   cancelObjectTransfer,
@@ -122,6 +123,121 @@ const getFirstNonBlankText = (...values) =>
   values.find(
     (value) => typeof value === "string" && value.trim().length > 0,
   ) || "";
+
+const collectDecryptErrorText = (source = {}) => {
+  const sources = [
+    source,
+    source?.data,
+    source?.apiData,
+    source?.payload,
+    source?.result,
+  ].filter(Boolean);
+  return getFirstNonBlankText(
+    ...sources.flatMap((item) => [
+      item.error,
+      item.error_message,
+      item.errorMessage,
+      item.message,
+      item.detail,
+      item.details,
+    ]),
+  );
+};
+
+const normalizeQmailDecryptError = (source = {}, fallbackMessage = "QMail could not decrypt this message.") => {
+  const transferError = normalizeTransferError(source?.apiData || source?.data || source, {
+    fallbackMessage,
+    terminal: true,
+  });
+  if (transferError) {
+    return {
+      title: transferError.title,
+      message: transferError.message,
+      detail: transferError.detail,
+      canRetry: transferError.canRetry !== false,
+    };
+  }
+
+  const detail = collectDecryptErrorText(source) || fallbackMessage;
+  const text = detail.toLowerCase();
+
+  if (/helper|rejected/.test(text)) {
+    return {
+      title: "Helper coin needs repair",
+      message: "The helper coin used for this download was rejected by one or more RAIDA servers. Run a health check, then try again.",
+      detail,
+      canRetry: true,
+    };
+  }
+  if (/not enough|insufficient.*stripes|stripes.*downloaded|missing.*stripes/.test(text)) {
+    return {
+      title: "Not enough message parts",
+      message: "QMail could not download enough message parts to rebuild this email. Try again later; if it keeps failing, delete the message or ask the sender to resend it.",
+      detail,
+      canRetry: true,
+    };
+  }
+  if (/crc|hash|integrity|corrupt|mismatch/.test(text)) {
+    return {
+      title: "Message integrity check failed",
+      message: "The downloaded message parts did not match the sender's integrity check. Try once more; if it repeats, delete the message or ask the sender to resend it.",
+      detail,
+      canRetry: true,
+    };
+  }
+  if (/not found|no stored tell|no longer exists|expired|not available|not committed/.test(text)) {
+    return {
+      title: "Message is no longer available",
+      message: "The QMail servers do not have the data needed to decrypt this message. Ask the sender to resend it, or delete the pending message.",
+      detail,
+      canRetry: false,
+    };
+  }
+  if (/manifest|malformed|invalid.*format|invalid.*message|parse/.test(text)) {
+    return {
+      title: "Invalid QMail message",
+      message: "This message is not in a valid QMail format. Ask the sender to resend it, or delete the pending message.",
+      detail,
+      canRetry: false,
+    };
+  }
+  if (/identity|mail id|encryption key|decrypt key|no encryption/.test(text)) {
+    return {
+      title: "Mail ID needs repair",
+      message: "Your Mail ID or encryption key could not decrypt this message. Run a health check, then try again.",
+      detail,
+      canRetry: true,
+    };
+  }
+  if (/timeout|temporarily unavailable|service unavailable|busy/.test(text)) {
+    return {
+      title: "QMail service is busy",
+      message: "QMail did not finish decrypting this message in time. Wait a moment, then try again.",
+      detail,
+      canRetry: true,
+    };
+  }
+  if (/network|connection|fetch|offline|unreachable|raida/.test(text)) {
+    return {
+      title: "Network problem",
+      message: "QMail could not reach enough RAIDA servers. Check your connection, then try again.",
+      detail,
+      canRetry: true,
+    };
+  }
+
+  return {
+    title: "Could not decrypt message",
+    message: "QMail could not determine why this message failed. Try again; if it keeps failing, delete it or ask the sender to resend it.",
+    detail,
+    canRetry: true,
+  };
+};
+
+const formatDecryptErrorNotification = (error) =>
+  error?.title && error?.message
+    ? `${error.title}: ${error.message}`
+    : "QMail could not decrypt this message.";
 
 const buildPreviewState = (body, ...previewCandidates) => {
   const preview = getFirstNonBlankText(...previewCandidates);
@@ -497,7 +613,9 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
 
       return {
         id: `pending-${identifier || guid}`,
+        notificationId: notif.notificationId ?? notif.notification_id ?? notif.id ?? null,
         guid,
+        fileGuid: guid,
         ...senderFields,
         subject: `${isDecrypting ? "Decrypting" : "Encrypted"} message${sequence > 1 ? ` #${sequence}` : ""}`,
         preview: isDecrypting
@@ -515,12 +633,39 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   }, [decryptingMailIds, pendingMails]);
 
   const displayEmails = useMemo(() => {
-    const baseEmails = currentFolder === "inbox"
-      ? [...formattedPendingMails, ...emails]
-      : emails;
+    if (currentFolder !== "inbox") return emails;
+
+    const merged = [...formattedPendingMails, ...emails];
+
+    let ordered = merged;
+    if (sortMode === "newest") {
+      // The backend sorts received mail newest-first, but pending/encrypted mail
+      // is merged in on the client and must be interleaved by its real arrival
+      // time — otherwise an older pending message floats above newer received
+      // mail. A pending message with no timestamp yet is genuinely newest, so it
+      // stays on top; a received message with no send time ("—") sinks to bottom.
+      const sortKey = (email) => {
+        const ms = timestampToMs(email.rawTimestamp);
+        if (ms) return ms;
+        return email.isPending ? Number.POSITIVE_INFINITY : 0;
+      };
+      ordered = merged
+        .map((email, index) => ({ email, index }))
+        .sort((a, b) => {
+          const diff = sortKey(b.email) - sortKey(a.email);
+          if (diff) return diff;
+          // Tiebreak: keep pending ahead of received, otherwise stable order.
+          if (a.email.isPending !== b.email.isPending) {
+            return a.email.isPending ? -1 : 1;
+          }
+          return a.index - b.index;
+        })
+        .map(({ email }) => email);
+    }
+
     return sortMode === "unread"
-      ? baseEmails.filter((email) => !email.isRead)
-      : baseEmails;
+      ? ordered.filter((email) => !email.isRead)
+      : ordered;
   }, [currentFolder, formattedPendingMails, emails, sortMode]);
   const qmailAddress = useMemo(() => (
     userAccount?.prettyAddress ||
@@ -1853,7 +1998,62 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
+  const handleDeletePendingEmail = async (pendingEmail) => {
+    const identifier = getEmailDownloadIdentifier(pendingEmail);
+    const source = pendingMailsRef.current.find(
+      (mail) => getEmailDownloadIdentifier(mail) === identifier,
+    );
+    const notificationId =
+      pendingEmail?.notificationId ??
+      pendingEmail?.notification_id ??
+      source?.notificationId ??
+      source?.notification_id ??
+      source?.id ??
+      null;
+    const fileGuid =
+      pendingEmail?.fileGuid ||
+      pendingEmail?.file_guid ||
+      pendingEmail?.guid ||
+      source?.fileGuid ||
+      source?.file_guid ||
+      source?.guid ||
+      identifier;
+
+    const result = await dismissMailNotification({
+      id: notificationId,
+      fileGuid,
+    });
+    if (!result.success) {
+      showDashboardNotification(
+        result.error || "Could not delete the pending encrypted message.",
+        "error",
+      );
+      return;
+    }
+
+    setPendingMails((prev) => {
+      const next = prev.filter(
+        (mail) => getEmailDownloadIdentifier(mail) !== identifier,
+      );
+      pendingMailsRef.current = next;
+      return next;
+    });
+    tellDownloadQueuedIdsRef.current.delete(identifier);
+    decryptRevealDeadlineRef.current.delete(identifier);
+    setMailDecrypting(identifier, false);
+    if (selectedEmail && getEmailDownloadIdentifier(selectedEmail) === identifier) {
+      setSelectedEmail(null);
+    }
+    await loadMailCounts();
+    showDashboardNotification("Pending encrypted message deleted.", "success");
+  };
+
 const handleDeleteEmail = async (emailId, isPermanent = false) => {
+    if (emailId && typeof emailId === "object" && emailId.isPending) {
+      await handleDeletePendingEmail(emailId);
+      return;
+    }
+
     // FIX: Automatically force permanent delete if we are currently viewing the trash folder!
     const forcePermanent = isPermanent || currentFolder === "trash";
 
@@ -2586,7 +2786,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
 
           if (!downloadOk) {
             if (shouldNotifyFailure()) {
-              showDashboardNotification("Failed to decrypt message.", "error");
+              showDashboardNotification(formatDecryptErrorNotification(normalizeQmailDecryptError(downloadRes)), "error");
             }
             return null;
           }
@@ -2603,7 +2803,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
 
           if (!emailId) {
             if (shouldNotifyFailure()) {
-              showDashboardNotification("Failed to decrypt message.", "error");
+              showDashboardNotification(formatDecryptErrorNotification(normalizeQmailDecryptError(downloadRes)), "error");
             }
             return null;
           }
@@ -2613,7 +2813,10 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           if (!hydrated) {
             if (shouldNotifyFailure()) {
               showDashboardNotification(
-                "Service temporarily unavailable. Try opening the message again.",
+                formatDecryptErrorNotification(normalizeQmailDecryptError(
+                  { message: "Message downloaded but could not be loaded locally." },
+                  "Message downloaded but could not be loaded locally.",
+                )),
                 "warning",
               );
             }
@@ -2729,7 +2932,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       } catch (error) {
         console.error("Download failed:", error);
         if (shouldNotifyFailure()) {
-          showDashboardNotification("Download failed", "error");
+          showDashboardNotification(formatDecryptErrorNotification(normalizeQmailDecryptError(error, "Download failed.")), "error");
         }
         return null;
       } finally {
