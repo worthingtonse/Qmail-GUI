@@ -145,22 +145,17 @@ const collectDecryptErrorText = (source = {}) => {
 };
 
 const normalizeQmailDecryptError = (source = {}, fallbackMessage = "QMail could not decrypt this message.") => {
-  const transferError = normalizeTransferError(source?.apiData || source?.data || source, {
-    fallbackMessage,
-    terminal: true,
-  });
-  if (transferError) {
-    return {
-      title: transferError.title,
-      message: transferError.message,
-      detail: transferError.detail,
-      canRetry: transferError.canRetry !== false,
-    };
-  }
-
   const detail = collectDecryptErrorText(source) || fallbackMessage;
   const text = detail.toLowerCase();
 
+  if (/no pending tell|file_guid|sender_sn|download directly/.test(text)) {
+    return {
+      title: "Message is no longer pending",
+      message: "QMail could not find the encrypted notice for this message. Refresh the inbox; if it still appears encrypted, delete the pending message.",
+      detail,
+      canRetry: false,
+    };
+  }
   if (/helper|rejected/.test(text)) {
     return {
       title: "Helper coin needs repair",
@@ -226,6 +221,18 @@ const normalizeQmailDecryptError = (source = {}, fallbackMessage = "QMail could 
     };
   }
 
+  const transferError = normalizeTransferError(source?.apiData || source?.data || source, {
+    fallbackMessage,
+    terminal: true,
+  });
+  if (transferError) {
+    return {
+      title: transferError.title,
+      message: transferError.message,
+      detail: transferError.detail,
+      canRetry: transferError.canRetry !== false,
+    };
+  }
   return {
     title: "Could not decrypt message",
     message: "QMail could not determine why this message failed. Try again; if it keeps failing, delete it or ask the sender to resend it.",
