@@ -192,10 +192,10 @@ const EmailListPane = ({
         ) : emails.length === 0 ? (
           <div className="email-list-pane__empty-state">
             <Mail size={48} />
-            <h3>No emails found</h3>
+            <h3>No qmails found</h3>
             <p>
               {searchQuery
-                ? `No emails matching "${searchQuery}" in ${getFolderTitle(currentFolder).toLowerCase()}`
+                ? `No qmails matching "${searchQuery}" in ${getFolderTitle(currentFolder).toLowerCase()}`
                 : `Your ${getFolderTitle(currentFolder).toLowerCase()} is empty`}
             </p>
           </div>

@@ -365,7 +365,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
             <X size={16} />
           </button>
           <p>
-            You do not have to purchase an email address if you have a RAIDA
+            You do not have to purchase a qmail address if you have a RAIDA
             locker code that contains one CloudCoin note valued more than 10
             CloudCoins. The CloudCoin will be imported from the locker into this
             program so you can stake your Qmail address. Locker codes can be
@@ -485,7 +485,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
         </div>
         <h1 className="service-selection-screen__title">Welcome to QMail</h1>
         <p className="service-selection-screen__description">
-          Experience the next generation of secure communication. Quantum-resistant encryption protecting your digital legacy.
+          Experience the next generation of secure communication. Quantum-safe encryption protecting your digital legacy.
         </p>
         {currentStep === 'initial' && renderInitialScreen()}
         {currentStep === 'locker-input' && renderLockerInput()}

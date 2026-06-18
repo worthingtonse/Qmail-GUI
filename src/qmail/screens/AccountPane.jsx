@@ -181,7 +181,7 @@ const SoundSettings = () => {
   return (
     <div className="account-pane__setting-item">
       <div className="account-pane__setting-info">
-        <div className="account-pane__setting-title">Mail Sound Alerts</div>
+        <div className="account-pane__setting-title">Qmail Sound Alerts</div>
         <div className="account-pane__setting-description">
           Play a chime when QMail detects a newly received message.
         </div>
@@ -499,7 +499,7 @@ const AccountPane = ({ userAccount, onSignOut }) => {
 
                 {userAccount.recovery_email && (
                   <div className="account-pane__profile-field">
-                    <label className="account-pane__field-label">Recovery Email</label>
+                    <label className="account-pane__field-label">Recovery Qmail</label>
                     <div className="account-pane__field-value">
                       {userAccount.recovery_email}
                     </div>

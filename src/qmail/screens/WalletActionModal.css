@@ -186,11 +186,33 @@
   cursor: wait;
 }
 
-.wallet-action-modal__receipt-header div {
+.wallet-action-modal__receipt-title {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: calc(var(--space-xs) / 2);
+}
+
+.wallet-action-modal__receipt-header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.wallet-action-modal__receipt-raw-toggle {
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wallet-action-modal__receipt-raw-toggle:hover {
+  color: var(--text-primary);
 }
 
 .wallet-action-modal__receipt-header strong {
@@ -229,6 +251,109 @@
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.wallet-action-modal__receipt-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-lg);
+  background: var(--secondary-bg);
+}
+
+.wallet-action-modal__receipt-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.wallet-action-modal__receipt-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+.wallet-action-modal__receipt-summary > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.wallet-action-modal__receipt-summary dt {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.wallet-action-modal__receipt-summary dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-align: right;
+}
+
+.wallet-action-modal__receipt-mono {
+  font-family: var(--font-mono, monospace);
+}
+
+.wallet-action-modal__receipt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.wallet-action-modal__receipt-table th,
+.wallet-action-modal__receipt-table td {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.wallet-action-modal__receipt-table th:first-child,
+.wallet-action-modal__receipt-table td:first-child {
+  text-align: left;
+}
+
+.wallet-action-modal__receipt-table thead th {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wallet-action-modal__receipt-table tbody th {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.wallet-action-modal__receipt-table tbody td {
+  color: var(--text-primary);
+}
+
+.wallet-action-modal__receipt-table tfoot th,
+.wallet-action-modal__receipt-table tfoot td {
+  border-bottom: none;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.wallet-action-modal__receipt-coins summary {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.wallet-action-modal__receipt-coins[open] summary {
+  margin-bottom: var(--space-xs);
+}
+
+.wallet-action-modal__receipt-note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 /* Receipt shown as its own modal on top of the wallet action modal. */

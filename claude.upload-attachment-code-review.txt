@@ -1,0 +1,575 @@
+================================================================================
+CODE REVIEW: LARGE-ATTACHMENT UPLOAD / OBJECT TRANSFER v1
+================================================================================
+Date:      2026-06-12
+Reviewer:  Claude (multi-agent review: one reviewer per repo + cross-repo
+           protocol consistency check; all BLOCKER/HIGH findings independently
+           re-verified against current file contents)
+
+Repos and scope reviewed:
+  1. D:\Code\src\C\rest_core
+       Commits c31be50..HEAD (dc34ef6, 328e17e "attachment-on-demand +
+       non-blocking download path", 1e02d71 "add object transfer support")
+       plus uncommitted working-tree changes and untracked files
+       (api_handlers_qmail_object_transfer.c, qmail_send_object_transfer.h,
+       qmail_receive_object_transfer.h, QMAIL_OBJECT_TRANSFER_API.md).
+  2. D:\Code\src\php\cloudcoin.org-main
+       Commits 4fd0f08..HEAD (large upload cmd 75, paged download cmd 74,
+       Object Transfer v1 freeze) plus working tree and untracked
+       qmail-commands/net-object-transfers.php.
+  3. D:\Code\src\javascript\Qmail-GUI
+       Commit 07f17b4 "attachment-on-demand GUI + render-first inbox loading"
+       plus uncommitted working-tree changes and untracked files
+       (activeTransferRegistry.js, transferErrors.js, ActiveTransfersPanel).
+
+Excluded per instructions: .svg files, test files/harnesses, and everything
+belonging to the qmail address-format change (wordlist removal, avatars,
+contacts/identity handlers, scripts/).
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+The wire protocol itself is in excellent shape. The frozen Object Transfer v1
+spec (PHP pages + JSON schema + test vectors), and the C implementation in
+rest_core were compared byte-by-byte across all nine commands (76-84), the
+manifest v2 entry, and the cmd 74/75 paging path: ZERO wire-format mismatches.
+Reserved fields, endianness, the 144-byte OBJECT_BEGIN layout (including the
+documented 7-byte reserved gap at offsets 77-83), the cmd-75 page echo, and the
+paged-download page-count math all agree across spec, vectors, and code.
+
+The real issues are at the edges:
+
+  - rest_core: two genuine bugs in the REST handler layer (uninitialized
+    struct serialized to JSON on a failure path; status handler collapses all
+    DB errors to 404), no path-traversal restriction on upload/download paths
+    taken from HTTP requests, and several smaller error-handling gaps.
+  - Qmail-GUI: the download path buffers the ENTIRE attachment in renderer
+    memory (directly at odds with the point of the feature), the open-path
+    IPC handler will open any path the renderer hands it, and a cluster of
+    cancel/resume/re-entrancy races in the transfer UI.
+  - cloudcoin.org-main: documentation drift only - stale "command 76 is not
+    assigned" text, status codes 167/169/202 missing from the machine-readable
+    status table, a phantom "queued" state, and QMAIL_OBJECT_TRANSFER_API.md
+    saying wallet_path is required when the code treats it as optional.
+
+One finding reported during review was REJECTED as a false positive (see
+"Rejected findings" at the end): the claim that parallel download range writes
+fail because "r+b" cannot extend a file. Seek-past-EOF + write in update mode
+is well-defined on both POSIX and the Windows CRT and extends the file; MSVC
+fopen also defaults to _SH_DENYNO sharing, so the parallel writers are fine.
+
+Finding count: 2 HIGH + 1 security HIGH in rest_core; 2 HIGH-severity and
+4 HIGH UI/race issues in Qmail-GUI; 7 doc findings in cloudcoin.org-main.
+
+================================================================================
+SECTION 1: rest_core (C)
+================================================================================
+
+--------------------------------------------------------------------------------
+R-1  HIGH - Uninitialized struct serialized to JSON when qmail_transfer_get
+     fails after resume/cancel                                   [verified]
+--------------------------------------------------------------------------------
+File: api_src/api_handlers_qmail_object_transfer.c:447-449 (resume) and
+      470-473 (cancel)
+
+    qmail_transfer_record_t record;
+    qmail_transfer_get(operation_id, &record);          // return ignored
+    send_transfer_response(response, &record, ...);
+
+After a successful resume or cancel, the record is re-fetched for the response
+body but the return value of qmail_transfer_get() is discarded. If the get
+fails (DB I/O error, or the record is purged between the resume call and the
+get), `record` is indeterminate stack memory and send_transfer_response()
+serializes garbage - including uninitialized path buffers - into the HTTP
+response. That is both an information-leak (stack contents leave the process)
+and a correctness bug.
+
+Fix: memset(&record, 0, sizeof(record)) before the call AND check the return;
+on failure, return a minimal success response ("Transfer resumed") without the
+record body, or a 500 with the result code.
+
+--------------------------------------------------------------------------------
+R-2  HIGH - No path restriction on source_path / destination_path from HTTP
+--------------------------------------------------------------------------------
+File: api_src/api_handlers_qmail_object_transfer.c:275-276 (upload) and
+      364-365 (download)
+
+source_path (upload) and destination_path (download) come straight from
+request parameters into qmail_transfer_create_upload/download with no
+traversal or prefix checks. Anyone who can reach the REST port can exfiltrate
+any readable file (upload it to a RAIDA) or write a downloaded object to an
+arbitrary writable path. The API is documented as local-only, but nothing in
+the transport layer enforces a bind to localhost-only AND other local
+processes/users can still hit it.
+
+Fix: canonicalize the path (realpath/GetFullPathName), reject any path that
+does not fall under an allowed root (e.g. Client_Data or an explicit
+configured downloads root), and reject ".." components before canonicalization
+as a belt-and-braces measure.
+
+--------------------------------------------------------------------------------
+R-3  MEDIUM - Status handler maps every failure to 404
+--------------------------------------------------------------------------------
+File: api_src/api_handlers_qmail_object_transfer.c:419-425        [verified]
+
+api_handle_qmail_object_transfer_status() returns "Transfer not found", 404
+for ALL non-success results from qmail_transfer_get(), masking internal DB
+errors as not-found. This violates the project's own CLAUDE.md rule
+("NEVER treat all failures as 404"). The GUI's reconcile loop treats 404 as
+"transfer gone, drop it from the registry" - a transient DB error would make
+the client silently forget a live transfer.
+
+Fix: 404 only for RESULT_NOT_FOUND; 500 (with result code) for anything else.
+
+--------------------------------------------------------------------------------
+R-4  MEDIUM - json_add_int used for uint32_t chunk size
+--------------------------------------------------------------------------------
+File: api_src/api_handlers_qmail_object_transfer.c:137
+
+json_add_int(jb, "chunk_bytes", (int)record->accepted_chunk) wraps negative
+for accepted_chunk > INT_MAX. The transfer manager accepts any chunk up to the
+server-advertised max_chunk, which has no enforced ceiling below UINT32_MAX.
+CLAUDE.md requires json_add_int64 for any value that can exceed INT_MAX.
+
+Fix: json_add_int64(jb, "chunk_bytes", (int64_t)record->accepted_chunk).
+
+--------------------------------------------------------------------------------
+R-5  MEDIUM - Failed spawn after resume leaves a misleading DB record
+--------------------------------------------------------------------------------
+File: src/qmail/qmail_transfer_manager.c:1703-1720
+
+qmail_transfer_resume() clears retry_count and error_message, then calls
+spawn_operation(). If the spawn fails (active set at its 64-operation cap, or
+thread creation failure), the handler correctly returns 409, but the record
+has already been scrubbed: state=paused with no error message and no progress.
+A client polling status sees a clean paused transfer with no hint that resume
+is failing.
+
+Fix: on spawn failure, write a descriptive error_message back to the record
+("resume failed: server at capacity") before returning; consider 503 rather
+than 409 for the at-capacity case so clients can distinguish it.
+
+--------------------------------------------------------------------------------
+R-6  LOW - Dead duplicate shutdown check with copy-pasted wrong message
+--------------------------------------------------------------------------------
+File: src/qmail/qmail_transfer_manager.c:881-892
+
+run_upload() has two back-to-back identical s_shutdown checks; the second is
+unreachable and its message ("Object deletion paused...") was copy-pasted from
+run_delete(). Harmless today, but it suggests a different check was intended
+(e.g. operation_cancelled()) and will mislead future readers.
+
+Fix: delete lines 887-892, or replace with the check that was actually meant.
+
+--------------------------------------------------------------------------------
+R-7  LOW - task left in "running" state when DB insert fails for delete ops
+--------------------------------------------------------------------------------
+File: src/qmail/qmail_transfer_manager.c:1686-1687
+
+qmail_transfer_create_delete() returns early when qmail_transfer_store_insert
+fails but - unlike the upload (1606-1609) and download (1654-1657) twins -
+does not call task_fail(), leaving the Tasks/ entry running forever.
+
+Fix: add task_fail(record.task_id, "Failed to persist the transfer") before
+the early return, matching the other two creators.
+
+--------------------------------------------------------------------------------
+R-8  ADVISORY - Pre-allocate the download temp file
+--------------------------------------------------------------------------------
+File: src/qmail/qmail_transfer_manager.c:1244-1252, 510-523
+
+The temp file is created empty and parallel range workers extend it by
+seeking past EOF and writing. That is correct and well-defined (see Rejected
+findings), but pre-allocating to total_size up front (ftruncate /
+SetEndOfFile) would surface disk-full immediately instead of mid-transfer,
+and avoids sparse-file fragmentation on the .qmail.part file.
+
+--------------------------------------------------------------------------------
+R-9  ADVISORY - Defensive page-size constant looser than the frozen spec
+--------------------------------------------------------------------------------
+File: src/protocol.c:29
+
+QMAIL_UPLOAD_LARGE_MAX_PAGE_DATA is 1 MiB, but the frozen cmd-75 contract caps
+page data at 262144 bytes (max body 262234). Harmless today because the only
+producer (qmail_upload.c) enforces 256 KiB, but the cross-check constant should
+mirror the contract: set it to 262144.
+
+Also noted (no action required): the begin-response validation in
+qmail_transfer_manager.c:946-960 (accepted_chunk <= preferred_chunk, exact
+retention echo, base_generation check) conforms exactly to spec section 6 -
+good work. The state machine, durable store, and restart reconcile path
+(cmd 78 reconcile + cmd 81 pin) match QMAIL_OBJECT_TRANSFER_API.md.
+
+================================================================================
+SECTION 2: Qmail-GUI (Electron + React)
+================================================================================
+
+--------------------------------------------------------------------------------
+G-1  HIGH - Entire attachment buffered in renderer memory on download
+                                                                  [verified]
+--------------------------------------------------------------------------------
+File: src/api/qmailApiServices.js:2860-2880 (downloadMailAttachment)
+
+The download reads the response stream chunk-by-chunk into a JS array
+(chunks.push(value)) and then constructs a Blob from it. The full attachment
+body lives in the renderer's V8 heap before a single byte reaches disk, and
+transiently ~2x during Blob construction. For the very feature this work
+exists to enable - huge attachments - this caps practical size at whatever
+the renderer heap tolerates and will OOM-crash the renderer on multi-hundred-MB
+files with no user-visible error. It also contradicts the project's own
+checklist (docs/qmail-object-transfer-v1-client-checklist.md): "Never load an
+entire large attachment into renderer memory" / "Downloads must stream to a
+temporary file."
+
+The checklist does defer true streaming to a later phase, but the current
+code is strictly worse than the simple alternative: response.blob() (already
+used as the fallback path) lets Chromium's blob storage spill large bodies to
+disk instead of pinning them in the JS heap.
+
+Fix (interim): drop the manual reader loop and use response.blob() uniformly;
+progress can come from the X-QMail-Operation-Id status polling that already
+exists. Fix (proper): route the download through the main process and stream
+to a temp file via IPC, per the checklist.
+
+--------------------------------------------------------------------------------
+G-2  HIGH (security) - open-path IPC opens any renderer-supplied path
+                                                                  [verified]
+--------------------------------------------------------------------------------
+File: electron.cjs:723-735; exposed via preload.cjs
+
+ipcMain.handle('open-path') trims the string it receives and passes it
+directly to shell.openPath(). Nothing restricts it to paths the main process
+produced. The values that reach it include destination_path read off API
+responses (normalizeObjectTransferStatus), so the backend - or anything that
+can influence its responses - chooses what the OS opens; a compromised
+renderer can open arbitrary executables.
+
+Fix: maintain an allowlist in the main process - paths under
+app.getPath('downloads'), backendDataDir, and paths returned by
+dialog.showSaveDialog - and verify the resolved canonical path is inside one
+of those roots before calling shell.openPath. Prefer shell.showItemInFolder
+for "show me the file" UX since it cannot execute the target.
+
+--------------------------------------------------------------------------------
+G-3  HIGH - Cancel race: local abort fires before server-side cancel lands
+--------------------------------------------------------------------------------
+File: src/qmail/screens/QMailDashboard.jsx:2958-2991
+
+handleCancelAttachmentDownload() aborts the local fetch immediately while the
+durable cancelObjectTransfer() call is still in flight. The abort tears down
+the progress state (attachmentDownloadAbortRef is nulled in the finally), so
+the user can click Resume/re-download and start a NEW download for the same
+operation while the cancel for the old one is still racing it on the
+single-threaded backend.
+
+Fix: set a "cancelling" lock first, await the durable cancel (or its
+settlement), and only then clear local state; have handleDownloadAttachment /
+handleResumeAttachmentDownload refuse to start while the lock is held.
+
+--------------------------------------------------------------------------------
+G-4  HIGH - Re-entrancy guard on attachment click uses async React state
+--------------------------------------------------------------------------------
+File: src/qmail/screens/ReadingPane.jsx:144; QMailDashboard.jsx:3056
+
+The double-click guard is `attachmentDownloadProgress != null`, but that state
+is set asynchronously. Two fast clicks (same or different attachments) both
+pass the guard; the second overwrites attachmentDownloadAbortRef.current, so
+the first download can no longer be cancelled and the two progress streams
+fight over one progress state.
+
+Fix: a synchronous ref lock (downloadInProgressRef.current = true at the top
+of performAttachmentDownload before any await, cleared in finally), checked
+before creating the AbortController.
+
+--------------------------------------------------------------------------------
+G-5  HIGH - Reconcile loop polls every restored transfer every second
+--------------------------------------------------------------------------------
+File: src/qmail/screens/QMailDashboard.jsx:541-602
+
+The restored-transfer reconcile interval fires every 1 s and issues
+getObjectTransferStatus for every unfinished restored transfer in parallel
+via Promise.all. The code elsewhere (drainTellDownloadQueue, comment at
+line ~456) explicitly serializes requests because rest_core's HTTP server is
+single-threaded; this loop does the opposite and will queue N concurrent
+requests behind real transfer traffic.
+
+Fix: poll restored transfers every 5-10 s, cap concurrency at 1-2 (reuse the
+serialization approach drainTellDownloadQueue already uses).
+
+--------------------------------------------------------------------------------
+G-6  MEDIUM - Resume after pause leaves the UI in a dead "Sending..." state
+--------------------------------------------------------------------------------
+File: src/qmail/screens/ComposeModal.jsx:1377-1421
+
+handleResumeUpload() calls resumeObjectTransfer per operation and sets
+isSending=true, but never re-enters the task/status polling loop (taskId state
+was cleared when the send was marked paused/failed). The transfer proceeds or
+fails on the server with no UI updates; the modal shows "Sending..." until
+closed.
+
+Fix: keep taskId (and operation ids) in a ref that survives the state reset
+and restart the polling loop after a successful resume.
+
+--------------------------------------------------------------------------------
+G-7  MEDIUM - Cancel-upload reads a stale operation-id snapshot and resets UI
+     on partial failure
+--------------------------------------------------------------------------------
+File: src/qmail/screens/ComposeModal.jsx:1325-1375
+
+handleCancelUpload() iterates transferOperationIds (React state) while the
+polling loop discovers new operation ids concurrently - ids discovered after
+the snapshot are never cancelled. And after the loop, setTransferControlPending("")
+runs regardless of per-id outcomes, so a transfer whose cancel failed keeps
+running server-side while the UI returns to a normal sending state.
+
+Fix: read the ids from the same Set the polling loop maintains (move it to a
+ref), track per-id cancel outcomes, and surface ids that could not be
+cancelled instead of resetting unconditionally.
+
+--------------------------------------------------------------------------------
+G-8  MEDIUM - Non-enumerated terminal states produce no user-visible error
+--------------------------------------------------------------------------------
+File: src/qmail/transferErrors.js:280-285 (OBJECT_TRANSFER_TERMINAL_STATES)
+
+normalizeObjectTransferStatus passes terminal: isFinished where isFinished
+only recognizes completed/cancelled/failed. A status payload with state
+"error", "timeout", or "aborted" makes normalizeTransferError return null,
+so the failure is silently dropped from the UI.
+
+Fix: add those states to OBJECT_TRANSFER_TERMINAL_STATES, or treat any
+not-known-running state as terminal for error-normalization purposes.
+
+--------------------------------------------------------------------------------
+G-9  MEDIUM - Successful download reported as failed if the attachment
+     refresh throws
+--------------------------------------------------------------------------------
+File: src/qmail/screens/QMailDashboard.jsx:2893-2896
+
+refreshEmailAttachments(emailId) runs before completedSuccessfully = true; if
+it throws, the catch path marks the (already completed, file-on-disk)
+download as failed.
+
+Fix: set completedSuccessfully before the refresh and wrap the refresh in its
+own try/catch with a console warning.
+
+--------------------------------------------------------------------------------
+G-10 MEDIUM - Registry ignores explicit error-clearing
+--------------------------------------------------------------------------------
+File: src/qmail/activeTransferRegistry.js:91
+
+error: cleanText(entry?.error, 512) || previous?.error || null
+means a caller passing error: "" to clear a stale error (ComposeModal does on
+resume) silently keeps the previous error in localStorage.
+
+Fix: if entry.error !== undefined, accept the cleaned value (including null)
+without falling back to previous.error.
+
+--------------------------------------------------------------------------------
+G-11 MEDIUM - Attachment path budget counted in UTF-16 units, not bytes
+--------------------------------------------------------------------------------
+File: src/qmail/screens/ComposeModal.jsx:684-741
+
+The aggregate attachment-path limit (backend buffer MAX_PATH_LEN*4 = 16384
+bytes) is enforced with path.length, which counts UTF-16 code units. Paths
+with non-ASCII characters (CJK, emoji) under-count their UTF-8 byte length by
+2-4x, so a set of paths can pass the client check and overflow/get rejected
+at the backend.
+
+Fix: new TextEncoder().encode(entry.path).length.
+
+--------------------------------------------------------------------------------
+G-12 LOW - File size captured at pick time only
+--------------------------------------------------------------------------------
+File: src/qmail/screens/ComposeModal.jsx:1013-1030; electron.cjs:641
+
+attachmentTotalBytes comes from fs.stat at pick time. If the file changes
+before Send, the progress bar and the persisted totalBytes are wrong (the
+checklist explicitly asks for re-validation at send time). Fix: re-stat
+immediately before send via IPC and warn on mismatch.
+
+--------------------------------------------------------------------------------
+G-13 LOW - Dashboard unmount does not cancel in-flight loads
+--------------------------------------------------------------------------------
+File: src/qmail/screens/QMailDashboard.jsx:869-896
+
+Initial-load and wallet-poll promises are not cancelled on unmount/sign-out;
+mostly a warning-noise issue, but worth an AbortController on the sign-out
+path now that downloads can be long-lived.
+
+================================================================================
+SECTION 3: cloudcoin.org-main (protocol documentation)
+================================================================================
+
+The spec was checked for internal arithmetic consistency: every command layout
+(76-84) re-summed byte-by-byte against its declared sizes - all correct. The
+JSON schema, HTML tables, and frozen test vectors agree with each other and
+with the C implementation. Findings are documentation drift:
+
+--------------------------------------------------------------------------------
+P-1  MEDIUM - Stale "command 76 is not assigned" text
+--------------------------------------------------------------------------------
+Files: protocol/qmail-upload-large-page.php:30; protocol/qmail-download.php:70,216
+
+These pages (last touched Jun 7-8) still say command 76 is unassigned; the
+Jun 11 freeze assigns 76-84 to Object Transfer v1. An implementer reading only
+the cmd-74/75 pages could collide with the frozen range. Fix: reword to point
+at Object Transfer v1 as a separate subsystem.
+
+--------------------------------------------------------------------------------
+P-2  MEDIUM - Reused legacy statuses (167/169/202) missing from the OT status
+     table and JSON schema
+--------------------------------------------------------------------------------
+Files: protocol/qmail-object-transfer-v1.php section 9;
+       protocol/spec/qmail-object-transfer-v1.json (status_codes)
+
+Section 6 normatively requires ERROR_PAYMENT_PROCESSING (167),
+ERROR_PAYMENT_REQUIRED (169) and ERROR_FILE_NOT_EXIST (202), but section 9 and
+the machine-readable status map list only 218-235. A schema-driven client
+treats 167 as an unknown status and fails a begin instead of retrying a
+pending payment. (rest_core handles 167 correctly as retryable -
+raida_status.h:122, qmail_transfer_manager.c:106-112 - so today only
+third-party implementers are at risk.) Fix: add a "reused legacy statuses"
+subsection and JSON entries for 167, 169, 202 (and generic success 250).
+
+--------------------------------------------------------------------------------
+P-3  LOW - 32-bit body-length formula understated in prose
+--------------------------------------------------------------------------------
+File: protocol/qmail-object-transfer-v1.php section 4 (line ~141)
+
+Prose says the length covers "payload + terminator" but the frozen vectors
+include challenge(16) + identity preamble(32) as well (cmd-76 vector:
+194 = 16+32+144+2). The JSON disambiguates, but the normative page should
+state the full formula explicitly.
+
+--------------------------------------------------------------------------------
+P-4  LOW - Request-header bytes 0 and 8 undocumented for cmds 76-84
+--------------------------------------------------------------------------------
+File: protocol/qmail-object-transfer-v1.php section 4
+
+Vectors and rest_core (src/protocol.c:260-281) send byte 0 = 0x00 and
+byte 8 = 0x00, diverging from the legacy header docs (byte 8 = 0x01). A server
+validating byte 8 against the legacy docs would reject conforming clients.
+Fix: add rows for bytes 0 and 8.
+
+--------------------------------------------------------------------------------
+P-5  LOW - REST page lists a phantom "queued" state and omits three real ones
+--------------------------------------------------------------------------------
+File: qmail-commands/net-object-transfers.php:206
+
+The implementation's states are created, hashing, beginning, uploading,
+committing, querying, downloading, verifying, completed, paused, cancelling,
+cancelled, failed (qmail_transfer_manager.h:26-40). "queued" does not exist;
+created/hashing/querying are missing. Fix: replace with the 13 real strings.
+(Note this also feeds GUI finding G-8 - the GUI's terminal-state list was
+written against incomplete docs.)
+
+--------------------------------------------------------------------------------
+P-6  LOW - Capabilities example advertises class_id 0
+--------------------------------------------------------------------------------
+File: qmail-commands/net-object-transfers.php:115-122
+
+storage_class=0 is the reserved "server default" selector, so an advertised
+class with id 0 is unselectable-by-value. Fix: use class_id 1 in the example.
+
+--------------------------------------------------------------------------------
+P-7  LOW - QMAIL_OBJECT_TRANSFER_API.md says wallet_path is "Required"
+--------------------------------------------------------------------------------
+File: rest_core/QMAIL_OBJECT_TRANSFER_API.md:15,21,32,41
+
+The code falls back to DEFAULT_WALLET via resolve_wallet_path
+(api_handlers_utils.c:243-258); the PHP REST page correctly says optional.
+Fix the markdown.
+
+Also LOW/cosmetic: the working-tree qmail-sidebar-components.php change puts
+the 'Upload Large Page' wire-protocol page inside the REST API sidebar group.
+
+================================================================================
+SECTION 4: CROSS-REPO CONSISTENCY (verified clean)
+================================================================================
+
+  - All 18 request/response header sizes and every field offset for commands
+    76-84 match between the JSON schema, the HTML tables, the frozen vectors,
+    and qmail_object_transfer.c serializers/parsers. The cmd-76 vector was
+    decoded by hand and matches the C writer exactly.
+  - The 7-byte reserved gap at OBJECT_BEGIN offsets 77-83 is documented in
+    both the HTML (line 171) and JSON (offset 77, size 7, value zero) and
+    zero-filled by the C code - not a discrepancy.
+  - Cmd 74/75 paging: the page echo at 66-67, length at 68-71, data at 72+,
+    header bytes 10-13/14-15/22-23, the 16-bit page cap, the
+    ceil(original_size / (data_stripe_count * 256KiB)) page-count formula, the
+    CBDF key-4 uint16-LE paged flag, and the whole-file CRC check all match
+    between the spec pages and qmail_upload.c / protocol.c / qmail_receive.c /
+    qmail_upload_orchestrator.c.
+  - Status 167: defined in PHP docs, mapped and retryable in rest_core
+    (lands transfers in resumable "paused", not "failed"). Correct on both
+    sides; just missing from the OT status table (P-2).
+  - The GUI currently uses the legacy REST path only (upload_and_tell +
+    /qmail/db/attachments/get) and tracks Object Transfer operations via
+    operation ids / X-QMail-Operation-Id. Per the client checklist this is the
+    intended Phase-1 posture, not a defect; the deferred items (capability
+    discovery, streaming to temp file, hash verification before save,
+    disk-space preflight, opaque path handles) are recorded in
+    docs/qmail-object-transfer-v1-client-checklist.md.
+
+================================================================================
+REJECTED FINDINGS (reported during review, verified false)
+================================================================================
+
+  - "Parallel download range writes fail because fopen 'r+b' cannot extend a
+    file past EOF" (qmail_transfer_manager.c write_file_range). False: in
+    update mode, seeking past EOF and writing is well-defined on POSIX and the
+    Windows CRT and extends the file, zero-filling the gap; MSVC fopen
+    defaults to _SH_DENYNO so concurrent FILE* handles on the same file at
+    distinct offsets are fine. Downgraded to advisory R-8 (pre-allocation is
+    still a good idea for early disk-full detection).
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+  ID    Sev      Repo        File
+  R-1   HIGH     rest_core   api_handlers_qmail_object_transfer.c:447,470
+  R-2   HIGH     rest_core   api_handlers_qmail_object_transfer.c:275,364
+  R-3   MEDIUM   rest_core   api_handlers_qmail_object_transfer.c:419
+  R-4   MEDIUM   rest_core   api_handlers_qmail_object_transfer.c:137
+  R-5   MEDIUM   rest_core   qmail_transfer_manager.c:1703
+  R-6   LOW      rest_core   qmail_transfer_manager.c:881
+  R-7   LOW      rest_core   qmail_transfer_manager.c:1686
+  R-8   ADVISORY rest_core   qmail_transfer_manager.c:1244
+  R-9   ADVISORY rest_core   protocol.c:29
+  G-1   HIGH     Qmail-GUI   qmailApiServices.js:2860
+  G-2   HIGH     Qmail-GUI   electron.cjs:723
+  G-3   HIGH     Qmail-GUI   QMailDashboard.jsx:2958
+  G-4   HIGH     Qmail-GUI   ReadingPane.jsx:144 / QMailDashboard.jsx:3056
+  G-5   HIGH     Qmail-GUI   QMailDashboard.jsx:541
+  G-6   MEDIUM   Qmail-GUI   ComposeModal.jsx:1377
+  G-7   MEDIUM   Qmail-GUI   ComposeModal.jsx:1325
+  G-8   MEDIUM   Qmail-GUI   transferErrors.js:280
+  G-9   MEDIUM   Qmail-GUI   QMailDashboard.jsx:2893
+  G-10  MEDIUM   Qmail-GUI   activeTransferRegistry.js:91
+  G-11  MEDIUM   Qmail-GUI   ComposeModal.jsx:684
+  G-12  LOW      Qmail-GUI   ComposeModal.jsx:1013
+  G-13  LOW      Qmail-GUI   QMailDashboard.jsx:869
+  P-1   MEDIUM   cloudcoin   qmail-upload-large-page.php:30, qmail-download.php
+  P-2   MEDIUM   cloudcoin   qmail-object-transfer-v1.php s.9 + JSON schema
+  P-3   LOW      cloudcoin   qmail-object-transfer-v1.php s.4
+  P-4   LOW      cloudcoin   qmail-object-transfer-v1.php s.4
+  P-5   LOW      cloudcoin   net-object-transfers.php:206
+  P-6   LOW      cloudcoin   net-object-transfers.php:115
+  P-7   LOW      cloudcoin   rest_core/QMAIL_OBJECT_TRANSFER_API.md
+
+Suggested fix order:
+  1. R-1 (one-line memset + return check; info leak)
+  2. G-2 (open-path allowlist; security)
+  3. G-1 (drop manual buffering; the feature's core constraint)
+  4. R-2 (path restriction on the REST surface)
+  5. G-3/G-4 (cancel/re-entrancy races - same locking fix area)
+  6. R-3, G-8, P-5 together (the 404-collapse + state-list drift interact:
+     fix the state list, then the GUI terminal-state set, then the status
+     handler's error mapping)
+  7. Everything else as convenient.
+
+================================================================================
+END OF REVIEW
+================================================================================

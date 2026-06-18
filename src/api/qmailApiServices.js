@@ -124,6 +124,27 @@ const QMAIL_DENOMINATION_CODE_TO_VALUE = {
   4: 10000,
 };
 
+// Reverse of QMAIL_DENOMINATION_CODE_TO_VALUE: a denomination *value*
+// (1/10/100/1000/10000) back to its 0-4 code. Used when the backend sends the
+// value but not the explicit code.
+const denominationValueToCode = (value) => {
+  const entry = Object.entries(QMAIL_DENOMINATION_CODE_TO_VALUE).find(
+    ([, v]) => v === value,
+  );
+  return entry ? Number(entry[0]) : null;
+};
+
+// Recover { serialNumber, denominationCode } from a canonical dotted-decimal
+// address like "25.165@giga". Returns null when the string is missing or not a
+// parseable address. This is the resilience path for Sent/Drafts rows: the
+// backend may carry the recipient's address but omit the explicit denomination
+// code, which would otherwise default the cartouche/suffix to "bit".
+const parseAddressIdentity = (address) => {
+  if (typeof address !== "string" || address.trim() === "") return null;
+  const parsed = parseQmailAddress(address.trim());
+  return parsed && parsed.ok ? parsed : null;
+};
+
 const readNumericApiField = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined || value === "") continue;
@@ -222,22 +243,45 @@ const withSenderFields = (source = {}, fallback = "Unknown Sender") => {
 // list endpoint now carries the primary recipient (recipient_sn /
 // recipient_address / recipient_denomination_code) plus recipient_count.
 // Mirror withSenderFields() so the dashboard can swap in recipient identity.
-const getRecipientSerialNumber = (source = {}) => {
+// Serial number, falling back to the one parsed from recipient_address.
+const getRecipientSerialNumber = (source = {}, parsedAddress = null) => {
   const sn = readNumericApiField(source.recipient_sn, source.recipientSn);
-  return sn && sn > 0 ? sn : null;
+  if (sn && sn > 0) return sn;
+  return parsedAddress && parsedAddress.serialNumber > 0
+    ? parsedAddress.serialNumber
+    : null;
 };
 
-const getRecipientDenominationCode = (source = {}) => {
+// Denomination code (0-4) with precedence: explicit code → value-derived code
+// (recipient_denomination as 1/10/100/1000/10000) → code parsed from
+// recipient_address. Only returns null when none are available, so a present
+// recipient address never gets silently mislabeled as "bit" (code 0).
+const getRecipientDenominationCode = (source = {}, parsedAddress = null) => {
   const code = readNumericApiField(
     source.recipient_denomination_code,
     source.recipientDenominationCode,
   );
-  return code !== null && code >= 0 && code <= 4 ? code : null;
+  if (code !== null && code >= 0 && code <= 4) return code;
+
+  const value = readNumericApiField(
+    source.recipient_denomination,
+    source.recipientDenomination,
+  );
+  const codeFromValue = value !== null ? denominationValueToCode(value) : null;
+  if (codeFromValue !== null) return codeFromValue;
+
+  return parsedAddress ? parsedAddress.denominationCode : null;
 };
 
 const withRecipientFields = (source = {}) => {
-  const recipientSn = getRecipientSerialNumber(source);
-  const recipientDenominationCode = getRecipientDenominationCode(source);
+  // Parse recipient_address once so SN and denomination can both fall back to it
+  // when the backend omits the explicit numeric fields.
+  const parsedAddress = parseAddressIdentity(source.recipient_address);
+  const recipientSn = getRecipientSerialNumber(source, parsedAddress);
+  const recipientDenominationCode = getRecipientDenominationCode(
+    source,
+    parsedAddress,
+  );
   const recipientDenomination =
     recipientDenominationCode !== null
       ? QMAIL_DENOMINATION_CODE_TO_VALUE[recipientDenominationCode]

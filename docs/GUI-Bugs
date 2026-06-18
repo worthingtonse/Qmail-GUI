@@ -1,0 +1,55 @@
+Bugs with the QMail GUI:
+
+1. Folder structure is not being created automatically in the correct location.
+When the Qmail.exe starts for the first time, it should create (via rest_core) a folder called Client_Data in the same folder that the Qmail.exe program is located in. 
+2. Bug 1 may cause the next problem: When the program boots, it is suppose to look in its Client_Data/Wallets/Bank or Fracked folders to see if thre is a mailbox key coin there. 
+
+ Instead, a file called 'raida_stats.csv' is created. 
+ 
+ -------------------
+ I am getting ready to clear you and I need you to write a handoff file that will make it easy for you do the next phase of testing. In the next phase, I will find bugs by manually tesing when I find one, I will tell you about them. 
+ You will fix those bugs and keep track of the fixes you make in a file so the fixes can be reviewed by other models. 
+ 
+ For your file that has PART 1, add a PART 0 that includes your "Recommended preflight" as a check list. Any questions?
+ 
+ Then, after the fixes are made, you will need to use the most current core.exe build to compile the fixed QMail.exe file for testing. You will also need to commit changes from time to time. 
+ Then i will test manually again. Write a handoff file and ask me any questions if you have them. 
+ 
+ 
+ There are some issues that need to be fixed. I will clear you before you start fixing them but I want to 
+ Goals:
+ 
+ First blocking bug: BUG-51. The file structure is not being implemented on startup  
+ Here is the goal: 
+ 1. The core.exe should be bundled into the QMail.exe so that a person does not need to copy the core.exe and put it next to QMaeil.exe. For example, purhaps when QMail.exe is launched for the first time, the Client_Data folder will be created and all the sub folders and files will be created too. This could happen if when the QMail.exe is first run, it will create the core.exe file next to the Qmail.exe and the Qmail.exe will then start the core.exe using aruments that were passed on to the Qmail.exe when it was started. It is the core.exe program that auto creates the folder structure. How can we have just one executable (QMail.exe) that also runs the core? We also need to set what specific ports the QMail.exe listens to (by using arguments) or if it will just pick a random port (Default behavior). We also need to specify if Qmail will start core.exe in debug mode and if it needs to use the Raida 11 fix that is needed just for development on my network. What I have written above is just brain storming. 
+ 
+ Create a file called docs\*.bug.fix.ideas.txt where * is the first three letters of your model. 
+ The first bug will be BUG-51. Write what you think should be done to meet the goals. 
+ PS. it is possible that the version of QMail.exe and core.exe that I am testing is stale and this is already fixed in the newest versions. Let me know if you have any questions. 
+ ---------------
+ New information: 
+ Q1: I am using: "E:\Client3\QMail.exe" with a date modeified 5/22/2006. 
+ Q2: If Client_Data has been created, I don't know where. But definetly not where it is suppose to be. 
+ Q3. core.exe does not have to be visable. 
+ Q4. Is there any customary way of naming flags? If yes, then do that. You probably want to add help and show help if they issue a flag that does not exist. The help should contain examples. There is a chance that the r11ip flag may not be needed since Raida 11 has been moved to a different network. Are you able to test if it is still needed?
+Q5: Yes if this is the only way to see the DevTools. No if there is another button like F12 that will do the same thing. 
+Q6. Yes, each gets a random port unless we specify the port in the flags of the Qmail.exe. 
+ 
+ Read the Proposed implementation of  BUG-51 by other models:
+ docs\gem.bug.fix.ideas.txt 
+ docs/gpt.bug.fix.ideas.txt
+ Add a fix plan to your but.fix.ideas.txt if needed. Ask me any questions, Then implement your changes. Go ahead and compile rest_core, move the core.exe to Qmail-GUI if Cmake does not do it auotmatically (or change Cmake to do that). Then copile Qmail. The program should be able to write over existing core.exe files and kill processes that are using them first if needed. 
+ 
+ ---------------
+ 1. When the rest_core project is compiled into core.exe, the CMake file will create or copy the core.exe into the E:\ folder/drive. This can then be copied to QMail-GUI project to be compiled with the QMail-GUI into the or as part of the QMail.exe program. The CMake file for rest_core can be updated so a copy of the new core.exe is saved into the place where the QMail-GUI project needs it so it can be included when QMail-GUI is compiled. 
+ 2. New QMail.exe files will be needed after some fixs to confirm correct operation. The QMail will be compiled when the bug fixed blocked testing for other bugs. The rest_core will need to be compiled too if that code changes. 
+3. Commits can happen afte user-approved batches.  
+ 
+ Here is your hadoff file:
+ JavaScript\Qmail-GUI\docs\opu.bug-fix-phase.handoff.txt
+ Here is an important checklist that shows how we will be testing: 
+ docs/opu.bug-fix-phase.handoff.txt
+ There are other handoffs from other models. Start by looking at these other handoffs to see if there is any things that conflicked with what your hand off is saying. 
+ -------------
+ Opus has fixed BUG-51. 
+ Review the changes made by looking at: 

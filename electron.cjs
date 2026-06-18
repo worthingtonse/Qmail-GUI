@@ -346,7 +346,7 @@ function createSplashWindow() {
 <body>
   <div class="container">
     <div class="logo">QMail</div>
-    <div class="tagline">Quantum-resistant secure mail</div>
+    <div class="tagline">Quantum-safe secure mail</div>
     <div class="status"><span class="spinner"></span>Starting QMail&hellip;</div>
     <div class="disclaimer">${SPLASH_DISCLAIMER}</div>
   </div>

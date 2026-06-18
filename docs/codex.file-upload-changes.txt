@@ -1,0 +1,96 @@
+QMail GUI file-upload and active-transfer recovery changes
+
+Scope
+- This note covers the client-side code I changed for transfer error reporting, upload/download recovery, and restart persistence.
+- It does not include the many unrelated pre-existing worktree changes already present in the repository.
+
+Changed code
+- `src/qmail/transferErrors.js`
+  - New shared normalizer for Object Transfer error payloads.
+  - Maps server statuses to stable client codes like `capacity`, `storage_full`, and `generation_conflict`.
+  - Preserves backend detail while marking which failures are resumable.
+
+- `src/qmail/transferErrors.test.js`
+  - Covers the new error classifier and notification formatting.
+
+- `src/api/qmailApiServices.js`
+  - Preserves HTTP error payloads instead of collapsing them to plain strings.
+  - Normalizes transfer status/control/download responses into structured records.
+  - Carries `transferError`, `lastStatus`, `lastResult`, and download path fields through the API layer.
+
+- `src/api/qmailApiServices.objectTransfer.test.js`
+  - Verifies structured status/control handling for capacity, storage-full, generation-conflict, and terminal failures.
+
+- `src/api/qmailApiServices.download.test.js`
+  - Verifies attachment download failures keep the server status detail.
+
+- `src/qmail/activeTransferRegistry.js`
+  - New persisted registry for active transfers.
+  - Stores only non-secret UI recovery data in `localStorage`.
+  - Supports add, update, remove, and full clear.
+
+- `src/qmail/activeTransferRegistry.test.js`
+  - Verifies persisted restore data, merge behavior, and cleanup.
+
+- `src/qmail/screens/ActiveTransfersPanel.jsx`
+  - New floating restore panel for restarted sessions.
+  - Displays progress, errors, destination path, and actions for cancel/resume/open/dismiss.
+
+- `src/qmail/screens/ActiveTransfersPanel.css`
+  - Styling for the restored-transfer panel.
+
+- `src/qmail/screens/ComposeModal.jsx`
+  - Records upload operations in the registry as they are discovered.
+  - Clears registry entries on successful completion.
+  - Keeps cancellation/resume state aligned with the durable transfer record.
+
+- `src/qmail/screens/ComposeModal.css`
+  - Small UI additions for transfer error copy inside the compose progress panel.
+
+- `src/qmail/screens/QMailDashboard.jsx`
+  - Restores active transfers on startup by reading the registry and reconciling against `/api/qmail/net/object-transfers/status`.
+  - Keeps attachment downloads and uploads registered while they run.
+  - Shows the restored-transfer panel and wires cancel/resume/dismiss/open-folder actions.
+  - Removes restored records when transfers complete normally or are dismissed.
+
+- `src/qmail/screens/ReadingPane.jsx`
+  - Shows restored download state, error detail, and resume/retry controls.
+  - Adds open-folder support for completed downloads.
+
+- `src/qmail/screens/ReadingPane.css`
+  - Styles for the restored download progress and open-folder UI.
+
+Review notes
+- The restore logic is intentionally client-only. The server currently exposes per-operation status, not an active-transfer list, so the GUI can only recover operations it previously recorded locally.
+- The registry stores operation IDs and display metadata only. It does not persist reusable secrets or upload credentials.
+- Server status remains authoritative after restart. The UI reconciles saved records with `/object-transfers/status` before showing them as active.
+- Terminal failures stay visible until dismissed, so a user can see what happened after reopening the app.
+
+Verification
+- `npm test -- --run`
+- `npm run lint`
+- `npm run build`
+
+Post-review corrections (2026-06-12)
+- `electron.cjs` / `preload.cjs`
+  - Replaced unrestricted renderer-controlled path opening with a `revealPath` IPC handler limited to existing paths under Downloads or the backend data directory.
+  - Added a main-process attachment re-stat API restricted to paths returned by the native attachment picker.
+- `src/api/qmailApiServices.js`
+  - Removed renderer-side response-chunk accumulation; Chromium blob storage now handles the response body.
+  - Added `error`, `timeout`, and `aborted` to terminal transfer states.
+- `src/qmail/screens/QMailDashboard.jsx`
+  - Added synchronous download and cancellation locks.
+  - Serialized restored-transfer polling at a five-second interval.
+  - Prevented a post-save attachment refresh error from changing a completed download into a failure.
+- `src/qmail/screens/ComposeModal.jsx`
+  - Counts attachment path limits in UTF-8 bytes.
+  - Re-stats files immediately before send and blocks changed or missing files.
+  - Keeps operation IDs in a ref for cancel/resume and reports partial cancellation failures.
+  - Polls durable transfer status after a resumed upload.
+- `src/qmail/activeTransferRegistry.js`
+  - Honors explicit clearing of a previously stored transfer error.
+
+Additional verification
+- `node --check electron.cjs`
+- `node --check preload.cjs`
+- Full GUI suite: 96 tests passed.

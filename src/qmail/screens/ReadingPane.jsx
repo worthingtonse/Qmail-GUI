@@ -18,6 +18,8 @@ import {
   X,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
+import { getQmailAvatarModel } from "../avatar/qmailAvatar";
 import {
   formatByteProgress,
   formatProgressPercentage,
@@ -32,12 +34,6 @@ const DECRYPT_STRIPES = [
   ["11100111", "00011000", "10000011", "01111100", "10101100", "01010011"],
   ["01010110", "10101001", "00110010", "11001101", "01101110", "10010001"],
   ["11011000", "00100111", "11101010", "00010101", "10011100", "01100011"],
-];
-
-const DECRYPT_LINES = [
-  "headers resolved",
-  "body rendered",
-  "attachments indexed",
 ];
 
 const DECRYPT_STEPS = [
@@ -75,17 +71,6 @@ const SevenStripeDecryptAnimation = ({ active }) => (
         ))}
       </div>
       <div className="reading-pane__decrypt-scan" />
-      <div className="reading-pane__decrypt-plaintext">
-        {DECRYPT_LINES.map((line, lineIndex) => (
-          <span
-            key={line}
-            className="reading-pane__decrypt-plaintext-line"
-            style={{ "--line-delay": `${1200 + lineIndex * 180}ms` }}
-          >
-            {line}
-          </span>
-        ))}
-      </div>
     </div>
 
     <div className="reading-pane__decrypt-steps" aria-hidden="true">
@@ -153,9 +138,9 @@ const ReadingPane = ({
   if (!email) {
     return (
       <section className="reading-pane">
-        <section className="reading-pane__empty" aria-label="No email selected">
+        <section className="reading-pane__empty" aria-label="No qmail selected">
           <Mail size={48} />
-          <h3 className="reading-pane__empty-title">Select an email to read</h3>
+          <h3 className="reading-pane__empty-title">Select a qmail to read</h3>
           <p className="reading-pane__empty-text">
             Choose a message from the list to view its contents here.
           </p>
@@ -330,9 +315,31 @@ const ReadingPane = ({
       </section>
     );
   }
+  const headerSenderSn = email.senderSn ?? email.sender_sn;
+  const headerSenderDenominationCode =
+    email.senderDenominationCode ?? email.sender_denomination_code;
+  // A real cartouche only renders for a valid serial + denomination; drafts
+  // and unresolved senders fall back to the small SenderAvatar.
+  const hasHeaderCartouche =
+    !email.isDraft &&
+    Boolean(
+      getQmailAvatarModel({
+        serialNumber: headerSenderSn,
+        denominationCode: headerSenderDenominationCode,
+      }),
+    );
+
   return (
     <section className="reading-pane">
       <header className="reading-pane__header">
+        {hasHeaderCartouche && (
+          <QmailCartoucheAvatar
+            serialNumber={headerSenderSn}
+            denominationCode={headerSenderDenominationCode}
+            className="reading-pane__header-cartouche"
+          />
+        )}
+        <div className="reading-pane__header-text">
         {email.isDraft ? (
           <div className="reading-pane__top-row">
             <div className="reading-pane__sender">
@@ -358,13 +365,15 @@ const ReadingPane = ({
         ) : (
           <div className="reading-pane__top-row">
             <div className="reading-pane__sender">
-              <SenderAvatar
-                sender={email.sender}
-                email={email.senderEmail || email.from}
-                status={email.senderStatus}
-                senderSn={email.senderSn ?? email.sender_sn}
-                senderDenominationCode={email.senderDenominationCode ?? email.sender_denomination_code}
-              />
+              {!hasHeaderCartouche && (
+                <SenderAvatar
+                  sender={email.sender}
+                  email={email.senderEmail || email.from}
+                  status={email.senderStatus}
+                  senderSn={email.senderSn ?? email.sender_sn}
+                  senderDenominationCode={email.senderDenominationCode ?? email.sender_denomination_code}
+                />
+              )}
               <div className="reading-pane__sender-details">
                 <span className="reading-pane__sender-name">
                   {email.from || email.senderEmail || email.sender}
@@ -376,7 +385,7 @@ const ReadingPane = ({
                 <button
                   className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__action-button--icon"
                   onClick={() => onReply(email)}
-                  title="Reply to email"
+                  title="Reply to qmail"
                   type="button"
                 >
                   <Reply size={16} />
@@ -408,7 +417,7 @@ const ReadingPane = ({
                 <button
                   className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__action-button--icon"
                   onClick={() => onForward(email)}
-                  title="Forward email"
+                  title="Forward qmail"
                   type="button"
                 >
                   <Forward size={16} />
@@ -437,7 +446,7 @@ const ReadingPane = ({
                 <button
                   className="reading-pane__action-button reading-pane__action-button--secondary"
                   onClick={() => onMoveEmail(email.id, "archive")}
-                  title="Archive email"
+                  title="Archive qmail"
                   type="button"
                 >
                   <Archive size={16} /> Archive
@@ -448,6 +457,7 @@ const ReadingPane = ({
         )}
 
         <h2 className="reading-pane__subject">{email.subject}</h2>
+        </div>
       </header>
 
       <div className="reading-pane__body">

@@ -100,6 +100,8 @@
 
 .email-list-pane__qmail-address {
   min-width: 0;
+  /* Extra breathing room between the folder title and the address. */
+  margin-left: var(--space-sm);
   overflow: hidden;
   color: var(--text-secondary);
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;

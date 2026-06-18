@@ -1,12 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
 
-    
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="#23364b" stroke="#f4c14b" stroke-width="3.3" />
-    <rect x="22" y="78" width="56" height="8" fill="#23364b" />
-    
-    
-    <rect x="17.4" y="81.6" width="65.2" height="8.35" rx="4" fill="#f4c14b" />
-    <rect x="24" y="79.6" width="52" height="4.3" rx="3" fill="#ffe08a" />
+
+    <defs>
+      <radialGradient id="bit-alarm" cx="50%" cy="42%" r="62%">
+        <stop offset="0%" stop-color="#7A2F00" />
+        <stop offset="100%" stop-color="#3B1600" />
+      </radialGradient>
+    </defs>
+
+<!--Main frame with background-->
+    <rect 
+		x="24" 
+		y="10" 
+		width="52" 
+		height="76" 
+		rx="16" 
+		fill="url(#bit-alarm)" 
+		stroke="#C74C00" 
+		stroke-width="3.4"
+	/>
+
+
+ 
+  
+  <rect x="22" y="78" width="56" height="8" fill="#FF7119" />
+      
+    <rect x="17.4" y="81.6" width="65.2" height="8.35" rx="4" fill="#FF7119" />
+   
+   <rect x="24" y="79.6" width="52" height="4.3" rx="3" fill="#D2B04C" />
     
   
 </svg>

@@ -31,7 +31,7 @@ const CLOUDCOIN_PURCHASE_URL = "https://cloudcoin.com";
 
 const DMP_PAYMENT_INFO = [
   "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
-  "The Inbox Fee lets recipients get paid for their attention when receiving email. Influencers can set their own inbox fee by registering at https://DistributedMailSystem.com.",
+  "The Inbox Fee lets recipients get paid for their attention when receiving qmails. Influencers can set their own inbox fee by registering at https://DistributedMailSystem.com.",
   "The DMP open standard can support up to 65 thousand different payment currencies. In Phase 1, QMail uses CloudCoin: a quantum-safe, energy-efficient, instant digital cash technology that does not require usernames, logins, or private keys. Like physical cash, it provides strong privacy.",
   "Places you can purchase CloudCoin include CloudCoin.com.",
 ];
@@ -313,6 +313,19 @@ const NavigationPane = ({
         </button>
 
 
+        <div className="navigation-pane__link navigation-pane__link--static">
+          <Key size={18} />
+          <span className="navigation-pane__link-label">In Lockers</span>
+          {walletBalance && (
+            <span
+              className="navigation-pane__locker-balance"
+              title="Coins pre-funded into locker codes"
+              aria-label={`In lockers ${walletBalance.lockerPoolError ? "unknown" : formatBalance(walletLockedValue)} CC`}
+            >
+              {walletBalance.lockerPoolError ? "--" : formatBalance(walletLockedValue)} CC
+            </span>
+          )}
+        </div>
         {/* Future wallet details navigation:
             onClick={() => setActiveView("account")} */}
         <div className="navigation-pane__link navigation-pane__link--static">
@@ -328,19 +341,6 @@ const NavigationPane = ({
                 <AlertTriangle size={12} className="navigation-pane__wallet-balance-icon" />
               )}
               {formatBalance(walletCombinedValue)} CC
-            </span>
-          )}
-        </div>
-        <div className="navigation-pane__link navigation-pane__link--static">
-          <Key size={18} />
-          <span className="navigation-pane__link-label">In Lockers</span>
-          {walletBalance && (
-            <span
-              className="navigation-pane__locker-balance"
-              title="Coins pre-funded into locker codes"
-              aria-label={`In lockers ${walletBalance.lockerPoolError ? "unknown" : formatBalance(walletLockedValue)} CC`}
-            >
-              {walletBalance.lockerPoolError ? "--" : formatBalance(walletLockedValue)} CC
             </span>
           )}
         </div>

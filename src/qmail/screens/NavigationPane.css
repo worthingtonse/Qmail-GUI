@@ -105,12 +105,13 @@
   min-width: 0;
 }
 
+/* Matches .navigation-pane__wallet-balance so both amounts read the same. */
 .navigation-pane__locker-balance {
   display: inline-flex;
   align-items: center;
   margin-left: auto;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
+  color: var(--status-success);
+  font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
 }

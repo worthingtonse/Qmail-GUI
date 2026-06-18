@@ -1130,7 +1130,7 @@ const ComposeModal = ({
     clearAutosaveTimer();
     setIsSending(true);
     setSendingStatus("sending");
-    setSendProgress("Preparing email...");
+    setSendProgress("Preparing qmail...");
     setTransferOperationIds([]);
     transferOperationIdsRef.current = [];
     setTransferState("");
@@ -1159,10 +1159,10 @@ const ComposeModal = ({
     const knownOperationIds = new Set();
     const uploadLabel =
       attachments.length === 1
-        ? attachments[0].name || "Email attachment"
+        ? attachments[0].name || "Qmail attachment"
         : attachments.length > 1
-          ? `${attachments.length} email attachments`
-          : subject.trim() || "Email send";
+          ? `${attachments.length} qmail attachments`
+          : subject.trim() || "Qmail send";
     const rememberUploadOperations = (
       operationIds,
       state,
@@ -1193,11 +1193,11 @@ const ComposeModal = ({
           state: "failed",
           error: message,
         }, {
-          fallbackMessage: message || "Failed to send email",
+          fallbackMessage: message || "Failed to send qmail",
           terminal: true,
         });
       const failureMessage =
-        normalizedFailure?.message || message || "Failed to send email";
+        normalizedFailure?.message || message || "Failed to send qmail";
       rememberUploadOperations(
         [...knownOperationIds],
         "failed",
@@ -1312,7 +1312,7 @@ const ComposeModal = ({
           } catch (pollError) {
             taskResult = {
               success: false,
-              error: pollError.message || "Failed to track email status",
+              error: pollError.message || "Failed to track qmail status",
             };
           }
 
@@ -1390,7 +1390,7 @@ const ComposeModal = ({
                 );
                 setSendingStatus("completed");
                 setTransferFailure(null);
-                setSendProgress("Email sent successfully!");
+                setSendProgress("Qmail sent successfully!");
                 setUploadByteProgress(
                   deriveUploadByteProgress(
                     { ...taskResult.data, isSuccessful: true },
@@ -1408,7 +1408,7 @@ const ComposeModal = ({
                 markSendCancelled();
               } else {
                 markSendFailed(
-                  taskError || message || "Failed to send email",
+                  taskError || message || "Failed to send qmail",
                   taskResult.data,
                 );
               }
@@ -1425,7 +1425,7 @@ const ComposeModal = ({
                 markSendCancelled();
               } else {
                 markSendFailed(
-                  taskResult.error || "Failed to track email status",
+                  taskResult.error || "Failed to track qmail status",
                   taskResult,
                 );
               }
@@ -1449,7 +1449,7 @@ const ComposeModal = ({
         );
         setSendingStatus("completed");
         setTransferFailure(null);
-        setSendProgress("Email sent successfully!");
+        setSendProgress("Qmail sent successfully!");
         setProgress(100);
         setUploadByteProgress(
           attachmentTotalBytes > 0
@@ -1466,13 +1466,13 @@ const ComposeModal = ({
           finishSend(emailData);
         }, 1500);
       } else {
-        const sendError = new Error(result.error || "Failed to send email");
+        const sendError = new Error(result.error || "Failed to send qmail");
         sendError.transferError = result.transferError || null;
         throw sendError;
       }
     } catch (error) {
       console.error("Send error:", error);
-      markSendFailed(error.message || "Failed to send email", error);
+      markSendFailed(error.message || "Failed to send qmail", error);
     }
   };
 
@@ -1644,7 +1644,7 @@ const ComposeModal = ({
               setTransferState("completed");
               setSendingStatus("sending");
               setSendProgress(
-                "Attachment upload completed. Finalizing the email in the background.",
+                "Attachment upload completed. Finalizing the qmail in the background.",
               );
               return;
             }
@@ -1855,7 +1855,7 @@ const ComposeModal = ({
                 if (mode === "reply") return "Reply";
                 if (mode === "replyAll") return "Reply All";
                 if (mode === "forward") return "Forward";
-                return "Compose Email";
+                return "Compose Qmail";
               })()}
             </h3>
             {renderProgressIndicator()}
@@ -1977,7 +1977,7 @@ const ComposeModal = ({
                 scheduleAutosave();
               }}
               disabled={isSending}
-              placeholder="Email subject"
+              placeholder="Qmail subject"
             />
           </div>
           <div className="compose-modal__field compose-modal__field--message">
@@ -2084,7 +2084,7 @@ const ComposeModal = ({
                 ? "Checking RAIDA network status"
                 : canSend === false
                   ? "Send anyway; the backend will make the final network decision"
-                  : "Send email"
+                  : "Send qmail"
             }
           >
             {sendingStatus === "sending" ? (

@@ -11,11 +11,32 @@
 /* was: .reading-pane-header */
 .reading-pane__header {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
+  align-items: stretch;
+  gap: var(--space-lg);
   padding: var(--space-lg) var(--space-xl);
   border-bottom: 2px solid var(--border-subtle);
   background-color: var(--secondary-bg);
+}
+
+/* Tall sender cartouche spanning the full height of the header, to the
+   left of the sender name + subject. Square, sized to roughly match the
+   two stacked lines of text (sender + subject) beside it. */
+.reading-pane__header-cartouche {
+  display: block;
+  flex: none;
+  align-self: stretch;
+  width: 5rem;
+  min-height: 5rem;
+  height: auto;
+}
+
+.reading-pane__header-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-md);
 }
 
 .reading-pane__header--pending {
@@ -383,33 +404,6 @@
   animation-delay: calc(950ms * var(--motion-scale));
 }
 
-.reading-pane__decrypt-plaintext {
-  position: absolute;
-  inset-inline: var(--space-lg);
-  inset-block-end: var(--space-md);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: calc(var(--space-xs) / 1.5);
-  pointer-events: none;
-}
-
-.reading-pane__decrypt-plaintext-line {
-  width: min(18rem, 100%);
-  padding: calc(var(--space-xs) / 1.5) var(--space-sm);
-  border: 1px solid color-mix(in srgb, var(--status-success) 38%, var(--border-medium));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--status-success) 10%, var(--card-bg));
-  color: var(--text-primary);
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: var(--font-size-xs);
-  text-align: left;
-  opacity: 0;
-  transform: translateX(-0.5rem);
-  animation: qmail-decrypt-plaintext calc(450ms * var(--motion-scale)) ease-out forwards;
-  animation-delay: var(--line-delay);
-}
-
 .reading-pane__decrypt-steps {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -433,7 +427,6 @@
 
 .reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-stripe,
 .reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-stream,
-.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-plaintext-line,
 .reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-step {
   opacity: 0.72;
   transform: none;
@@ -495,17 +488,6 @@
   100% {
     opacity: 0;
     transform: translateY(12rem);
-  }
-}
-
-@keyframes qmail-decrypt-plaintext {
-  from {
-    opacity: 0;
-    transform: translateX(-0.5rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 
@@ -903,6 +885,11 @@
     font-size: var(--font-size-xl);
   }
 
+  .reading-pane__header-cartouche {
+    width: 4rem;
+    min-height: 4rem;
+  }
+
   .reading-pane__actions {
     flex-direction: column;
     align-items: stretch;
@@ -938,7 +925,6 @@
 
   .reading-pane__decrypt-stripe,
   .reading-pane__decrypt-stream,
-  .reading-pane__decrypt-plaintext-line,
   .reading-pane__decrypt-step {
     opacity: 1;
     transform: none;

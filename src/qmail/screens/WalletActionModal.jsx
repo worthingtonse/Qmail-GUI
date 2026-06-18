@@ -23,6 +23,7 @@ import {
   waitForTaskCompletion,
   withdrawToLockerCode,
 } from "../../api/qmailApiServices";
+import { RAIDA_COUNT } from "./serverStatusUi";
 import "./ComposeModal.css";
 import "./WalletActionModal.css";
 
@@ -128,6 +129,165 @@ const formatReceiptContent = (content) => {
   return JSON.stringify(content, null, 2);
 };
 
+const parseReceiptJson = (content) => {
+  if (content == null) return null;
+  if (typeof content === "object") return content;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const RECEIPT_TYPE_LABELS = {
+  deposit: "Deposit",
+  upgrade: "Coin Upgrade",
+  locker_download: "Locker Download",
+  locker_upload: "Locker Upload",
+};
+
+const RECEIPT_TOTAL_ROWS = [
+  { countKey: "bank_count", valueKey: "value_bank", label: "Authentic", alwaysShow: true },
+  { countKey: "fracked_count", valueKey: "value_fracked", label: "Fracked" },
+  { countKey: "limbo_count", valueKey: "value_limbo", label: "Limbo" },
+  { countKey: "counterfeit_count", valueKey: "value_counterfeit", label: "Counterfeit" },
+  { countKey: "duplicate_count", label: "Duplicates" },
+  { countKey: "error_count", label: "Errors" },
+  { countKey: "converted_count", label: "Converted" },
+  { countKey: "expired_count", label: "Expired" },
+  { countKey: "legacy_counterfeit_count", label: "Legacy Counterfeit" },
+  { countKey: "move_failures", label: "Move Failures" },
+];
+
+const formatReceiptDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+};
+
+const formatCcAmount = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0 CC";
+  return `${number.toLocaleString(undefined, { maximumFractionDigits: 8 })} CC`;
+};
+
+// Coin denomination is a signed power of ten: value = 10^denom CC.
+const formatCoinValue = (denom) => {
+  const exponent = Number(denom);
+  if (!Number.isInteger(exponent)) return "";
+  return formatCcAmount(10 ** exponent);
+};
+
+const ReceiptDetails = ({ receipt }) => {
+  const totals = receipt.totals || {};
+  const locker = receipt.locker;
+  const coins = Array.isArray(receipt.coins) ? receipt.coins : [];
+  const typeLabel = RECEIPT_TYPE_LABELS[receipt.type] || "Wallet Operation";
+  const dateLabel = formatReceiptDate(receipt.date);
+  const totalRows = RECEIPT_TOTAL_ROWS.filter(
+    (row) => row.alwaysShow || Number(totals[row.countKey]) > 0,
+  );
+
+  return (
+    <div className="wallet-action-modal__receipt-details">
+      <dl className="wallet-action-modal__receipt-summary">
+        <div>
+          <dt>Type</dt>
+          <dd>{typeLabel}</dd>
+        </div>
+        {dateLabel && (
+          <div>
+            <dt>Date</dt>
+            <dd>{dateLabel}</dd>
+          </div>
+        )}
+        {locker?.locker_key && (
+          <div>
+            <dt>Locker Code</dt>
+            <dd className="wallet-action-modal__receipt-mono">{locker.locker_key}</dd>
+          </div>
+        )}
+        {locker && Number.isFinite(Number(locker.raida_consensus)) && (
+          <div>
+            <dt>RAIDA Consensus</dt>
+            <dd>
+              {Number(locker.raida_consensus)} of {RAIDA_COUNT} servers
+            </dd>
+          </div>
+        )}
+        {receipt.memo && (
+          <div>
+            <dt>Memo</dt>
+            <dd>{receipt.memo}</dd>
+          </div>
+        )}
+      </dl>
+
+      <table className="wallet-action-modal__receipt-table">
+        <thead>
+          <tr>
+            <th scope="col">Coins</th>
+            <th scope="col">Count</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {totalRows.map((row) => (
+            <tr key={row.countKey}>
+              <th scope="row">{row.label}</th>
+              <td>{Number(totals[row.countKey] || 0).toLocaleString()}</td>
+              <td>{row.valueKey ? formatCcAmount(totals[row.valueKey]) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total Added</th>
+            <td />
+            <td>{formatCcAmount(totals.total_deposited)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      {coins.length > 0 && (
+        <details className="wallet-action-modal__receipt-coins">
+          <summary>
+            {coins.length === 1 ? "1 coin" : `${coins.length.toLocaleString()} coins`}
+          </summary>
+          <table className="wallet-action-modal__receipt-table">
+            <thead>
+              <tr>
+                <th scope="col">Serial Number</th>
+                <th scope="col">Value</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {coins.map((coin, index) => (
+                <tr key={`${coin.sn}-${index}`}>
+                  <td className="wallet-action-modal__receipt-mono">{coin.sn}</td>
+                  <td>{formatCoinValue(coin.denom)}</td>
+                  <td title={coin.pown ? `RAIDA responses: ${coin.pown}` : undefined}>
+                    {coin.bucket || "Unknown"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+
+      {receipt.per_coin_detail_truncated && (
+        <p className="wallet-action-modal__receipt-note">
+          Per-coin details were omitted because this deposit contains too many coins.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const WalletActionModal = ({
   isOpen,
   initialMode = "add",
@@ -153,6 +313,7 @@ const WalletActionModal = ({
   const [isReceiptVisible, setIsReceiptVisible] = useState(false);
   const [isReceiptLoading, setIsReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
+  const [showRawReceipt, setShowRawReceipt] = useState(false);
 
   const walletPickerSupported =
     typeof window !== "undefined" &&
@@ -180,6 +341,7 @@ const WalletActionModal = ({
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
+    setShowRawReceipt(false);
   }, [initialMode, isOpen]);
 
   const modalTitle = mode === "withdraw" ? "Withdraw" : "Add Funds";
@@ -200,6 +362,7 @@ const WalletActionModal = ({
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
+    setShowRawReceipt(false);
   };
 
   const resetOperationState = () => {
@@ -617,27 +780,45 @@ const WalletActionModal = ({
           onClick={(event) => event.stopPropagation()}
         >
           <header className="compose-modal__header wallet-action-modal__receipt-header">
-            <div>
+            <div className="wallet-action-modal__receipt-title">
               <strong>Receipt</strong>
               <span>{receiptFilename}</span>
             </div>
-            <button
-              type="button"
-              className="compose-modal__close-button"
-              onClick={() => setIsReceiptVisible(false)}
-              aria-label="Close receipt"
-            >
-              <X size={20} />
-            </button>
+            <div className="wallet-action-modal__receipt-header-actions">
+              {!isReceiptLoading && parseReceiptJson(receiptContent) && (
+                <button
+                  type="button"
+                  className="wallet-action-modal__receipt-raw-toggle"
+                  onClick={() => setShowRawReceipt((show) => !show)}
+                >
+                  {showRawReceipt ? "Formatted" : "Raw JSON"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="compose-modal__close-button"
+                onClick={() => setIsReceiptVisible(false)}
+                aria-label="Close receipt"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </header>
           {isReceiptLoading ? (
             <div className="wallet-action-modal__receipt-loading" role="status">
               <Loader2 size={16} className="spinning" />
               <span>Loading receipt...</span>
             </div>
-          ) : (
-            <pre className="wallet-action-modal__receipt-content">{formatReceiptContent(receiptContent)}</pre>
-          )}
+          ) : (() => {
+            const parsedReceipt = parseReceiptJson(receiptContent);
+            return parsedReceipt && !showRawReceipt ? (
+              <div className="wallet-action-modal__receipt-body">
+                <ReceiptDetails receipt={parsedReceipt} />
+              </div>
+            ) : (
+              <pre className="wallet-action-modal__receipt-content">{formatReceiptContent(receiptContent)}</pre>
+            );
+          })()}
         </section>
       </div>
     )}

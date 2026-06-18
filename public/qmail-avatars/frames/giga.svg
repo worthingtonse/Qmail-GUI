@@ -25,20 +25,31 @@
         <stop offset="0%"   stop-color="#fff6c4" />
         <stop offset="100%" stop-color="#d39a23" />
       </linearGradient>
+	  
+	  <radialGradient id="bg-frame" cx="50%" cy="42%" r="62%">
+        <stop offset="0%" stop-color="#918633" />
+        <stop offset="100%" stop-color="#6B6325" />
+      </radialGradient>
+	  
     </defs>
 
     <path d="M39 10 L50 3 L61 10" fill="url(#giga-crown)" />
+	
+	
     <path d="M39 10 H61" stroke="#fff8df" stroke-width="1.8" stroke-linecap="round" />
 
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="#23364b" stroke="url(#giga-rim)" stroke-width="4.2" />
+    <rect x="24" y="10" width="52" height="76" rx="16" fill="bg-frame" stroke="url(#giga-rim)" stroke-width="4.2" />
     <!-- specular sheen: a brighter thin arc on the upper-left of the rim -->
     <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#fff8df" stroke-width="1.1" stroke-linecap="round" opacity="0.85" />
     <rect x="22" y="78" width="56" height="8" fill="#23364b" />
     <!-- inner highlight line: flush against the rim's inner edge, no gap -->
-    <rect x="26.2" y="12.2" width="47.6" height="71.6" rx="14" fill="none" stroke="#fff4cf" stroke-width="1.2" />
+    <rect x="26.2" y="12.2" width="47.6" height="71.6" rx="14" 
+	fill="url(#bg-frame)" 
+	stroke="#fff4cf" stroke-width="1.2" />
 
       <path d="M31 13 C39 9.5, 61 9.5, 69 13" fill="none" stroke="#fff4cf" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M31 83 C39 86.5, 61 86.5, 69 83" fill="none" stroke="#fff4cf" stroke-width="1.6" stroke-linecap="round" />
+    
+	<path d="M31 83 C39 86.5, 61 86.5, 69 83" fill="none" stroke="#fff4cf" stroke-width="1.6" stroke-linecap="round" />
 
     <rect x="15.6" y="80.4" width="68.8" height="9.4" rx="4" fill="url(#giga-bar)" />
     <rect x="24" y="78.4" width="52" height="5.2" rx="3" fill="#fff8df" />

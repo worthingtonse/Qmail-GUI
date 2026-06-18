@@ -73,7 +73,7 @@ const PAYMENT_STATUS_UNCLAIMED = 0;
 const PAYMENT_STATUS_CLAIMED = 1;
 const PAYMENT_STATUS_REFUNDED = 3;
 const PAYMENT_REJECTION_MESSAGE =
-  "The payment you sent was rejected by the receiver. The inbox fee you included has been refunded. Your email may or may not have been read.";
+  "The payment you sent was rejected by the receiver. The inbox fee you included has been refunded. Your qmail may or may not have been read.";
 
 
 const normalizeMailIdentifier = (identifier) => {
@@ -167,7 +167,7 @@ const normalizeQmailDecryptError = (source = {}, fallbackMessage = "QMail could 
   if (/not enough|insufficient.*stripes|stripes.*downloaded|missing.*stripes/.test(text)) {
     return {
       title: "Not enough message parts",
-      message: "QMail could not download enough message parts to rebuild this email. Try again later; if it keeps failing, delete the message or ask the sender to resend it.",
+      message: "QMail could not download enough message parts to rebuild this qmail. Try again later; if it keeps failing, delete the message or ask the sender to resend it.",
       detail,
       canRetry: true,
     };
@@ -233,6 +233,7 @@ const normalizeQmailDecryptError = (source = {}, fallbackMessage = "QMail could 
       canRetry: transferError.canRetry !== false,
     };
   }
+
   return {
     title: "Could not decrypt message",
     message: "QMail could not determine why this message failed. Try again; if it keeps failing, delete it or ask the sender to resend it.",
@@ -1360,7 +1361,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       } else {
         setEmails([]);
         if (notifyOnError) {
-          showDashboardNotification("Failed to load emails", "error");
+          showDashboardNotification("Failed to load qmails", "error");
         }
         return result;
       }
@@ -1369,7 +1370,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       if (requestId === loadEmailsRequestRef.current) {
         setEmails([]);
         if (notifyOnError) {
-          showDashboardNotification("Error loading emails", "error");
+          showDashboardNotification("Error loading qmails", "error");
         }
       }
       return { success: false, error: error.message };
@@ -1444,7 +1445,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         console.error("Email sort error:", error);
         if (requestId === loadEmailsRequestRef.current) {
           setEmails([]);
-          showDashboardNotification("Error loading emails", "error");
+          showDashboardNotification("Error loading qmails", "error");
         }
       })
       .finally(() => {
@@ -1869,7 +1870,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleSendEmail = async () => {
     setIsComposeOpen(false);
     setComposeContext(null);
-    showDashboardNotification("Email Sent!", "success");
+    showDashboardNotification("Qmail Sent!", "success");
     await loadWalletBalance();
     await loadDrafts();
     if (currentFolder === "drafts" || currentFolder === "sent") {
@@ -3533,7 +3534,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         }}
         onSend={handleSendEmail}
         onSendFailure={(message) =>
-          showDashboardNotification(message || "Failed to send email", "error")
+          showDashboardNotification(message || "Failed to send qmail", "error")
         }
         composeContext={composeContext}
         walletBalance={walletBalance}

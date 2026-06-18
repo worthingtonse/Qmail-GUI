@@ -1,0 +1,179 @@
+================================================================================
+SESSION HANDOFF — QMail Object Transfer v1 send/receive work
+Written by: Claude (Opus 4.8), 2026-06-13
+For: a fresh session started from scratch (do NOT need to resume the old one)
+================================================================================
+
+User: sean@raidatech.com. Three repos in play:
+  - C server/client core:  D:\Code\src\C\rest_core         (branch: qmail)
+  - PHP protocol docs:     D:\Code\src\php\cloudcoin.org-main (branch: main)
+  - Electron+React GUI:    D:\Code\src\javascript\Qmail-GUI  (branch: main)
+Test clients (each has its own QMail.exe + Client_Data):
+  D:\Code\Tools\test-clients\Client6\   (SN 9506, address 37.34@bit)
+  D:\Code\Tools\test-clients\Client7\   (SN 6565, address 25.165@giga)
+
+A note on the conversation if you DO resume instead: a large part of this
+session built a "manifest v2 / 72-byte tell entry" design and then
+COMPLETELY REVERSED it. The wire truth NOW is: tells carry ONLY manifest
+version 1 with 16-byte entries. If you see v2/72-byte talk in old context,
+it is dead. This handoff reflects the final state.
+
+--------------------------------------------------------------------------------
+WHAT THIS SESSION DID (all committed + pushed unless noted under "LOOSE ENDS")
+--------------------------------------------------------------------------------
+Goal across the session: get a QMail message to actually send from one
+client and arrive at another, using the new Object Transfer v1 storage
+(cmds 76-84) instead of legacy striped pages.
+
+rest_core (branch qmail), in order:
+  8173d70  object-transfer code-review fixes + per-session API token gate
+           (R-1..R-7 from a prior review; -api-token flag / QMAIL_API_TOKEN
+           env; object-transfer REST endpoints require Authorization: Bearer
+           when a token is configured; constant-time compare).
+  bed9bdb  beacon starts when the identity coin arrives AFTER boot
+           (extracted qmail_beacon_try_start() in main_rest.c; called from
+           import-credentials and from beacon-control action=start, which
+           previously launched threads on an unpopulated state).
+  0e10c0e  tells carry ONLY the v1 manifest — dropped wire manifest v2.
+           Send writes genuine 16-byte entries with a real per-file CRC32
+           (crc32_present set). Receive DERIVES the object key from the tell:
+           object_id = email GUID, generation = 1, file_type from the entry;
+           tries the object store (cmd 81/82) first, falls back to legacy
+           striped (cmd 74), verifies the reconstructed file against the
+           v1 CRC32. QMAIL_TELL_MANIFEST_VERSION_2 deleted; 72-byte entry is
+           now an internal synthesized struct only.
+  a85b4cf  download-retry give-up (the most recent fix).
+           qmail_received_tells gained download_attempts / download_failed /
+           first_attempt_at (auto-migrated). The retry worker
+           (api_src/main_rest.c) abandons a tell after 8 failed sweeps
+           (QMAIL_DL_RETRY_MAX_ATTEMPTS, ~16 min) OR 24 h pending
+           (QMAIL_DL_RETRY_MAX_AGE_SEC), whichever first; get_pending
+           excludes download_failed=1. Helper:
+           qmail_db_tell_record_failed_attempt() in src/qmail/qmail_db.c.
+
+cloudcoin.org (branch main): 48e2357, 1144363, 48ee14d
+  Spec docs brought in line with the v1-only reality:
+  qmail-tell.php (offset 51 = version 1 only; object-stored mail uses the
+  same v1 manifest, key derived from the GUID), qmail-object-transfer-v1.php
+  section 7 renamed "Tell integration", 72-byte entry removed from the JSON
+  schema / vectors / generator+validator tools.
+
+Qmail-GUI (branch main): bd11020
+  Attachment-transfer review fixes + backend session token:
+  electron.cjs generates a random QMAIL_API_TOKEN per launch, passes it to
+  core.exe via env, renderer fetches it over IPC and sends it as a bearer
+  header on object-transfer endpoints. Download switched to response.blob()
+  (no whole-file buffering in the renderer heap). open-path replaced by an
+  allowlisted reveal-path. Plus cancel/resume/re-entrancy fixes.
+
+Build/deploy state at handoff:
+  - rest_core built clean, all 5 ctest tests pass.
+  - core.exe is mirrored into Qmail-GUI/backend by the rest_core build.
+  - QMail.exe rebuilt (npm run build-portable) and DEPLOYED to BOTH
+    Client6 and Client7 (12:13 PM 2026-06-13 build, ~61.68 MB, identical).
+    => Both test clients are running the LATEST fixes.
+  - Stuck undownloadable tells were deleted from both client DBs
+    (E61B... from Client6, 60B2B3A0... from Client7). Inboxes are clean.
+
+--------------------------------------------------------------------------------
+THE BLOCKER (server-side, NOT a client bug) — read this first next session
+--------------------------------------------------------------------------------
+Object Transfer mail still does NOT deliver. Root cause is SERVER-SIDE:
+the META object (file_type 0x00) is unretrievable after the sender's
+cmd 79 commit reports success. The BODY object (file_type 0x01, same
+object_id/generation/servers/key) downloads fine via cmd 81/82; the meta
+misses the object store and returns 0xCA (202 FILE_NOT_EXIST) from every
+server on the cmd 74 fallback. Without the meta (which holds the CBDF:
+subject, recipients, body framing) the email can't be assembled, so the
+recipient shows "Failed to decrypt" / "queued for background decryption".
+Reproduced BOTH directions, with and without a large attachment, so it is
+not load- or direction-specific. Leading theory: file_type 0 treated as
+"unset/default" on the server's store or (object_id,file_type) lookup, OR
+tiny objects not durably persisted/indexed.
+
+The client is behaving correctly (requests the right key, fails hard
+rather than storing a corrupt email). Do NOT "fix" the client for this.
+
+Full server handoff with timestamped log excerpts + a concrete lookup the
+server team can run is at:
+  D:\Code\Tools\test-clients\Client6\Client_Data\claude.note-to-server-meta-object-missing.txt
+The user relays these notes to a separate "Server AI" that edits raidax.
+
+Secondary server issue: RAIDA 13 (and later RAIDA 22) fail cmd 83
+OBJECT_CAPABILITIES signature validation (client log: "invalid response
+signature from RAIDA NN", src/qmail/qmail_object_transfer.c:879). Those
+servers drop out of the upload set. Same server note covers it.
+
+--------------------------------------------------------------------------------
+OUT-OF-SCOPE BUGS + FUTURE WARNINGS — already recorded, don't re-discover
+--------------------------------------------------------------------------------
+Canonical file (just updated this session):
+  D:\Code\src\C\rest_core\docs\gpt.large-upload-out-of-scope-bugs.txt
+  See "SESSION ADDENDUM — 2026-06-13":
+    #9  server meta-object missing (BLOCKER, above)
+    #10 server cmd-83 signature failures RAIDA 13/22 (HIGH)
+    #11 object-transfer receive still reassembles whole file in RAM (HIGH,
+        future large-download work; qmail_receive.c ~1241 +
+        qmail_receive_object_reconstruct.c)
+    W-1 download-retry give-up is a symptom bound; abandoned tells are
+        silently undelivered — want a GUI "could not be delivered" state +
+        manual retry once #9 is fixed.
+    W-2 receipts from the dead manifest-v2 builds can't be re-sent.
+    W-3 >4 GB sends unsupported (32-bit tell size fields; ties to item #7).
+    W-4 API session token is per-process; external/CLI callers need it.
+    W-5 cmd-83 failures spam ERROR logs every operation.
+NOTE: that doc edit is UNCOMMITTED (see LOOSE ENDS).
+
+--------------------------------------------------------------------------------
+LOOSE ENDS / UNCOMMITTED at handoff
+--------------------------------------------------------------------------------
+rest_core: docs/gpt.large-upload-out-of-scope-bugs.txt is MODIFIED but not
+  committed (the 2026-06-13 addendum). Commit it if you want it in git;
+  it's docs-only.
+
+Qmail-GUI: uncommitted working-tree changes exist that are likely the
+  USER's or a linter's, NOT mine — do not blindly commit/revert them.
+  At handoff they included: electron.cjs (the apiSessionToken block IS
+  mine and is already committed in bd11020 — but the file shows as M, so
+  it has further local edits; check the diff before touching), plus
+  ComposeModal.css/.jsx, EmailListPane.css, NavigationPane.css/.jsx,
+  ReadingPane.css/.jsx, WalletActionModal.css, and .claude/settings.local.json.
+  Ask the user before committing any of these.
+
+--------------------------------------------------------------------------------
+HOW TO TEST A SEND (so you can tell if the server bug got fixed)
+--------------------------------------------------------------------------------
+Both clients run from D:\Code\Tools\test-clients\ClientN\QMail.exe.
+After a send, read the SENDER's main.log for "TELL to beacon ... Success
+(status=0xFA, accepted=1)" — tell delivery works now. Then read the
+RECEIVER's main.log: the meta (file_type 0x00) download is the tell. If you
+see "object store miss for file_type 0x00" then "status=0xCA" x N, the
+server meta bug (#9) is STILL present. If the meta downloads via cmd 81/82
+("Object download completed") and you see "CBDF parsed OK ... stored in
+INBOX", the server side is FIXED and delivery works.
+Watch building: `cmake --build build` in rest_core (mirrors core.exe into
+Qmail-GUI/backend); `npm run build-portable` in Qmail-GUI; then copy
+release\QMail.exe to each ClientN\ — but the client must be CLOSED first
+(the running .exe locks the file).
+
+To inspect/clear a client DB:
+  python sqlite3 on D:\Code\Tools\test-clients\ClientN\Client_Data\qmail.db
+  Table qmail_received_tells: downloaded=0 means pending; download_failed=1
+  means the new give-up abandoned it.
+
+--------------------------------------------------------------------------------
+WORKING AGREEMENTS WITH THIS USER
+--------------------------------------------------------------------------------
+- Commit messages end with the Co-Authored-By trailer (the harness states
+  the exact line; for Opus 4.8 it's: Co-Authored-By: Claude Opus 4.8
+  (1M context) <noreply@anthropic.com>).
+- Server-side fixes are NOT done by us — write a note in the relevant
+  Client_Data folder (named claude.note-to-server-*.txt) and the user
+  relays it to the Server AI.
+- Confirm before destructive DB edits or before committing files that look
+  like the user's own in-progress work.
+- The user reads logs and runs the clients manually; ask them to close a
+  client before overwriting its QMail.exe.
+================================================================================
+END OF HANDOFF
+================================================================================
