@@ -1711,16 +1711,50 @@ export const deleteContact = async (serialNumber) => {
  * Merges /api/qmail/local/status (topology) with /api/raida/echo (per-server health).
  * @returns {Promise<{success: boolean, data?: {servers, totalServers, availableServers, raidaEcho}, error?: string}>}
  */
-export const getServers = async () => {
+// QMail server topology (which RAIDA indices are mail servers, their IPs/ports)
+// is static for the life of the process. Cache it so a status refresh only needs
+// ONE /raida/echo call and never re-fetches topology — the echo already carries
+// per-RAIDA availability for every server, including the mail/beacon ones.
+let _qmailTopologyCache = null;
+
+/**
+ * @param {object} [options]
+ * @param {object} [options.echoData] Pre-fetched /raida/echo result (with a
+ *   `raidas` array). When supplied, getServers does NOT issue its own echo —
+ *   it derives mail-server availability from this single shared echo, avoiding
+ *   a redundant round trip to the (rate-limited) beacon.
+ * @param {boolean} [options.skipEcho] When true, never call /raida/echo from
+ *   this helper. Server availability is unknown if echoData is absent/null.
+ */
+export const getServers = async (options = {}) => {
   try {
+    const safeOptions = options || {};
+    const hasEchoData = Object.prototype.hasOwnProperty.call(safeOptions, "echoData");
+    const { echoData = null, skipEcho = false } = safeOptions;
     // API-FIX: Changed /api/data/servers → /api/qmail/local/status
     // /qmail/local/status returns topology only (raida_index, ip, port, region,
     // hostname). It does NOT return is_available or percent_uptime. We merge
     // live availability from /raida/echo so consumers get honest health data.
-    const [statusRes, echoRes] = await Promise.all([
-      fetch(`${API_BASE_URL}/qmail/local/status`).then((r) => handleResponse(r)).catch(() => null),
-      fetch(`${API_BASE_URL}/raida/echo`).then((r) => r.ok ? r.json() : null).catch(() => null),
-    ]);
+    //
+    // Topology is fetched once and cached; availability comes from the shared
+    // echo (passed in by the caller) or, if none was passed, a single echo here.
+    const statusPromise = _qmailTopologyCache
+      ? Promise.resolve(_qmailTopologyCache)
+      : fetch(`${API_BASE_URL}/qmail/local/status`)
+          .then((r) => handleResponse(r))
+          .catch(() => null);
+
+    const echoPromise = skipEcho || hasEchoData
+      ? Promise.resolve(echoData)
+      : fetch(`${API_BASE_URL}/raida/echo`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+
+    const [statusRes, echoRes] = await Promise.all([statusPromise, echoPromise]);
+
+    if (statusRes && statusRes.servers && Array.isArray(statusRes.servers.list)) {
+      _qmailTopologyCache = statusRes; // remember topology for next refresh
+    }
 
     console.log("Data received from /qmail/local/status:", statusRes);
 
@@ -1837,6 +1871,94 @@ export const getQMailLockerPoolStatus = async (walletPath = null) => {
     return { success: true, data: await getLockerPoolStatusData(walletPath) };
   } catch (error) {
     console.error("Get locker pool status failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+const appendCanSendRecipientParams = (params, name, value) => {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+
+  values
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .forEach((entry) => params.append(name, entry));
+};
+
+const readApiBoolean = (value) =>
+  value === true || value === 1 || value === "1" || value === "true";
+
+/**
+ * Checks whether QMail can currently fund a send from the Default wallet.
+ * @param {{to?: string[]|string, cc?: string[]|string, bcc?: string[]|string, uploadLockers?: number, inboxFee?: number}} options
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getQMailCanSend = async (options = {}) => {
+  try {
+    const lookup = await lookupDefaultWalletPath();
+    if (!lookup.path) {
+      throw new Error(
+        lookup.reason === "no_wallet"
+          ? "No Default wallet is registered on the QMail backend."
+          : "Could not reach the QMail backend to look up the Default wallet.",
+      );
+    }
+
+    const params = new URLSearchParams({ wallet_path: lookup.path });
+    const uploadLockers = Number(
+      options.uploadLockers ?? options.upload_lockers ?? 0,
+    );
+    if (Number.isFinite(uploadLockers) && uploadLockers > 0) {
+      params.set("upload_lockers", String(Math.trunc(uploadLockers)));
+    }
+
+    const inboxFee = Number(
+      options.inboxFee ??
+        options.inbox_fee ??
+        options.requiredInboxFee ??
+        options.required_inbox_fee ??
+        0,
+    );
+    if (Number.isFinite(inboxFee) && inboxFee > 0) {
+      params.set("inbox_fee", String(Math.trunc(inboxFee)));
+    }
+
+    appendCanSendRecipientParams(params, "to", options.to);
+    appendCanSendRecipientParams(params, "cc", options.cc);
+    appendCanSendRecipientParams(params, "bcc", options.bcc);
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/local/can-send?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+    if (!data || data.success !== true) {
+      throw new Error("Invalid response from send funding check endpoint");
+    }
+
+    const canSend = readApiBoolean(data.can_send);
+    return {
+      success: true,
+      data: {
+        canSend,
+        reason: data.reason || "",
+        message:
+          data.message ||
+          (canSend
+            ? "Ready to send mail"
+            : "You do not have enough CloudCoins to send mail. Add funds, then try again."),
+        requiredUploadLockers: readNumericApiField(data.required_upload_lockers) ?? 0,
+        requiredInboxFee: readNumericApiField(data.required_inbox_fee) ?? 0,
+        walletRequired: readNumericApiField(data.wallet_required) ?? 0,
+        walletBalance: readNumericApiField(data.wallet_balance) ?? 0,
+        combinedWalletValue: readNumericApiField(data.combined_wallet_value) ?? 0,
+        raw: data,
+      },
+    };
+  } catch (error) {
+    console.error("QMail can-send check failed:", error);
     return { success: false, error: error.message };
   }
 };

@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Mail,
   Inbox,
@@ -137,6 +137,10 @@ const NavigationPane = ({
   const [qmailServers, setQmailServers] = useState(null);
   const [qmailSummary, setQmailSummary] = useState(null);
   const [showWalletPaymentInfo, setShowWalletPaymentInfo] = useState(false);
+  // True while a server-health check is running, so concurrent triggers (button,
+  // interval, isRefreshing toggle) cannot stack overlapping echo calls.
+  const checkInFlightRef = useRef(false);
+  const wasRefreshingRef = useRef(false);
 
   const showUnknownRaidaHealth = useCallback(() => {
     setRaidaHealth(null);
@@ -197,37 +201,58 @@ const NavigationPane = ({
     });
   }, [showUnknownQmailHealth]);
 
-  const checkServerHealth = useCallback(async () => {
-    const qmailResult = await getServers();
-
+  const applyQmailServersFromEcho = useCallback(async (echoData) => {
+    const qmailResult = await getServers({ echoData, skipEcho: true });
     if (qmailResult.success) {
       applyQmailServers(qmailResult.data?.servers);
-      if (qmailResult.data?.raidaEcho) {
-        applyRaidaEcho(qmailResult.data.raidaEcho);
+    } else {
+      showUnknownQmailHealth();
+    }
+  }, [applyQmailServers, showUnknownQmailHealth]);
+
+  const checkServerHealth = useCallback(async () => {
+    /* Re-entrancy guard: the interval, the mount effect, and the isRefreshing
+     * toggle can all fire this. Without a guard, overlapping runs stack
+     * concurrent echo calls onto the (rate-limited) beacon and the status
+     * panels never settle. Skip if a check is already in flight. */
+    if (checkInFlightRef.current) return;
+    checkInFlightRef.current = true;
+    try {
+      /* ONE echo for both panels. /raida/echo already returns the status of all
+       * 25 RAIDAs, including the mail/beacon servers, so the QMail server panel
+       * derives its availability from this same result — no second echo, no
+       * extra round trip to the beacon. */
+      const raidaResult = await echoRaida();
+      if (raidaResult.success) {
+        applyRaidaEcho(raidaResult.data);
       } else {
         showUnknownRaidaHealth();
       }
-      return;
-    }
 
-    showUnknownQmailHealth();
-    const raidaResult = await echoRaida();
-    if (raidaResult.success) {
-      applyRaidaEcho(raidaResult.data);
-    } else {
-      showUnknownRaidaHealth();
+      // Merge the shared echo into the mail-server topology (topology is cached
+      // after the first call, and skipEcho prevents a second echo on failure).
+      const echoForServers = raidaResult.success
+        ? raidaResult.data
+        : null;
+      await applyQmailServersFromEcho(echoForServers);
+    } finally {
+      checkInFlightRef.current = false;
     }
   }, [
-    applyQmailServers,
     applyRaidaEcho,
-    showUnknownQmailHealth,
+    applyQmailServersFromEcho,
     showUnknownRaidaHealth,
   ]);
 
   useEffect(() => {
-    if (isRefreshing) return undefined;
+    if (isRefreshing) {
+      wasRefreshingRef.current = true;
+      return undefined;
+    }
 
-    checkServerHealth();
+    const justFinishedRefresh = wasRefreshingRef.current;
+    wasRefreshingRef.current = false;
+    if (!justFinishedRefresh) checkServerHealth();
     const interval = setInterval(checkServerHealth, 120000);
     return () => clearInterval(interval);
   }, [checkServerHealth, isRefreshing]);
@@ -240,8 +265,30 @@ const NavigationPane = ({
   }, [isRefreshing, showUnknownQmailHealth, showUnknownRaidaHealth]);
 
   useEffect(() => {
-    applyRaidaEcho(raidaEchoSnapshot);
-  }, [applyRaidaEcho, raidaEchoSnapshot]);
+    let cancelled = false;
+
+    const applySnapshot = async () => {
+      applyRaidaEcho(raidaEchoSnapshot);
+      if (!raidaEchoSnapshot) return;
+
+      const qmailResult = await getServers({
+        echoData: raidaEchoSnapshot,
+        skipEcho: true,
+      });
+      if (cancelled) return;
+
+      if (qmailResult.success) {
+        applyQmailServers(qmailResult.data?.servers);
+      } else {
+        showUnknownQmailHealth();
+      }
+    };
+
+    applySnapshot();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyQmailServers, applyRaidaEcho, raidaEchoSnapshot, showUnknownQmailHealth]);
 
   const walletBalanceStatus = getWalletBalanceStatus(walletBalance);
   const walletLockedValue = getWalletLockedValue(walletBalance);

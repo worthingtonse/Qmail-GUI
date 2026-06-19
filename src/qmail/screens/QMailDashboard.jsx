@@ -19,6 +19,7 @@ import {
   getDrafts,
   getEmailAttachments,
   getQMailWalletBalance,
+  getQMailCanSend,
   checkMailNow,
   echoRaida,
   markEmailRead,
@@ -1772,7 +1773,23 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
-  const handleOpenCompose = () => {
+  const handleOpenCompose = async () => {
+    const fundingCheck = await getQMailCanSend();
+    if (!fundingCheck.success) {
+      showDashboardNotification(
+        fundingCheck.error || "Could not check whether QMail can send right now.",
+        "error",
+      );
+      return;
+    }
+    if (!fundingCheck.data.canSend) {
+      showDashboardNotification(
+        fundingCheck.data.message || "Add funds to your Default wallet before sending mail.",
+        "error",
+      );
+      return;
+    }
+
     setComposeContext({
       mode: "new",
       ownIdentity: userAccount

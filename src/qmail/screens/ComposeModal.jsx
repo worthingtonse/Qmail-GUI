@@ -14,6 +14,7 @@ import "./ComposeModal.css";
 import {
   getDrafts,
   sendEmail,
+  getQMailCanSend,
   getTaskStatus,
   getObjectTransferStatus,
   cancelObjectTransfer,
@@ -1125,6 +1126,25 @@ const ComposeModal = ({
         );
         return;
       }
+    }
+
+    const fundingCheck = await getQMailCanSend({
+      to: toList,
+      cc: ccList,
+      bcc: bccList,
+    });
+    if (!fundingCheck.success) {
+      setError(
+        fundingCheck.error || "Could not check whether QMail can send right now.",
+      );
+      return;
+    }
+    if (!fundingCheck.data.canSend) {
+      setError(
+        fundingCheck.data.message ||
+          "Add funds to your Default wallet before sending mail.",
+      );
+      return;
     }
 
     clearAutosaveTimer();

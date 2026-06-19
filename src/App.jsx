@@ -81,7 +81,7 @@ function App() {
       const ready = await waitForBackend();
       if (!ready) {
         setLoadingMessage(
-          "QMail backend didn't respond. The app will keep trying — you can also restart QMail.",
+          "The background of the program failed to start. There may be a conflict with ports. Try to start the program again.",
         );
         // Don't hard-block; proceed to the normal flow and let the
         // individual screens surface their own retry affordances.
