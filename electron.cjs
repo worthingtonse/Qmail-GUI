@@ -225,7 +225,17 @@ function startBackend(port) {
     log('Backend started PID: ' + backendProcess.pid + ' on port ' + port);
 
     backendProcess.stdout.on('data', (data) => {
-      log('BACKEND: ' + data.toString().trim());
+      const output = data.toString().trim();
+      log('BACKEND: ' + output);
+
+      // Detect when backend is ready to accept requests
+      if (output.includes('REST API server running on')) {
+        log('Backend is ready for requests');
+        // Broadcast to all windows that backend is ready
+        if (mainWindow) {
+          mainWindow.webContents.send('backend-ready', { port });
+        }
+      }
     });
 
     backendProcess.stderr.on('data', (data) => {
@@ -778,6 +788,79 @@ ipcMain.handle('get-backend-data-dir', async () => backendDataDir || null);
 
 ipcMain.handle('get-api-token', async () => apiSessionToken);
 
+// Filenames that are NOT coins — OS/editor cruft that can litter a wallet
+// directory. A directory containing only these must NOT count as "has ID".
+const NON_COIN_FILES = new Set([
+  '.ds_store',
+  'thumbs.db',
+  'desktop.ini',
+  '.gitkeep',
+]);
+
+// Returns true if `dir` (or any subdirectory) contains at least one real
+// coin file. Coins may live directly in Bank/Fracked or be nested one level
+// deeper, so we recurse. We can't reliably allow-list coin extensions here
+// (the layout isn't documented in this process), so instead we treat any
+// regular file that isn't known OS/editor junk as a coin.
+function dirHasCoinFile(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    log(`has-id-coin: error reading ${dir}: ${error.message}`);
+    return false;
+  }
+
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      if (!NON_COIN_FILES.has(entry.name.toLowerCase())) {
+        return true;
+      }
+    } else if (entry.isDirectory()) {
+      if (dirHasCoinFile(path.join(dir, entry.name))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+ipcMain.handle('has-id-coin', async () => {
+  if (!backendDataDir) {
+    return { has_id: false, error: 'Data directory not available' };
+  }
+
+  const idCoinDirs = [
+    path.join(backendDataDir, 'Client_Data', 'Wallets', 'Mail', 'Bank'),
+    path.join(backendDataDir, 'Client_Data', 'Wallets', 'Mail', 'Fracked'),
+  ];
+
+  for (const dir of idCoinDirs) {
+    if (fs.existsSync(dir) && dirHasCoinFile(dir)) {
+      return { has_id: true };
+    }
+  }
+
+  return { has_id: false };
+});
+
+// Open an external URL in the user's default browser. Restricted to
+// http/https so the renderer can't use this to launch arbitrary local
+// programs (file:, etc.).
+ipcMain.handle('open-external', async (_event, url) => {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: 'Only http/https URLs may be opened.' };
+    }
+    await shell.openExternal(parsed.href);
+    return { success: true };
+  } catch (error) {
+    log(`open-external failed for ${url}: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('reveal-path', async (_event, targetPath) => {
   try {
     const requestedPath = String(targetPath || '').trim();
@@ -823,12 +906,13 @@ ipcMain.handle('list-sound-files', async () => {
     return [];
   }
 });
-// Boot sequence:
+// Boot sequence (Option 2 - backend gets a head start):
 //   1. Pick a free port for the backend (OS-assigned, supports multi-instance).
-//   2. Open the splash window immediately so the user sees life.
-//   3. Spawn core.exe with that port.
+//   2. Spawn core.exe with that port (backend starts in background).
+//   3. Open the splash window so the user sees life.
 //   4. Load the main renderer with the port in the URL.
 //   5. Splash closes when the main window's first paint fires.
+//   6. Frontend receives backend-ready signal when core.exe is listening.
 async function boot() {
   if (qmailArgs.port !== null) {
     backendPort = qmailArgs.port;
@@ -843,8 +927,9 @@ async function boot() {
     }
   }
 
-  createSplashWindow();
+  // Start backend first so it has time to initialize while splash is showing
   startBackend(backendPort);
+  createSplashWindow();
   createMainWindow(backendPort);
 }
 

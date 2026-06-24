@@ -16,6 +16,10 @@ import {
   normalizeIdentityForUi,
 } from "./api/qmailApiServices";
 
+// Where all QMail software downloads live. The "Download Update" button
+// opens this page in the user's default browser.
+const DOWNLOAD_PAGE_URL = "https://cloudcoinconsortium.com/use.php";
+
 const QMAIL_DISCLAIMER_TEXT = `DISCLAIMER:
 This software is provided 'as-is', without any express or implied warranty.
 In no event shall the authors be held liable for any damages arising from
@@ -78,6 +82,33 @@ function App() {
 
   useEffect(() => {
     const initializeApp = async () => {
+      // The version check hits a remote URL and the local identity check
+      // reads the filesystem via IPC — NEITHER depends on the backend HTTP
+      // server. Kick the version check off immediately; it resolves on its
+      // own schedule and the prompt is gated on backend readiness before
+      // any download is attempted.
+      checkForUpdates();
+
+      // FAST PATH: the local coin-file check (hasId) does NOT wait on
+      // core.exe. Run it FIRST, before waitForBackend(), so a returning
+      // user lands on QMAIL immediately while the backend is still binding
+      // its port. QMailDashboard's mount-time useEffect retries
+      // getIdentity() to seed userAccount once the backend has indexed it.
+      try {
+        const idCheck = await hasId();
+        console.log("[initializeApp] fast-path hasId returned:", idCheck);
+        if (idCheck && idCheck.has_id) {
+          clearSkipAutoRestore();
+          setProvisioningData(null);
+          setSelectedService(SERVICES.QMAIL);
+          setIsLoading(false);
+          return;
+        }
+      } catch (error) {
+        // Fall through to the full backend-dependent flow below.
+        console.error("[initializeApp] fast-path hasId failed:", error);
+      }
+
       const ready = await waitForBackend();
       if (!ready) {
         setLoadingMessage(
@@ -86,45 +117,79 @@ function App() {
         // Don't hard-block; proceed to the normal flow and let the
         // individual screens surface their own retry affordances.
       }
-      // Run version check and identity check in parallel on startup
-      await Promise.all([checkForUpdates(), checkIdentity()]);
+      // No fast-path identity — fall back to the backend identity check.
+      await checkIdentity();
+      // If selectedService is still SERVICES.NONE after checkIdentity(),
+      // it means the identity check failed and we should stay on the service selection screen
+      console.log("[initializeApp] selectedService after checks:", selectedService);
       setIsLoading(false);
     };
 
     initializeApp();
   }, []);
 
+  // Listen for backend-ready signal from Electron main process.
+  // When core.exe is ready to accept requests, retry identity checks
+  // if they failed during the initial startup window.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.electronAPI) return;
+
+    const handleBackendReady = async () => {
+      console.log('[App] Backend ready signal received, retrying identity check...');
+      // Only retry if identity check failed previously (still on ServiceSelectionScreen)
+      if (selectedService === SERVICES.NONE) {
+        await checkIdentity();
+      }
+    };
+
+    // Listen for backend-ready event from Electron IPC
+    const unsubscribe = window.electronAPI.onBackendReady(handleBackendReady);
+    return unsubscribe;
+  }, [selectedService]);
+
   // FIX-03: returning users with a configured identity should go
   // STRAIGHT to QMAIL, not bounce through WalletSetupScreen on every
   // launch. WalletSetupScreen is now first-run-only (post-import).
   const checkIdentity = async () => {
     try {
+      console.log("[checkIdentity] Starting identity check...");
       const identity = await getIdentity();
+      console.log("[checkIdentity] getIdentity returned:", identity);
+      console.log("[checkIdentity] identity.configured =", identity?.configured);
 
       if (identity && identity.configured) {
+        console.log("[checkIdentity] ✓ User has configured identity, going to QMAIL");
         // Returning user — normalize and seed the dashboard directly.
         clearSkipAutoRestore();
-        setProvisioningData(normalizeIdentityForUi(identity));
+        const normalized = normalizeIdentityForUi(identity);
+        console.log("[checkIdentity] Normalized identity:", normalized);
+        setProvisioningData(normalized);
         setSelectedService(SERVICES.QMAIL);
+        console.log("[checkIdentity] Called setSelectedService(SERVICES.QMAIL)");
         return;
       }
 
+      console.log("[checkIdentity] Identity not configured (identity:", identity, "), checking hasId...");
       // Fallback: identity endpoint may not have loaded yet, but coin files
       // may already exist in the Mail wallet. Check with has-id.
       const idCheck = await hasId();
+      console.log("[checkIdentity] hasId returned:", idCheck);
       if (idCheck && idCheck.has_id) {
+        console.log("[checkIdentity] ✓ Coin files exist, going to QMAIL");
         // Coin files exist — go to QMAIL. QMailDashboard's mount-time
         // useEffect will retry getIdentity() and seed userAccount once
         // the backend has indexed the identity.
         clearSkipAutoRestore();
         setProvisioningData(null);
         setSelectedService(SERVICES.QMAIL);
+        console.log("[checkIdentity] Called setSelectedService(SERVICES.QMAIL)");
         return;
       }
 
+      console.log("[checkIdentity] ✗ No identity found, staying on ServiceSelectionScreen");
       // No identity at all — stay on ServiceSelectionScreen
     } catch (error) {
-      console.error("Failed to restore identity:", error);
+      console.error("[checkIdentity] ✗ Exception caught:", error);
       setSelectedService(SERVICES.NONE);
     }
   };
@@ -141,27 +206,15 @@ function App() {
     }
   };
 
-  const detectOS = () => {
-    const platform = window.navigator.platform.toLowerCase();
-    if (platform.includes("win")) return "windows";
-    if (platform.includes("mac")) return "mac";
-    if (platform.includes("linux")) return "linux";
-    return "windows";
-  };
-
+  // Open the downloads page in the user's default browser. Prefers the
+  // Electron shell (proper external open); falls back to window.open in a
+  // plain browser/Vite build.
   const handleDownload = () => {
-    if (!updateAvailable) return;
-
-    const os = detectOS();
-    let downloadUrl = updateAvailable.download_url_windows;
-
-    if (os === "mac") {
-      downloadUrl = updateAvailable.download_url_mac;
-    } else if (os === "linux") {
-      downloadUrl = updateAvailable.download_url_linux;
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal(DOWNLOAD_PAGE_URL);
+    } else {
+      window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
     }
-
-    window.open(downloadUrl, "_blank");
     setShowUpdateModal(false);
   };
 
@@ -313,8 +366,9 @@ function App() {
                 </div>
 
                 <p className="update-modal__description">
-                  A new version of QMail is available. Please download and
-                  install the latest version to continue using the application.
+                  A new version of QMail is available. Click below to open the
+                  downloads page in your browser, then download and install the
+                  latest version.
                 </p>
               </div>
 

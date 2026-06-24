@@ -6,6 +6,7 @@ import {
   parseQmailAddress,
 } from "../qmail/address/qmailAddress";
 import { normalizeTransferError } from "../qmail/transferErrors";
+import { BUILD_DATE } from "../version";
 
 // Port resolution priority:
 //   1. ?backendPort=N in the URL — set by Electron at boot to support
@@ -2216,9 +2217,13 @@ export const sendEmail = async (emailData) => {
     const toList = Array.isArray(emailData.to) ? emailData.to : [];
     const ccList = Array.isArray(emailData.cc) ? emailData.cc : [];
     const bccList = Array.isArray(emailData.bcc) ? emailData.bcc : [];
+    const resolvedWalletPath = await resolveDefaultWalletPathForOperation(
+      emailData.walletPath ?? emailData.wallet_path ?? null,
+    );
 
     // Build URL-encoded form body (backend parses POST body as query params)
     const params = new URLSearchParams();
+    params.set("wallet_path", resolvedWalletPath);
     toList.forEach((recipient) => params.append("to", recipient));
     ccList.forEach((recipient) => params.append("cc", recipient));
     bccList.forEach((recipient) => params.append("bcc", recipient));
@@ -2317,17 +2322,50 @@ export const convertSnToEmail = async (sn, denomination = null) => {
 };
 
 // Version check
+// Remote version file. Returns a bare date string like "2026-03-24" (no
+// JSON, no .php extension). Hosted independently of the local backend so
+// the version check does NOT depend on core.exe being up. The local build
+// date it is compared against lives in src/version.js (BUILD_DATE).
+const REMOTE_VERSION_URL =
+  "https://raida11.cloudcoin.com/service/qmail_client_version";
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Checks whether a newer client build is available by fetching the remote
+ * version date and comparing it to the local BUILD_DATE. Does NOT touch the
+ * local backend. YYYY-MM-DD strings compare correctly with plain ordering
+ * (lexicographic == chronological for zero-padded ISO dates).
+ *
+ * @returns {Promise<{success: boolean, data?: {update_available: boolean,
+ *   current_version: string, latest_version: string, message: string},
+ *   error?: string}>}
+ */
 export const checkVersion = async () => {
   try {
-    // API-FIX: Changed /admin/version-check → /system/version-check
-    const response = await fetch(`${API_BASE_URL}/system/version-check`);
-
+    const response = await fetch(REMOTE_VERSION_URL, { method: "GET" });
     if (!response.ok) {
-      throw new Error("Failed to check version");
+      throw new Error(`Version endpoint returned ${response.status}`);
     }
 
-    const data = await response.json();
-    return { success: true, data };
+    const latestVersion = (await response.text()).trim();
+    if (!ISO_DATE_PATTERN.test(latestVersion)) {
+      // Defensive: don't prompt for an update off a malformed response.
+      throw new Error(`Unexpected version format: "${latestVersion}"`);
+    }
+
+    const updateAvailable = latestVersion > BUILD_DATE;
+    return {
+      success: true,
+      data: {
+        update_available: updateAvailable,
+        current_version: BUILD_DATE,
+        latest_version: latestVersion,
+        message: updateAvailable
+          ? "A newer version of QMail is available."
+          : "QMail is up to date.",
+      },
+    };
   } catch (error) {
     console.error("Version check error:", error);
     return { success: false, error: error.message };
@@ -2718,7 +2756,7 @@ export const getIdentity = async () => {
     if (response.ok) {
       const data = await response.json();
       const serialNumber = data.serial_number || 0;
-      return {
+      const result = {
         ...data,
         configured: data.registered === true && serialNumber > 0,
         identity: data.registered
@@ -2737,7 +2775,10 @@ export const getIdentity = async () => {
             }
           : null,
       };
+      console.log("[getIdentity] Returned:", result);
+      return result;
     }
+    console.log("[getIdentity] Response not ok, status:", response.status);
     return null;
   } catch (error) {
     console.error("Identity check failed:", error);
@@ -2876,15 +2917,16 @@ export const normalizeIdentityForUi = (raw, opts = {}) => {
 
 /**
  * Checks if the Mail wallet has any ID coin files (Bank or Fracked).
+ * Uses local filesystem check via IPC (no API call needed).
  * @returns {Promise<{has_id: boolean} | null>}
  */
 export const hasId = async () => {
   try {
-    const response = await fetch(`${API_BASE_URL}/qmail/local/identity/exists`);
-    if (response.ok) {
-      return await response.json();
+    if (!window.electronAPI || !window.electronAPI.hasIdCoin) {
+      console.warn("hasId: electronAPI.hasIdCoin not available (running in browser?)");
+      return null;
     }
-    return null;
+    return await window.electronAPI.hasIdCoin();
   } catch (error) {
     console.error("has-id check failed:", error);
     return null;

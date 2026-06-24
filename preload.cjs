@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   revealPath: (targetPath) => ipcRenderer.invoke('reveal-path', targetPath),
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   listSoundFiles: () => ipcRenderer.invoke('list-sound-files'),
+  hasIdCoin: () => ipcRenderer.invoke('has-id-coin'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   // FIX-02 (Batch 5): open a multi-select file picker for ComposeModal
   // attachments. Resolves to an Array<{path, name, size}>, or [] if
   // the user cancels. ComposeModal checks for window.electronAPI
@@ -38,6 +40,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, command) => callback(command);
     ipcRenderer.on('qmail:menu-command', handler);
     return () => ipcRenderer.removeListener('qmail:menu-command', handler);
+  },
+  onBackendReady: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('backend-ready', handler);
+    return () => ipcRenderer.removeListener('backend-ready', handler);
   },
   notifyThemeChanged: (themeId) => ipcRenderer.send('theme:changed', themeId)
 });
