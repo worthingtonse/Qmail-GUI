@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AlertTriangle, CheckCircle, Download, X, Loader2 } from "lucide-react";
 import "./App.css";
 import "./UpdateModal.css";
@@ -14,6 +14,7 @@ import {
   getIdentity,
   hasId,
   normalizeIdentityForUi,
+  checkMailNow,
 } from "./api/qmailApiServices";
 
 // Where all QMail software downloads live. The "Download Update" button
@@ -48,6 +49,9 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
+  // Guards prewarmInbox() so the background beacon ping fires at most once,
+  // even if both the fast path and the backend identity check confirm QMAIL.
+  const inboxPrewarmedRef = useRef(false);
 
   // Wait for the backend to be ready before kicking off identity /
   // version checks. The Electron splash hides the very first window
@@ -80,6 +84,26 @@ function App() {
     return false;
   };
 
+  // Pre-warm the inbox in the BACKGROUND once we know the user has an
+  // identity, so new mail is already fetched to the local DB by the time the
+  // user finishes reading the disclaimer and clicks Accept. checkMailNow() is
+  // the beacon PING that forces a fetch; it needs the backend up, so we wait
+  // for it first. Fire-and-forget: failures are non-fatal (the dashboard's
+  // manual refresh still works). Runs at most once (inboxPrewarmedRef).
+  const prewarmInbox = () => {
+    if (inboxPrewarmedRef.current) return;
+    inboxPrewarmedRef.current = true;
+    (async () => {
+      try {
+        await waitForBackend();
+        await checkMailNow();
+        console.log("[prewarmInbox] background beacon ping complete");
+      } catch (error) {
+        console.warn("[prewarmInbox] background ping failed (non-fatal):", error);
+      }
+    })();
+  };
+
   useEffect(() => {
     const initializeApp = async () => {
       // The version check hits a remote URL and the local identity check
@@ -102,6 +126,9 @@ function App() {
           setProvisioningData(null);
           setSelectedService(SERVICES.QMAIL);
           setIsLoading(false);
+          // Start fetching mail in the background while the user reads the
+          // disclaimer, so the inbox is fresh by the time they click Accept.
+          prewarmInbox();
           return;
         }
       } catch (error) {
@@ -166,6 +193,7 @@ function App() {
         setProvisioningData(normalized);
         setSelectedService(SERVICES.QMAIL);
         console.log("[checkIdentity] Called setSelectedService(SERVICES.QMAIL)");
+        prewarmInbox();
         return;
       }
 
@@ -183,6 +211,7 @@ function App() {
         setProvisioningData(null);
         setSelectedService(SERVICES.QMAIL);
         console.log("[checkIdentity] Called setSelectedService(SERVICES.QMAIL)");
+        prewarmInbox();
         return;
       }
 
