@@ -24,12 +24,6 @@
     "build-all": "npm run build && electron-builder --config electron-builder.config.cjs --win --mac --linux",
     "dist": "npm run build && electron-builder --config electron-builder.config.cjs --publish=never"
   },
-  "dependencies": {
-    "lucide-react": "^0.552.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "uuid": "^13.0.0"
-  },
   "devDependencies": {
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
@@ -42,7 +36,11 @@
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "lucide-react": "^0.552.0",
     "postcss": "^8.5.15",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^13.0.0",
     "vite": "^4.5.3",
     "vitest": "^4.1.7",
     "wait-on": "^7.2.0"
