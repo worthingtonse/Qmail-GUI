@@ -2327,7 +2327,7 @@ export const convertSnToEmail = async (sn, denomination = null) => {
 // the version check does NOT depend on core.exe being up. The local build
 // date it is compared against lives in src/version.js (BUILD_DATE).
 const REMOTE_VERSION_URL =
-  "https://raida11.cloudcoin.com/service/qmail_client_version";
+  "https://raida11.cloudcoin.global/service/qmail_client_version";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
