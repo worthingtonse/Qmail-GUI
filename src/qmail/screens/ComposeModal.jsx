@@ -40,6 +40,7 @@ import {
   forgetActiveTransfer,
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
 const MIN_RAIDA_FOR_SEND = 6;
 const SEND_POLL_TIMEOUT_MS = 60000;
@@ -1806,6 +1807,7 @@ const ComposeModal = ({
         {filteredContacts.slice(0, 5).map((contact, index) => {
           const address = getContactAddress(contact);
           const name = getContactName(contact);
+          const parsedAddress = parseQmailAddress(address);
           return (
             <button
               type="button"
@@ -1813,10 +1815,23 @@ const ComposeModal = ({
               className="compose-modal__contact-suggestion"
               onClick={() => handleContactSelect(field, contact)}
             >
-              <div className="compose-modal__contact-name">
-                {name}
-              </div>
-              {address && <div className="compose-modal__contact-address">{address}</div>}
+              <span className="compose-modal__contact-suggestion-text">
+                <span className="compose-modal__contact-name">
+                  {name}
+                </span>
+                {address && (
+                  <span className="compose-modal__contact-address">
+                    {address}
+                  </span>
+                )}
+              </span>
+              {parsedAddress.ok && (
+                <QmailCartoucheAvatar
+                  serialNumber={parsedAddress.serialNumber}
+                  denominationCode={parsedAddress.denominationCode}
+                  className="compose-modal__contact-cartouche"
+                />
+              )}
             </button>
           );
         })}
@@ -1924,7 +1939,6 @@ const ComposeModal = ({
             field: "to",
             label: "To:",
             value: to,
-            placeholder: "write address here",
           })}
 
           {/* Advanced options toggle */}
@@ -1946,13 +1960,11 @@ const ComposeModal = ({
                 field: "cc",
                 label: "CC:",
                 value: cc,
-                placeholder: "0006.1.87654321 (separate multiple with commas)",
               })}
               {renderRecipientField({
                 field: "bcc",
                 label: "BCC:",
                 value: bcc,
-                placeholder: "0006.1.11223344 (separate multiple with commas)",
               })}
               <div className="compose-modal__field">
                 <label htmlFor="subsubject">Sub-Subject:</label>

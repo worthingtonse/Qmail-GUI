@@ -14,4 +14,18 @@
 //
 // ===========================================================================
 
-export const BUILD_DATE = "2026-06-23";
+export const BUILD_DATE = "2026-06-26";
+
+export const formatBuildDateForDisplay = (value = BUILD_DATE) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+  if (!match) return String(value || "");
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+};

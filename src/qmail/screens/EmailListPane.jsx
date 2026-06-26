@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useState } from "react";
-import { Search, Mail, RefreshCw, Trash2, AlertTriangle, Loader2, Copy, Check } from "lucide-react";
+import { Search, Mail, RefreshCw, Trash2, AlertTriangle, Loader2 } from "lucide-react";
 import EmailListItem from "./EmailListItem";
 import "./EmailListPane.css";
 
@@ -31,16 +31,15 @@ const EmailListPane = ({
   loadingDraftId = null,
   searchResultCapHit = false,
   pageSize = 50,
-  qmailAddress = "",
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showTrashConfirm, setShowTrashConfirm] = useState(false);
   const [isDeletingTrashPage, setIsDeletingTrashPage] = useState(false);
-  const [addressCopied, setAddressCopied] = useState(false);
   const visibleTrashMessages =
     currentFolder === "trash" ? emails.filter((email) => !email.isPending) : [];
   const visibleTrashCount = visibleTrashMessages.length;
-  const showQmailAddress = currentFolder === "inbox" && qmailAddress.trim();
+  const showTrashActionBar =
+    currentFolder === "trash" && visibleTrashCount > 0 && onDeleteVisibleTrash;
   const deleteTrashButtonLabel =
     visibleTrashCount === 1
       ? "Delete this message permanently"
@@ -50,30 +49,6 @@ const EmailListPane = ({
     const value = e.target.value;
     setSearchQuery(value);
     onSearch(value);
-  };
-
-  const handleCopyAddress = async () => {
-    const address = qmailAddress.trim();
-    if (!address) return;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(address);
-      } else {
-        // Fallback for environments without the async clipboard API.
-        const textarea = document.createElement("textarea");
-        textarea.value = address;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setAddressCopied(true);
-      setTimeout(() => setAddressCopied(false), 2000);
-    } catch (error) {
-      console.error("Failed to copy QMail address:", error);
-    }
   };
 
   const handleConfirmDeleteVisibleTrash = async () => {
@@ -116,51 +91,26 @@ const EmailListPane = ({
         </div>
       </div>
 
-      <header className="email-list-pane__header">
-        <div className="email-list-pane__header-top">
-          <div className="email-list-pane__title-group">
-            <h3 className="email-list-pane__title">{getFolderTitle(currentFolder)}</h3>
-            {showQmailAddress && (
-              <span className="email-list-pane__qmail-address" title={qmailAddress}>
-                {qmailAddress}
-              </span>
-            )}
-            {showQmailAddress && (
-              <button
-                type="button"
-                className="email-list-pane__copy-address"
-                onClick={handleCopyAddress}
-                title={addressCopied ? "Copied!" : "Copy address"}
-                aria-label={addressCopied ? "Address copied" : "Copy QMail address"}
-              >
-                {addressCopied ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-            )}
-          </div>
-          <span className="email-list-pane__count">
-            {emails.length} {emails.length === 1 ? "message" : "messages"}
-          </span>
-        </div>
-        {onSortChange && (
-          <div className="email-list-pane__sort-bar" role="toolbar" aria-label="Sort messages">
-            <span className="email-list-pane__sort-label">Sort:</span>
-            {SORT_OPTIONS.map((opt) => (
-              <button
-                type="button"
-                key={opt.key}
-                className={`email-list-pane__sort-button ${
-                  sortMode === opt.key ? "email-list-pane__sort-button--active" : ""
-                }`}
-                onClick={() => onSortChange(opt.key)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {currentFolder === "trash" &&
-          visibleTrashCount > 0 &&
-          onDeleteVisibleTrash && (
+      {(onSortChange || showTrashActionBar) && (
+        <header className="email-list-pane__header">
+          {onSortChange && (
+            <div className="email-list-pane__sort-bar" role="toolbar" aria-label="Sort messages">
+              <span className="email-list-pane__sort-label">Sort:</span>
+              {SORT_OPTIONS.map((opt) => (
+                <button
+                  type="button"
+                  key={opt.key}
+                  className={`email-list-pane__sort-button ${
+                    sortMode === opt.key ? "email-list-pane__sort-button--active" : ""
+                  }`}
+                  onClick={() => onSortChange(opt.key)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {showTrashActionBar && (
             <div className="email-list-pane__trash-action-bar">
               <span className="email-list-pane__trash-action-copy">
                 Deletes only the messages shown on this page.
@@ -175,7 +125,8 @@ const EmailListPane = ({
               </button>
             </div>
           )}
-      </header>
+        </header>
+      )}
 
       {searchQuery.trim() && searchResultCapHit && !isLoading && (
         <div className="email-list-pane__search-cap-notice" role="status">

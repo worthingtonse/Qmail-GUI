@@ -33,7 +33,7 @@ const readStoredSoundFile = (fallback) => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return fallback;
     const stored = window.localStorage.getItem(SOUND_MAIL_FILE_STORAGE_KEY);
-    return stored === null ? fallback : normalizeSoundFile(stored);
+    return stored === null ? fallback : normalizeSoundValue(stored);
   } catch {
     /* ignore */
   }
@@ -49,9 +49,11 @@ const persistSetting = (key, value) => {
   }
 };
 
-const normalizeSoundFile = (filename) => String(filename || "").trim();
-const buildSoundSrc = (filename) => {
-  const normalized = normalizeSoundFile(filename);
+const normalizeSoundValue = (value) => String(value || "").trim();
+const isExternalSoundValue = (value) => /^file:\/\//i.test(String(value || "").trim());
+const buildSoundSrc = (value) => {
+  const normalized = normalizeSoundValue(value);
+  if (isExternalSoundValue(normalized)) return normalized;
   return normalized ? `./sounds/${encodeURIComponent(normalized)}` : null;
 };
 
@@ -60,7 +62,7 @@ class SoundService {
     this.sounds = {};
     this.isEnabled = readStoredBoolean(SOUND_ENABLED_STORAGE_KEY, true);
     this.volume = readStoredVolume(0.3); // Default volume (30%)
-    this.mailSoundFile = normalizeSoundFile(
+    this.mailSoundFile = normalizeSoundValue(
       readStoredSoundFile(DEFAULT_MAIL_SOUND_FILE),
     );
     this.preloadSounds();
@@ -161,6 +163,12 @@ class SoundService {
     this.playSource(src, options);
   }
 
+  previewMailReceived() {
+    const src = this.getMailSoundSrc() || buildSoundSrc(DEFAULT_MAIL_SOUND_FILE);
+    if (!src) return;
+    this.playSource(src, { force: true });
+  }
+
   getMailSoundFile() {
     return this.mailSoundFile;
   }
@@ -172,7 +180,7 @@ class SoundService {
   }
 
   setMailSoundFile(filename) {
-    this.mailSoundFile = normalizeSoundFile(filename);
+    this.mailSoundFile = normalizeSoundValue(filename);
     persistSetting(SOUND_MAIL_FILE_STORAGE_KEY, this.mailSoundFile);
   }
 

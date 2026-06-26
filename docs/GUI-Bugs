@@ -91,3 +91,89 @@ Q6. Yes, each gets a random port unless we specify the port in the flags of the 
    - Add route/component-level code splitting with React.lazy/dynamic import for large screens such as QMailDashboard, wallet tools, and rarely used modals.
    - Consider Rollup manualChunks for large stable dependencies.
    - Keep this as a performance cleanup after higher-priority startup and RAIDA reliability issues are fixed.
+
+5. TITLE BAR COLOR PICKER REQUIRED USER GESTURE (2026-06-26)
+   Status: Fixed in current build
+   Symptom: View > Title Bar Color... logged "A user gesture is required to show the color picker" and did not open a picker.
+
+   Root cause:
+   - The Electron menu click sent an IPC event to the renderer.
+   - The renderer then tried to open a hidden `<input type="color">`.
+   - Chromium does not treat a delayed IPC callback as the original user gesture, so it blocked the picker.
+
+   Fix:
+   - View > Title Bar Color... now opens a native Windows color dialog from the Electron main process.
+   - The selected color is normalized to `#RRGGBB`, applied to the native title bar, and saved to `qmail-window-settings.json`.
+   - Reset Title Bar Color remains disabled when the current color is the default Pear color (`#C9CC3F`) and becomes active after a custom color is selected.
+
+   Test:
+   - Launch QMail.exe and confirm the title bar defaults to Pear unless a saved custom titleBarColor exists.
+   - Select View > Title Bar Color..., choose a color, and confirm the title bar changes with no console user-gesture error.
+   - Restart QMail.exe and confirm the custom color persists.
+   - Select View > Reset Title Bar Color and confirm the title bar returns to Pear.
+
+6. TITLE BAR TITLE/ADDRESS/VERSION FORMATTING (2026-06-26)
+   Status: Fixed in current build
+   Symptom: The native title bar used hyphen-separated lowercase text such as `QMail - inbox - 25.167@giga`, and the visible version could surface numeric package versions in some paths.
+
+   Fix:
+   - Folder names in the title bar are capitalized and no longer separated from QMail by a hyphen, e.g. `QMail Inbox`.
+   - The user's address is labeled as `QMail Address:` and denomination words are capitalized, e.g. `QMail Address: 25.167@Giga`.
+   - The title bar includes the user-facing build date as `Version: June 26, 2026`.
+   - Help > About, the CLI `--version` output, and the update modal now show readable dates instead of numeric package versions or raw `YYYY-MM-DD` strings.
+
+   Note:
+   - Native Windows title bars do not support true independently centered text segments. The address is placed as the middle segment of the title string.
+
+7. ALERT SOUND MENU (2026-06-26)
+   Status: Added in current build
+   Requirement: Keep the native title bar, and add a menu path for alert sound selection with a no-sound option.
+
+   Implementation:
+   - Added an `Alerts` application menu.
+   - `Alerts > No Sound` disables mail alert sounds.
+   - `Alerts > Built-in Sounds` lets the user choose from packaged sounds.
+   - `Alerts > Choose Sound File...` opens a native audio-file picker for mp3, wav, ogg, m4a, aac, and flac files.
+   - `Alerts > Preview Alert Sound` plays the currently selected alert sound.
+   - Choices use the existing persisted sound setting (`qmail.sound.mailFile`) so the Account Pane sound picker and menu stay on the same setting.
+
+   Test:
+   - Pick each built-in sound and confirm it previews and persists.
+   - Pick No Sound and confirm new-mail alerts are silent.
+   - Pick a local audio file and confirm it previews and persists across restart.
+
+8. NOISY STATUS/BALANCE/COUNT REFRESHES (2026-06-26)
+   Status: Reduced in current build
+   Symptom: The GUI repeatedly called `/wallets/balance`, `/qmail/local/status`, and `/qmail/db/folders/counts`, filling both renderer logs and rest_core request logs with low-value status noise.
+
+   Fix:
+   - Removed the QMail dashboard's automatic 60-second folder-count poll.
+   - Removed the QMail dashboard's automatic 120-second wallet-balance poll.
+   - Removed the focus-triggered wallet-balance refresh.
+   - Removed the NavigationPane's automatic 120-second server-health refresh.
+   - Removed renderer `console.log` dumps for the three endpoint responses.
+   - rest_core now suppresses successful request-line logging for those three read-only endpoints; errors still log.
+
+   Remaining intentional calls:
+   - Initial dashboard load still reads balance/counts once.
+   - User/manual refresh still updates counts and server status.
+   - Send, download, move, delete, empty-folder, SSE/new-mail, and other state-changing workflows still refresh the data they change.
+
+9. QMAIL UPLOAD SERVER PAYMENT AMOUNT IS BACKEND-OWNED AND WHOLE-CC ONLY (2026-06-26)
+   Status: Deferred; requires rest_core protocol/accounting change first
+   Symptom: Uploading QMail messages/files/attachments currently pays QMail upload lockers/servers 1 CloudCoin. The desired upload price is 0.1 CloudCoins.
+
+   Current GUI behavior:
+   - The GUI send path calls `/api/qmail/net/messages/upload_and_tell`.
+   - It sends recipients, subject/body, duration, wallet path, and attachment file paths.
+   - It does not send or choose the QMail server payment amount.
+
+   Root issue:
+   - The amount is currently controlled inside rest_core by `qmail_upload_locker_fee_cc` and related defaults/minimums.
+   - rest_core currently treats the upload fee as an integer whole-CloudCoin amount and clamps values below 1 back to 1.
+   - rest_core should not be the authority that sets the QMail server upload price, and the protocol/accounting path must support fractional CloudCoins such as 0.1 CC.
+
+   Suggested GUI follow-up after rest_core is fixed:
+   - Keep the GUI from hardcoding this price.
+   - If rest_core exposes a server/service quote, show the quoted upload cost where useful and pass through any required confirmation/token fields.
+   - If a future settings screen exposes upload pricing, it must accept/display fractional CloudCoin values and must not assume whole-CC units.

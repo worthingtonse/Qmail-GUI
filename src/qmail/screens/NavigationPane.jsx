@@ -1,11 +1,13 @@
 /* eslint-disable react/prop-types */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Mail,
   Inbox,
   Send,
   Trash2,
   FileEdit,
+  Copy,
+  Check,
   Star,
   Users,
   RefreshCw,
@@ -25,9 +27,11 @@ import {
   buildQmailStatusTitle,
   buildRaidaStatusTitle,
 } from "./serverStatusUi";
+import { parseQmailAddress } from "../address/qmailAddress";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 import "./NavigationPane.css";
 
-const CLOUDCOIN_PURCHASE_URL = "https://cloudcoin.com";
+const CLOUDCOIN_PURCHASE_URL = "https://CloudCoin.com/Pay/";
 
 const DMP_PAYMENT_INFO = [
   "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
@@ -109,6 +113,22 @@ const ALLOWED_FOLDER_ICONS = {
 const normalizeIconName = (value) =>
   String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
+const capitalizeWord = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+};
+
+const formatQmailAddressForDisplay = (address) => {
+  const text = String(address || "").trim();
+  if (!text) return "";
+
+  const atIndex = text.lastIndexOf("@");
+  if (atIndex === -1) return text;
+
+  return `${text.slice(0, atIndex)}@${capitalizeWord(text.slice(atIndex + 1))}`;
+};
+
 const getFolderIcon = (folder) => {
   const override =
     ALLOWED_FOLDER_ICONS[normalizeIconName(folder.iconName)] ||
@@ -130,6 +150,7 @@ const NavigationPane = ({
   onWithdrawClick,
   folders,
   raidaEchoSnapshot,
+  qmailAddress = "",
 }) => {
   const [raidaHealth, setRaidaHealth] = useState(null);
   const [raidaDetails, setRaidaDetails] = useState(null);
@@ -137,6 +158,7 @@ const NavigationPane = ({
   const [qmailServers, setQmailServers] = useState(null);
   const [qmailSummary, setQmailSummary] = useState(null);
   const [showWalletPaymentInfo, setShowWalletPaymentInfo] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
   // True while a server-health check is running, so concurrent triggers (button,
   // interval, isRefreshing toggle) cannot stack overlapping echo calls.
   const checkInFlightRef = useRef(false);
@@ -309,10 +331,8 @@ const NavigationPane = ({
         if (!cancelled) checkServerHealth();
       })();
     }
-    const interval = setInterval(checkServerHealth, 120000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
   }, [applyCachedServerStatus, checkServerHealth, isRefreshing]);
 
@@ -353,14 +373,77 @@ const NavigationPane = ({
   const walletLockedValue = getWalletLockedValue(walletBalance);
   const walletCombinedValue = getWalletCombinedValue(walletBalance);
   const walletBalanceTitle = getWalletBalanceTitle(walletBalance, walletBalanceStatus);
+  const trimmedQmailAddress = String(qmailAddress || "").trim();
+  const displayQmailAddress = formatQmailAddressForDisplay(trimmedQmailAddress);
+  const parsedQmailAddress = useMemo(
+    () => parseQmailAddress(trimmedQmailAddress),
+    [trimmedQmailAddress],
+  );
 
   const handlePurchaseCoins = () => {
     window.open(CLOUDCOIN_PURCHASE_URL, "_blank", "noopener,noreferrer");
   };
 
+  const handleCopyAddress = async () => {
+    if (!trimmedQmailAddress) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trimmedQmailAddress);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = trimmedQmailAddress;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setAddressCopied(true);
+      setTimeout(() => setAddressCopied(false), 2000);
+    } catch (error) {
+      console.error("Failed to copy QMail address:", error);
+    }
+  };
+
   return (
     <aside className="navigation-pane">
       <header className="navigation-pane__compose">
+        <div className="navigation-pane__identity-address-row">
+          <span
+            className="navigation-pane__identity-address"
+            title={trimmedQmailAddress || "QMail address unavailable"}
+          >
+            {displayQmailAddress || "No address"}
+          </span>
+          <button
+            type="button"
+            className="navigation-pane__identity-copy"
+            onClick={handleCopyAddress}
+            disabled={!trimmedQmailAddress}
+            title={addressCopied ? "Copied!" : "Copy QMail address"}
+            aria-label={addressCopied ? "QMail address copied" : "Copy QMail address"}
+          >
+            {addressCopied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+        </div>
+        <section
+          className="navigation-pane__identity"
+          aria-label="Your QMail identity"
+        >
+          <div className="navigation-pane__identity-cartouche">
+            {parsedQmailAddress.ok ? (
+              <QmailCartoucheAvatar
+                serialNumber={parsedQmailAddress.serialNumber}
+                denominationCode={parsedQmailAddress.denominationCode}
+                className="navigation-pane__cartouche"
+              />
+            ) : (
+              <Mail size={34} />
+            )}
+          </div>
+        </section>
         <button
           className="navigation-pane__compose-button"
           onClick={onComposeClick}

@@ -1290,8 +1290,6 @@ export const getMailCount = async () => {
     const response = await fetch(`${API_BASE_URL}/qmail/db/folders/counts`);
     const data = await handleResponse(response);
 
-    console.log("Data received from /qmail/db/folders/counts:", data);
-
     // API-FIX: Backend returns { success, folders: { inbox: {total, unread}, ... } }
     if (data && data.folders) {
       // API-FIX: Compute summary by summing all folder totals/unread
@@ -1760,8 +1758,6 @@ export const getServers = async (options = {}) => {
       _qmailTopologyCache = statusRes; // remember topology for next refresh
     }
 
-    console.log("Data received from /qmail/local/status:", statusRes);
-
     if (statusRes && statusRes.servers && Array.isArray(statusRes.servers.list)) {
       // Build an index -> echo-status map (status === "Ready" means online).
       const echoByIndex = new Map();
@@ -1988,8 +1984,6 @@ export const getQMailWalletBalance = async () => {
     const query = new URLSearchParams({ wallet_path: lookup.path });
     const response = await fetch(`${API_BASE_URL}/wallets/balance?${query.toString()}`);
     const data = await handleResponse(response);
-
-    console.log("Data received from /wallets/balance:", data);
 
     // API-FIX: rest_core returns { success, command, wallet_path, wallet_name,
     //   total_value, total_notes, bank_value, bank_notes, fracked_value, fracked_notes,

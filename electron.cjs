@@ -1,11 +1,13 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
 
 process.stdout.write('[ELECTRON] Starting...\n');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 let mainWindow;
 let splashWindow = null;
@@ -30,8 +32,49 @@ const THEME_MENU_ITEMS = [
 ];
 
 const SOUND_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac']);
+const FALLBACK_ALERT_SOUND_FILES = [
+  'default.mp3',
+  'DingDing.mp3',
+  'Floraphonic.mp3',
+  'Notice.mp3',
+  'Ploops.mp3',
+];
 const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
+const QMAIL_BUILD_DATE = '2026-06-26';
+const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
+const CHANGE_PASSWORDS_NEXT_BOOT_TEXT =
+`# QMail mailbox authenticity-number rotation
+#
+# If pown_on_restart is true, QMail will change the authenticity numbers
+# for the Mailbox ID coin the next time this program starts.
+#
+# Authenticity numbers are shared secrets between your Mailbox ID and the
+# RAIDA/QMail servers. Changing them is similar to changing the password for
+# an online account: after the change completes, only this local copy of your
+# Mailbox ID should contain the current authenticity numbers.
+#
+# Use this if your Mailbox ID key file may have been copied or compromised.
+# The change prevents old copies of the key file from accessing your mailbox.
+#
+# Set the value to true, save this file, and restart QMail to rotate the
+# authenticity numbers. QMail sets it back to false after a successful change.
+pown_on_restart={VALUE}
+`;
+
+function formatBuildDateForDisplay(value = QMAIL_BUILD_DATE) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) return String(value || '');
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
 
 function isPathInside(rootPath, candidatePath) {
   const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
@@ -193,6 +236,29 @@ function resolveSoundLibraryDir() {
   }
 
   return candidates[0];
+}
+
+function buildSoundLabel(filename) {
+  const base = String(filename || '').replace(/\.[^.]+$/, '').trim();
+  return base || filename || 'Sound';
+}
+
+function listBuiltInAlertSoundsSync() {
+  const dir = resolveSoundLibraryDir();
+
+  try {
+    const files = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => SOUND_FILE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+      .sort((a, b) => a.localeCompare(b));
+
+    if (files.length > 0) return files;
+  } catch (error) {
+    log('alert sound menu list failed for ' + dir + ': ' + error.message);
+  }
+
+  return FALLBACK_ALERT_SOUND_FILES;
 }
 
 function isStandardTheme(themeId) {
@@ -422,6 +488,56 @@ function resetTitleBarColor() {
   return setTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
 }
 
+function showNativeTitleBarColorPicker() {
+  if (process.platform !== 'win32') {
+    sendTitleBarColorPickerCommand();
+    return;
+  }
+
+  const script = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "Add-Type -AssemblyName System.Drawing",
+    "$initial = [Environment]::GetEnvironmentVariable('QMAIL_INITIAL_COLOR')",
+    "$dialog = New-Object System.Windows.Forms.ColorDialog",
+    "$dialog.FullOpen = $true",
+    "$dialog.AllowFullOpen = $true",
+    "try { $dialog.Color = [System.Drawing.ColorTranslator]::FromHtml($initial) } catch {}",
+    "$result = $dialog.ShowDialog()",
+    "if ($result -eq [System.Windows.Forms.DialogResult]::OK) {",
+    "  '#{0:X2}{1:X2}{2:X2}' -f $dialog.Color.R, $dialog.Color.G, $dialog.Color.B",
+    "} else {",
+    "  'CANCEL'",
+    "}",
+  ].join('\n');
+
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-STA',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, QMAIL_INITIAL_COLOR: titleBarColor },
+    windowsHide: true,
+  });
+
+  const output = `${result.stdout || ''}`.trim().split(/\r?\n/).pop();
+  if (result.error) {
+    log('Title bar color picker failed: ' + result.error.message);
+    return;
+  }
+  if (!output || output === 'CANCEL') return;
+
+  const normalized = normalizeHexColor(output);
+  if (!normalized) {
+    log('Title bar color picker returned invalid color: ' + output);
+    return;
+  }
+  setTitleBarColor(normalized);
+}
+
 // BUG-51: CLI surface for QMail.exe. Parses our own flags; everything
 // not recognized triggers usage + exit. Long-options are GNU style.
 // All flags map 1:1 to core.exe flags of the same name (defined in
@@ -463,7 +579,7 @@ function parseQMailArgs(argv) {
       return null;
     }
     if (a === '--version' || a === '-V') {
-      process.stdout.write(`QMail ${app.getVersion()}\n`);
+      process.stdout.write(`QMail ${formatBuildDateForDisplay()}\n`);
       app.exit(0);
       return null;
     }
@@ -759,6 +875,31 @@ function sendTitleBarColorPickerCommand() {
   });
 }
 
+function sendAlertSoundCommand(payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('alerts:sound-command', payload);
+}
+
+async function chooseAlertSoundFile() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose Alert Sound',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Audio files', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
+
+  sendAlertSoundCommand({
+    action: 'set',
+    soundFile: pathToFileURL(result.filePaths[0]).href,
+  });
+}
+
 function setThemeFromMenu(themeId) {
   if (!isStandardTheme(themeId)) return;
   activeThemeMenuItem = themeId;
@@ -834,7 +975,7 @@ function buildApplicationMenu() {
         { type: 'separator' },
         {
           label: 'Title Bar Color...',
-          click: () => sendTitleBarColorPickerCommand(),
+          click: () => showNativeTitleBarColorPicker(),
         },
         {
           label: 'Reset Title Bar Color',
@@ -854,6 +995,34 @@ function buildApplicationMenu() {
       ],
     },
     {
+      label: 'Alerts',
+      submenu: [
+        {
+          label: 'Built-in Sounds',
+          submenu: [
+            {
+              label: 'No Sound',
+              click: () => sendAlertSoundCommand({ action: 'set', soundFile: '' }),
+            },
+            { type: 'separator' },
+            ...listBuiltInAlertSoundsSync().map((filename) => ({
+              label: buildSoundLabel(filename),
+              click: () => sendAlertSoundCommand({ action: 'set', soundFile: filename }),
+            })),
+          ],
+        },
+        {
+          label: 'Choose Sound File...',
+          click: () => chooseAlertSoundFile(),
+        },
+        { type: 'separator' },
+        {
+          label: 'Preview Alert Sound',
+          click: () => sendAlertSoundCommand({ action: 'preview' }),
+        },
+      ],
+    },
+    {
       label: 'Window',
       submenu: [
         { role: 'minimize' },
@@ -868,7 +1037,7 @@ function buildApplicationMenu() {
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
             title: `About ${app.name}`,
-            message: `${app.name} ${app.getVersion()}`,
+            message: `${app.name} ${formatBuildDateForDisplay()}`,
             buttons: ['OK'],
           }),
         },
@@ -989,9 +1158,7 @@ ipcMain.handle('show-error-dialog', async (event, title, message) => {
   });
 });
 
-ipcMain.handle('get-app-version', () => {
-  return app.getVersion();
-});
+ipcMain.handle('get-app-version', () => formatBuildDateForDisplay());
 
 ipcMain.handle('titlebar:get-color', () => ({
   success: true,
@@ -1238,6 +1405,102 @@ function dirHasCoinFile(dir) {
   return false;
 }
 
+function getClientDataDir() {
+  return backendDataDir ? path.join(backendDataDir, 'Client_Data') : null;
+}
+
+function getChangePasswordsFilePath() {
+  const clientDataDir = getClientDataDir();
+  return clientDataDir ? path.join(clientDataDir, CHANGE_PASSWORDS_NEXT_BOOT_FILE) : null;
+}
+
+function renderChangePasswordsFile(enabled) {
+  return CHANGE_PASSWORDS_NEXT_BOOT_TEXT.replace('{VALUE}', enabled ? 'true' : 'false');
+}
+
+function readPownOnRestartValue(content) {
+  if (typeof content !== 'string') return null;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = /^pown_on_restart\s*=\s*(true|false|1|0|yes|no)\s*$/i.exec(line);
+    if (match) {
+      return ['true', '1', 'yes'].includes(match[1].toLowerCase());
+    }
+  }
+  return null;
+}
+
+function writePownOnRestartValue(enabled) {
+  const clientDataDir = getClientDataDir();
+  const filePath = getChangePasswordsFilePath();
+  if (!clientDataDir || !filePath) {
+    return { success: false, error: 'Data directory not available' };
+  }
+
+  fs.mkdirSync(clientDataDir, { recursive: true });
+  fs.writeFileSync(filePath, renderChangePasswordsFile(enabled), 'utf8');
+  return { success: true, filePath, pown_on_restart: Boolean(enabled) };
+}
+
+function ensureChangePasswordsFile() {
+  const filePath = getChangePasswordsFilePath();
+  if (!filePath) {
+    return { success: false, error: 'Data directory not available' };
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return {
+      ...writePownOnRestartValue(true),
+      created: true,
+    };
+  }
+
+  return { success: true, filePath, created: false };
+}
+
+function readWalletRegistryPaths(clientDataDir) {
+  const registryPath = path.join(clientDataDir, 'wallet_paths.txt');
+  try {
+    const content = fs.readFileSync(registryPath, 'utf8');
+    return content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+  } catch {
+    return [];
+  }
+}
+
+function resolveMailWalletPath() {
+  const clientDataDir = getClientDataDir();
+  if (!clientDataDir) return null;
+
+  const paths = readWalletRegistryPaths(clientDataDir);
+  const mailPath = paths.find((walletPath) => {
+    const normalized = walletPath.replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase();
+    return normalized.endsWith('/wallets/mail') || normalized.endsWith('/mail');
+  });
+
+  if (mailPath) return mailPath;
+  return path.join(clientDataDir, 'Wallets', 'Mail');
+}
+
+function findBootPownSourceFolder(mailWalletPath) {
+  const candidates = [
+    path.join(mailWalletPath, 'Bank'),
+    path.join(mailWalletPath, 'Fracked'),
+  ];
+
+  for (const folderPath of candidates) {
+    if (fs.existsSync(folderPath) && dirHasCoinFile(folderPath)) {
+      return folderPath;
+    }
+  }
+
+  return null;
+}
+
 ipcMain.handle('has-id-coin', async () => {
   if (!backendDataDir) {
     return { has_id: false, error: 'Data directory not available' };
@@ -1255,6 +1518,66 @@ ipcMain.handle('has-id-coin', async () => {
   }
 
   return { has_id: false };
+});
+
+ipcMain.handle('qmail:get-boot-pown-plan', async () => {
+  try {
+    const ensured = ensureChangePasswordsFile();
+    if (!ensured.success) return ensured;
+
+    const filePath = getChangePasswordsFilePath();
+    const content = fs.readFileSync(filePath, 'utf8');
+    const enabled = readPownOnRestartValue(content);
+    if (enabled !== true) {
+      return {
+        success: true,
+        shouldPown: false,
+        filePath,
+        pown_on_restart: enabled === null ? false : enabled,
+      };
+    }
+
+    const walletPath = resolveMailWalletPath();
+    if (!walletPath) {
+      return {
+        success: false,
+        shouldPown: true,
+        filePath,
+        error: 'Mail wallet path could not be resolved',
+      };
+    }
+
+    const sourceFolder = findBootPownSourceFolder(walletPath);
+    if (!sourceFolder) {
+      return {
+        success: true,
+        shouldPown: false,
+        pown_on_restart: true,
+        filePath,
+        walletPath,
+        error: 'No Mail wallet ID coin found in Bank or Fracked',
+      };
+    }
+
+    return {
+      success: true,
+      shouldPown: true,
+      filePath,
+      walletPath,
+      sourceFolder,
+      memo: 'POWN',
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('qmail:set-pown-on-restart', async (_event, enabled) => {
+  try {
+    return writePownOnRestartValue(Boolean(enabled));
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
 
 // Open an external URL in the user's default browser. Restricted to

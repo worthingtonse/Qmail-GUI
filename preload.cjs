@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDownloadsDir: () => ipcRenderer.invoke('get-downloads-dir'),
   getBackendDataDir: () => ipcRenderer.invoke('get-backend-data-dir'),
   getRaidaCachedStatus: () => ipcRenderer.invoke('get-raida-cached-status'),
+  getBootPownPlan: () => ipcRenderer.invoke('qmail:get-boot-pown-plan'),
+  setPownOnRestart: (enabled) => ipcRenderer.invoke('qmail:set-pown-on-restart', enabled),
   revealPath: (targetPath) => ipcRenderer.invoke('reveal-path', targetPath),
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   listSoundFiles: () => ipcRenderer.invoke('list-sound-files'),
@@ -50,6 +52,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('titlebar:pick-color', handler);
     return () => ipcRenderer.removeListener('titlebar:pick-color', handler);
+  },
+  onAlertSoundCommand: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('alerts:sound-command', handler);
+    return () => ipcRenderer.removeListener('alerts:sound-command', handler);
   },
   onBackendReady: (callback) => {
     if (typeof callback !== 'function') return () => {};

@@ -6,6 +6,7 @@ import ServiceSelectionScreen from "./screens/ServiceSelectionScreen";
 import WalletSetupScreen from "./qmail/screens/WalletSetupScreen";
 import Wallet from "./wallet/Wallet";
 import QMail from "./qmail/QMail";
+import soundService from "./api/soundService";
 import { clearSkipAutoRestore } from "./qmail/skipAutoRestore";
 import { NotificationProvider } from "./components/common/notifications/NotificationContext";
 import NotificationContainer from "./components/common/notifications/NotificationContainer";
@@ -16,6 +17,7 @@ import {
   normalizeIdentityForUi,
   peekBeacon,
 } from "./api/qmailApiServices";
+import { formatBuildDateForDisplay } from "./version";
 
 // Where all QMail software downloads live. The "Download Update" button
 // opens this page in the user's default browser.
@@ -239,6 +241,39 @@ function App() {
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openTitleBarColorPicker]);
 
+  useEffect(() => {
+    const dispatchAlertSoundChanged = () => {
+      if (typeof window === "undefined") return;
+      window.dispatchEvent(
+        new CustomEvent("qmail-alert-sound-changed", {
+          detail: {
+            soundFile: soundService.getMailSoundFile(),
+            settings: soundService.getSettings(),
+          },
+        }),
+      );
+    };
+
+    const unsubscribe = window.electronAPI?.onAlertSoundCommand?.((payload = {}) => {
+      if (payload.action === "preview") {
+        soundService.previewMailReceived();
+        return;
+      }
+
+      if (payload.action !== "set") return;
+
+      const soundFile = String(payload.soundFile || "");
+      soundService.setMailSoundFile(soundFile);
+      soundService.setEnabled(Boolean(soundFile));
+      if (soundFile) {
+        soundService.playMailReceived({ force: true });
+      }
+      dispatchAlertSoundChanged();
+    });
+
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, []);
+
   // FIX-03: returning users with a configured identity should go
   // STRAIGHT to QMAIL, not bounce through WalletSetupScreen on every
   // launch. WalletSetupScreen is now first-run-only (post-import).
@@ -448,13 +483,13 @@ function App() {
                   <div className="update-modal__version-row">
                     <span className="update-modal__version-label">Current Version:</span>
                     <span className="update-modal__version-value">
-                      {updateAvailable.current_version}
+                      {formatBuildDateForDisplay(updateAvailable.current_version)}
                     </span>
                   </div>
                   <div className="update-modal__version-row">
                     <span className="update-modal__version-label">Latest Version:</span>
                     <span className="update-modal__version-value update-modal__version-value--highlight">
-                      {updateAvailable.latest_version}
+                      {formatBuildDateForDisplay(updateAvailable.latest_version)}
                     </span>
                   </div>
                 </div>

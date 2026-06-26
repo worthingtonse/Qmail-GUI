@@ -305,6 +305,34 @@
 }
 
 /* was: .contact-avatar */
+.contacts-pane__identity-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  justify-self: center;
+}
+
+.contacts-pane__avatar-cartouche {
+  display: block;
+  width: 3.5rem;
+  height: 3.5rem;
+  filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--accent-primary) 28%, transparent));
+}
+
+.contacts-pane__identity-mark--gold .contacts-pane__avatar-cartouche {
+  filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--tier-gold) 42%, transparent));
+}
+
+.contacts-pane__identity-mark--silver .contacts-pane__avatar-cartouche {
+  filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--tier-silver) 42%, transparent));
+}
+
+.contacts-pane__identity-mark--bronze .contacts-pane__avatar-cartouche {
+  filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--tier-bronze) 42%, transparent));
+}
+
 .contacts-pane__avatar {
   display: inline-flex;
   align-items: center;
@@ -441,6 +469,12 @@
   color: var(--accent-primary);
 }
 
+.contacts-pane__inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-xs) / 2);
+}
+
 /* was: .contact-email */
 .contacts-pane__email {
   margin-bottom: var(--space-xs);
@@ -488,6 +522,17 @@
     border-color calc(250ms * var(--motion-scale)) ease,
     color calc(250ms * var(--motion-scale)) ease,
     box-shadow calc(250ms * var(--motion-scale)) ease;
+}
+
+.contacts-pane__inline-actions .contacts-pane__action-button {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: var(--radius-sm);
+}
+
+.contacts-pane__inline-actions .contacts-pane__action-button svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .contacts-pane__action-button svg {
@@ -800,12 +845,17 @@
     text-align: center;
   }
 
+  .contacts-pane__identity-mark,
   .contacts-pane__avatar {
     justify-self: center;
   }
 
   .contacts-pane__name-row,
   .contacts-pane__stats {
+    justify-content: center;
+  }
+
+  .contacts-pane__inline-actions {
     justify-content: center;
   }
 

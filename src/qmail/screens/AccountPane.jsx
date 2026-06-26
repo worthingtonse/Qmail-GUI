@@ -92,13 +92,26 @@ const FALLBACK_SOUND_FILES = [
   "Ploops.mp3",
 ];
 
+const isCustomSoundFile = (value) => /^file:\/\//i.test(String(value || "").trim());
+
 const buildSoundLabel = (filename) => {
+  if (isCustomSoundFile(filename)) {
+    try {
+      const pathname = new URL(filename).pathname;
+      const base = decodeURIComponent(pathname.split("/").pop() || "");
+      return base.replace(/\.[^.]+$/, "").trim() || base || "Custom sound";
+    } catch {
+      return "Custom sound";
+    }
+  }
+
   const base = String(filename || "").replace(/\.[^.]+$/, "");
   return base.trim() || filename || "Sound";
 };
 
 const buildSoundSrc = (filename) => {
   const normalized = String(filename || "").trim();
+  if (isCustomSoundFile(normalized)) return normalized;
   return normalized ? `./sounds/${encodeURIComponent(normalized)}` : null;
 };
 
@@ -109,13 +122,30 @@ const buildFallbackSounds = () =>
     src: buildSoundSrc(filename),
   }));
 
-const withNoSoundOption = (sounds) => [
-  NO_SOUND_OPTION,
-  ...sounds.filter((sound) => sound && sound.filename),
-];
+const withNoSoundOption = (sounds, current = "") => {
+  const normalizedCurrent = String(current || "").trim();
+  const options = [
+    NO_SOUND_OPTION,
+    ...sounds.filter((sound) => sound && sound.filename),
+  ];
+
+  if (
+    isCustomSoundFile(normalizedCurrent) &&
+    !options.some((sound) => sound.filename === normalizedCurrent)
+  ) {
+    options.push({
+      filename: normalizedCurrent,
+      label: buildSoundLabel(normalizedCurrent),
+      src: normalizedCurrent,
+    });
+  }
+
+  return options;
+};
 
 const resolveSelectedSound = (sounds, current) => {
   if (current === NO_SOUND_FILE) return NO_SOUND_FILE;
+  if (isCustomSoundFile(current)) return current;
   if (sounds.some((sound) => sound.filename === current)) return current;
   return sounds.find((sound) => sound.filename)?.filename || NO_SOUND_FILE;
 };
@@ -149,7 +179,7 @@ const SoundSettings = () => {
         const soundFiles = Array.isArray(remoteSounds) && remoteSounds.length > 0
           ? remoteSounds
           : buildFallbackSounds();
-        const sounds = withNoSoundOption(soundFiles);
+        const sounds = withNoSoundOption(soundFiles, soundService.getMailSoundFile());
 
         setAvailableSounds(sounds);
 
@@ -162,7 +192,10 @@ const SoundSettings = () => {
         setSelectedSoundFile(next);
       } catch (error) {
         if (!cancelled) {
-          const fallbackSounds = withNoSoundOption(buildFallbackSounds());
+          const fallbackSounds = withNoSoundOption(
+            buildFallbackSounds(),
+            soundService.getMailSoundFile(),
+          );
           setAvailableSounds(fallbackSounds);
           const next = resolveSelectedSound(
             fallbackSounds,
@@ -182,6 +215,20 @@ const SoundSettings = () => {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const handleSoundChange = () => {
+      const settings = soundService.getSettings();
+      const current = soundService.getMailSoundFile();
+      setEnabled(settings.isEnabled);
+      setVolume(Math.round(settings.volume * 100));
+      setSelectedSoundFile(current);
+      setAvailableSounds((sounds) => withNoSoundOption(sounds, current));
+    };
+
+    window.addEventListener("qmail-alert-sound-changed", handleSoundChange);
+    return () => window.removeEventListener("qmail-alert-sound-changed", handleSoundChange);
   }, []);
 
   const handleVolumeChange = (event) => {

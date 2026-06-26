@@ -271,20 +271,21 @@
   overflow-y: auto;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
-  background: var(--glass-bg-strong);
+  background: var(--secondary-bg);
   box-shadow: var(--shadow-lg);
 }
 
 /* was: .contact-suggestion */
 .compose-modal__contact-suggestion {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-sm);
   width: 100%;
-  flex-direction: column;
-  gap: calc(var(--space-xs) / 2);
   padding: var(--space-md);
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
-  background: transparent;
+  background: var(--secondary-bg);
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -297,20 +298,44 @@
 
 .compose-modal__contact-suggestion:hover,
 .compose-modal__contact-suggestion:focus-visible {
-  background: var(--card-hover);
+  background: color-mix(in srgb, var(--secondary-bg) 88%, var(--accent-primary) 12%);
+}
+
+.compose-modal__contact-suggestion-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: calc(var(--space-xs) / 2);
 }
 
 /* was: .contact-name */
 .compose-modal__contact-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* was: .contact-address */
 .compose-modal__contact-address {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compose-modal__contact-cartouche {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
 }
 
 /* ==================== ADVANCED TOGGLE ==================== */
@@ -865,7 +890,7 @@
 
 .compose-modal__contact-suggestions {
   scrollbar-width: thin;
-  scrollbar-color: var(--border-medium) var(--card-bg);
+  scrollbar-color: var(--border-medium) var(--secondary-bg);
 }
 
 .compose-modal__contact-suggestions::-webkit-scrollbar {
@@ -873,7 +898,7 @@
 }
 
 .compose-modal__contact-suggestions::-webkit-scrollbar-track {
-  background: var(--card-bg);
+  background: var(--secondary-bg);
 }
 
 .compose-modal__contact-suggestions::-webkit-scrollbar-thumb {

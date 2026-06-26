@@ -24,6 +24,7 @@ import {
 } from "../../api/qmailApiServices";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { parseQmailAddress } from "../address/qmailAddress";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
 const SERIAL_NUMBER_PATTERN = /^\d+$/;
 const CONTACT_AVATAR_TONE_COUNT = 12;
@@ -868,15 +869,26 @@ useEffect(() => {
                   const contactKey = getContactKey(contact);
                   const isSavingDrdContact = savingDrdContactId === contactKey;
                   const isSavedDrdContact = isContactSavedLocally(contact);
+                  const parsedContactAddress = parseQmailAddress(contact.email);
                   return (
                     <article
                       key={contactKey}
                       className={`contacts-pane__item contacts-pane__item--${contact.source === "drd" ? "drd" : "user"}`}
                     >
-                      <div
-                        className={`contacts-pane__avatar contacts-pane__avatar--${contact.status} ${getContactAvatarToneClass(contact)}`}
-                      >
-                        <span>{getContactInitial(contact)}</span>
+                      <div className={`contacts-pane__identity-mark contacts-pane__identity-mark--${contact.status}`}>
+                        {parsedContactAddress.ok ? (
+                          <QmailCartoucheAvatar
+                            serialNumber={parsedContactAddress.serialNumber}
+                            denominationCode={parsedContactAddress.denominationCode}
+                            className="contacts-pane__avatar-cartouche"
+                          />
+                        ) : (
+                          <div
+                            className={`contacts-pane__avatar contacts-pane__avatar--${contact.status} ${getContactAvatarToneClass(contact)}`}
+                          >
+                            <span>{getContactInitial(contact)}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="contacts-pane__details">
                         <div className="contacts-pane__name-row">
@@ -894,6 +906,40 @@ useEffect(() => {
                               </>
                             )}
                           </span>
+                          {contact.source === "user" && (
+                            <span className="contacts-pane__inline-actions">
+                              <button
+                                type="button"
+                                className={`contacts-pane__action-button contacts-pane__action-button--favorite${
+                                  contact.isFavorite
+                                    ? " contacts-pane__action-button--favorite-on"
+                                    : ""
+                                }`}
+                                onClick={() => handleToggleFavorite(contact)}
+                                title={contact.isFavorite ? "Unfavorite" : "Mark as favorite"}
+                                aria-label={
+                                  contact.isFavorite
+                                    ? `Remove ${contact.name} from favorites`
+                                    : `Mark ${contact.name} as favorite`
+                                }
+                                aria-pressed={contact.isFavorite ? "true" : "false"}
+                              >
+                                <Star
+                                  size={16}
+                                  fill={contact.isFavorite ? "currentColor" : "none"}
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                className="contacts-pane__action-button contacts-pane__action-button--danger"
+                                onClick={() => handleDeleteContact(contact)}
+                                title="Delete contact"
+                                aria-label={`Delete ${contact.name}`}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </span>
+                          )}
                         </div>
                         <div className="contacts-pane__email">{contact.email}</div>
                         {contact.description && (
@@ -908,40 +954,6 @@ useEffect(() => {
                           </div>
                         )}
                       </div>
-                      {contact.source === "user" && (
-                        <button
-                          type="button"
-                          className={`contacts-pane__action-button contacts-pane__action-button--favorite${
-                            contact.isFavorite
-                              ? " contacts-pane__action-button--favorite-on"
-                              : ""
-                          }`}
-                          onClick={() => handleToggleFavorite(contact)}
-                          title={contact.isFavorite ? "Unfavorite" : "Mark as favorite"}
-                          aria-label={
-                            contact.isFavorite
-                              ? `Remove ${contact.name} from favorites`
-                              : `Mark ${contact.name} as favorite`
-                          }
-                          aria-pressed={contact.isFavorite ? "true" : "false"}
-                        >
-                          <Star
-                            size={16}
-                            fill={contact.isFavorite ? "currentColor" : "none"}
-                          />
-                        </button>
-                      )}
-                      {contact.source === "user" && (
-                        <button
-                          type="button"
-                          className="contacts-pane__action-button contacts-pane__action-button--danger"
-                          onClick={() => handleDeleteContact(contact)}
-                          title="Delete contact"
-                          aria-label={`Delete ${contact.name}`}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
                       {contact.source === "drd" && (
                         <button
                           type="button"

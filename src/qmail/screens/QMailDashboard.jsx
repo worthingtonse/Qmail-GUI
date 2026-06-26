@@ -34,6 +34,8 @@ import {
   getObjectTransferStatus,
   cancelObjectTransfer,
   resumeObjectTransfer,
+  depositCloudCoinFolder,
+  waitForTaskCompletion,
   sendEmail,
   getQMailPaymentInfo,
   markQMailPaymentRefunded,
@@ -61,6 +63,7 @@ import {
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
+import { BUILD_DATE, formatBuildDateForDisplay } from "../../version";
 
 import "./QMailDashboard.css";
 
@@ -76,6 +79,37 @@ const PAYMENT_STATUS_REFUNDED = 3;
 const PAYMENT_REJECTION_MESSAGE =
   "The payment you sent was rejected by the receiver. The inbox fee you included has been refunded. Your qmail may or may not have been read.";
 
+const capitalizeWord = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+};
+
+const formatTitleQmailAddress = (address) => {
+  const text = String(address || "").trim();
+  if (!text) return "";
+
+  const atIndex = text.lastIndexOf("@");
+  if (atIndex === -1) return text;
+
+  const localPart = text.slice(0, atIndex);
+  const denomination = text.slice(atIndex + 1);
+  return `${localPart}@${capitalizeWord(denomination)}`;
+};
+
+const buildWindowTitle = ({ folder, unread, qmailAddress }) => {
+  const unreadPrefix = unread > 0 ? `(${unread}) ` : "";
+  const folderTitle = capitalizeWord(folder || "Inbox");
+  const parts = [`${unreadPrefix}QMail ${folderTitle}`];
+  const formattedAddress = formatTitleQmailAddress(qmailAddress);
+
+  if (formattedAddress) {
+    parts.push(`QMail Address: ${formattedAddress}`);
+  }
+
+  parts.push(`Version: ${formatBuildDateForDisplay(BUILD_DATE)}`);
+  return parts.join("    ");
+};
 
 const normalizeMailIdentifier = (identifier) => {
   if (!identifier) return "";
@@ -589,6 +623,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const interactiveDecryptIdsRef = useRef(new Set());
   const decryptRevealDeadlineRef = useRef(new Map());
   const seenNotificationIdsRef = useRef(new Set());
+  const bootPownStartedRef = useRef(false);
 
   // FIX-03: seed from App's normalized identity, or null if the
   // has_id fallback path skipped seeding. The mount-time useEffect
@@ -1027,29 +1062,98 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   useEffect(() => {
     loadInitialData();
 
-    const mailCountInterval = setInterval(() => {
-      loadMailCounts();
-    }, 60000);
-
-    const walletInterval = setInterval(() => {
-      loadWalletBalance();
-    }, 120000);
-
-    const handleFocus = () => {
-      loadWalletBalance();
-    };
-    window.addEventListener("focus", handleFocus);
-
     return () => {
-      clearInterval(mailCountInterval);
-      clearInterval(walletInterval);
-      window.removeEventListener("focus", handleFocus);
       if (searchDebounceTimerRef.current) {
         clearTimeout(searchDebounceTimerRef.current);
       }
     };
     // Dashboard bootstrap intentionally runs once; these loaders close over
     // initial view state and are also called directly by UI handlers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (bootPownStartedRef.current) return undefined;
+    if (
+      typeof window === "undefined" ||
+      !window.electronAPI?.getBootPownPlan ||
+      !window.electronAPI?.setPownOnRestart
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    bootPownStartedRef.current = true;
+
+    (async () => {
+      try {
+        const plan = await window.electronAPI.getBootPownPlan();
+        if (cancelled) return;
+
+        if (!plan?.success) {
+          console.warn("Boot POWN check failed:", plan?.error || plan);
+          return;
+        }
+
+        if (!plan.shouldPown) {
+          if (plan.pown_on_restart === true && plan.error) {
+            console.warn("Boot POWN requested but skipped:", plan.error);
+          }
+          return;
+        }
+
+        showDashboardNotification(
+          "Changing mailbox authenticity numbers...",
+          "info",
+        );
+
+        const startResult = await depositCloudCoinFolder(
+          plan.sourceFolder,
+          plan.memo || "POWN",
+          plan.walletPath,
+        );
+        const taskId = startResult?.data?.task_id || startResult?.data?.taskId;
+        const result = taskId
+          ? await waitForTaskCompletion(taskId, {
+              timeoutMs: 300000,
+              intervalMs: 1000,
+            })
+          : startResult;
+
+        if (cancelled) return;
+
+        if (!result?.success) {
+          showDashboardNotification(
+            result?.error ||
+              "Mailbox authenticity numbers could not be changed. QMail will try again on the next startup.",
+            "error",
+          );
+          return;
+        }
+
+        await window.electronAPI.setPownOnRestart(false);
+        if (!cancelled) {
+          await loadWalletBalance();
+          showDashboardNotification(
+            "Mailbox authenticity numbers changed successfully.",
+            "success",
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Boot POWN failed:", error);
+          showDashboardNotification(
+            "Mailbox authenticity numbers could not be changed. QMail will try again on the next startup.",
+            "error",
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per dashboard mount; guarded by bootPownStartedRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1141,11 +1245,11 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   // BUG-25 FIX: Sync document.title with state via useEffect
   useEffect(() => {
     const unread = mailCounts[currentFolder]?.unread || 0;
-    const base = unread > 0
-      ? `(${unread}) QMail - ${currentFolder}`
-      : `QMail - ${currentFolder}`;
-    // Append the user's own address once identity has resolved.
-    document.title = qmailAddress ? `${base} - ${qmailAddress}` : base;
+    document.title = buildWindowTitle({
+      folder: currentFolder,
+      unread,
+      qmailAddress,
+    });
   }, [currentFolder, mailCounts, qmailAddress]);
 
   const loadInitialData = async () => {
@@ -3583,6 +3687,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         onWithdrawClick={() => handleOpenWalletAction("withdraw")}
         folders={folders}
         raidaEchoSnapshot={raidaEchoSnapshot}
+        qmailAddress={qmailAddress}
       />
 
       {(activeView === "inbox" ||
@@ -3611,7 +3716,6 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
             loadingDraftId={loadingDraftId}
             searchResultCapHit={searchResultCapHit}
             pageSize={EMAILS_PER_PAGE}
-            qmailAddress={qmailAddress}
           />
           {!isComposeOpen && (
             <ReadingPane
