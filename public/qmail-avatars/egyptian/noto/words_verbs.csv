@@ -1,0 +1,178 @@
+picture,word,depicts,score,remarks
+A001.svg,sitting,seated man,5,seated posture
+A002.svg,eating,man with hand to mouth,5,
+A002.svg,thinking,man with hand to mouth,4,gesture of speech/thought
+A003.svg,resting,man seated on heel,4,crouched at rest
+A003.svg,crouching,man seated on heel,4,
+A004.svg,praying,seated man with arms raised in adoration,5,
+A004.svg,pleading,seated man with arms raised in adoration,5,"adoration gesture; shortened from 'worshipping'; plain word, was 'kowtowing'"
+A005A.svg,hiding,man crouching and hiding behind a wall,5,
+A006A.svg,purifying,man purifying himself with water,5,
+A006B.svg,cleansing,man under a stream of water from a vessel,5,dedup of 'purifying'
+A006B.svg,washing,man under a stream of water from a vessel,4,
+A007.svg,fainting,fatigued man slumped with arm hanging,4,
+A008.svg,rejoicing,man performing the henu jubilation gesture,5,henu gesture
+A009.svg,carrying,man with a basket on his head,5,
+A009.svg,bearing,man with a basket on his head,4,
+A010.svg,rowing,man seated in a boat holding an oar,4,
+A014A.svg,striving,"man with blood streaming from head, slain",3,was 'dying'; email-friendly swap
+A015.svg,falling,"man falling, upside down",5,
+A016.svg,bowing,man bowing low,5,
+A016.svg,stooping,man bowing low,4,
+A019.svg,leaning,bent old man leaning on a staff,4,on staff
+A022.svg,standing,"man holding staff and sceptre, statue",3,
+A026.svg,calling,man with one arm outstretched calling,5,
+A026.svg,beckoning,man with one arm outstretched calling,4,
+A027.svg,running,"man hastening, running",5,
+A028.svg,cheering,man with both arms raised above head,4,dedup of 'rejoicing'
+A029.svg,tumbling,"man upside down, falling headfirst",5,dedup of 'falling'; head down
+A030.svg,praising,man with arms raised in praise,5,
+A030.svg,adoring,man with arms raised in praise,4,
+A031.svg,turning,"man with arms raised behind, turning away",4,averting
+A032.svg,dancing,man dancing with arms raised,5,
+A032A.svg,twirling,man dancing with one arm forward,5,dedup of 'dancing'
+A033.svg,wandering,man with staff and bundle over shoulder,4,
+A034.svg,pounding,man pounding in a mortar,5,
+A034.svg,grinding,man pounding in a mortar,4,
+A035.svg,building,"man building a wall, laying bricks",5,
+A036.svg,brewing,man kneading in a vat (brewer),4,
+A038.svg,grasping,man grasping necks of two panthers,4,
+A038.svg,wrestling,man grasping necks of two panthers,3,
+A039.svg,gripping,man grasping necks of two giraffes,3,dedup of 'grasping'
+A054.svg,reclining,mummy lying on a bier,4,dedup of 'lying'; reclining
+A056.svg,guarding,man seated holding a stick,3,
+A057.svg,raising,man holding stick and bag,3,dedup of 'building'; shortened from 'constructing'
+A059.svg,driving,man brandishing a stick to threaten,4,
+A059.svg,menacing,man brandishing a stick to threaten,4,shortened from 'threatening'
+A060.svg,sowing,man sowing seed while walking,5,
+A060.svg,strewing,man sowing seed while walking,4,shortened from 'scattering'
+A061.svg,striking,"man brandishing weapon, striking",4,
+A062.svg,hoisting,man with raised arm holding object on head,3,dedup of 'carrying'
+A064.svg,hauling,man bending forward carrying a load,4,dedup of 'carrying'; burden
+A066.svg,lying,man lying prone on his belly,5,prone
+A068.svg,upright,"man with arms hanging, standing",4,dedup of 'standing'; shortened from 'standing-tall'
+A069.svg,leaping,dancing/leaping man,4,
+A069.svg,prancing,dancing/leaping man,4,dedup of 'dancing'
+A070.svg,warding,man holding a long staff upright,3,dedup of 'standing'; shortened from 'watching-over'
+Aa005.svg,steering,part of a steering-oar/ship's gear,3,
+B001.svg,perching,seated woman,4,dedup of 'sitting'; shortened from 'seated-still'
+B005.svg,nursing,woman nursing a child,5,
+B005A.svg,suckling,woman seated nursing a child,5,dedup of 'nursing'
+B006.svg,tending,woman seated holding a child,3,
+B008.svg,clasping,woman holding a lotus flower,3,lotus; dedup of 'holding'
+B009.svg,kneeling,woman kneeling,4,
+C011.svg,upholding,"god supporting the sky (Heh, eternity)",3,dedup of 'kneeling'
+D008.svg,watching,eye within an enclosure,3,
+D009.svg,weeping,eye with flowing tears,5,
+D009.svg,crying,eye with flowing tears,4,
+D010.svg,gazing,eye of Horus (wedjat eye),3,dedup of 'watching'
+D018.svg,listening,ear of an animal,4,
+D018.svg,hearing,ear of an animal,4,
+D027.svg,nourish,female breast,3,dedup of 'nursing'; shortened from 'suckling-breast'
+D028.svg,embracing,two arms raised (ka),4,
+D029.svg,enfolding,two raised arms with standard (ka),3,dedup of 'embracing'
+D030.svg,exalting,two arms raised in adoration,4,dedup of 'praising'
+D030.svg,revering,two arms raised in adoration,4,dedup of 'adoring'; shortened from 'venerating'
+D031.svg,holding,arms holding/supporting an object,4,
+D031.svg,bracing,arms holding/supporting an object,3,shortened from 'supporting'
+D031A.svg,lifting,arms supporting/lifting an object,4,
+D032.svg,cuddling,two arms extended in embrace,5,"dedup of 'embracing'; shortened from 'embracing-wide'; plain word, was 'enclasp'"
+D032.svg,hugging,two arms extended in embrace,4,
+D035.svg,refusing,two arms in gesture of negation,3,
+D035.svg,denying,two arms in gesture of negation,3,
+D036.svg,reaching,forearm (arm),3,
+D037.svg,giving,forearm holding a loaf (giving),5,
+D037.svg,offering,forearm holding a loaf (giving),4,
+D038.svg,bestowing,forearm holding a round loaf,4,dedup of 'giving'
+D039.svg,tendering,forearm holding a bowl,5,dedup of 'offering'; shortened from 'presenting'
+D039.svg,handing,forearm holding a bowl,4,dedup of 'presenting'; shortened from 'proffering'
+D040.svg,smiting,forearm holding a stick,5,dedup of 'striking'
+D041.svg,halting,forearm with hand bent palm down,3,
+D042.svg,measuring,forearm for measuring (cubit),4,
+D043.svg,flailing,forearm holding a flail,4,dedup of 'striking'
+D043.svg,whipping,forearm holding a flail,4,
+D044.svg,ruling,forearm holding a sceptre,3,
+D045.svg,wielding,forearm holding a wand,3,
+D047.svg,clutching,hand,3,dedup of 'grasping'
+D050B.svg,pointing,finger,3,
+D051.svg,showing,finger (horizontal),3,dedup of 'pointing'; shortened from 'indicating'
+D055.svg,backing,two legs walking backward,4,shortened from 'retreating'
+D064.svg,walking,legs walking in motion,4,
+D064.svg,striding,legs walking in motion,3,dedup of 'running'
+E002.svg,charging,charging bull,4,
+E005.svg,nurturing,cow suckling a calf,4,dedup of 'nursing'
+E006.svg,galloping,horse,3,
+E013.svg,prowling,cat,3,
+E015.svg,skulking,recumbent jackal,3,dedup of 'lying'; shortened from 'lurking-low'
+E021.svg,crouched,recumbent Seth animal,3,dedup of 'lying'
+E034.svg,bounding,desert hare,3,dedup of 'leaping'
+F002.svg,goring,horns of a bull,3,
+G001.svg,soaring,Egyptian vulture,3,
+G002.svg,gliding,two Egyptian vultures,3,dedup of 'soaring'
+G004.svg,circling,buzzard / kite,3,
+G005.svg,swooping,falcon (Horus falcon),3,
+G006A.svg,perched,falcon on standard,3,
+G014.svg,brooding,"vulture (mother vulture, Mut)",3,
+G017.svg,hooting,owl,3,
+G026.svg,wading,sacred ibis on standard (Thoth),3,
+G026A.svg,paddling,ibis (variant),3,dedup of 'wading'
+G027.svg,stalking,flamingo,3,dedup of 'wading'
+G029.svg,wadestep,jabiru / saddle-billed stork,3,"dedup of 'wading'; shortened from 'striding-shallows'; plain word, was 'wadewalk'"
+G030.svg,foraging,three jabirus / storks,3,dedup of 'wading'
+G031.svg,stilting,heron,3,dedup of 'wading'; shortened from 'stilt-walking'
+G032.svg,roosting,heron on perch,3,dedup of 'perched'
+G033.svg,marshing,cattle egret,3,dedup of 'wading'; shortened from 'marsh-treading'
+G034.svg,sprinting,ostrich,4,dedup of 'running'
+G035.svg,diving,cormorant,3,
+G039.svg,swimming,pintail duck,3,
+G040.svg,flying,pintail duck flying,5,
+G041.svg,alighting,pintail duck alighting,4,
+G041.svg,landing,pintail duck alighting,4,
+G048.svg,nesting,three ducklings in a nest,3,
+G050.svg,dabbling,two plovers,3,dedup of 'wading'; shortened from 'wading-pair'
+G051.svg,pecking,bird pecking at fish,5,
+G051.svg,feeding,bird pecking at fish,4,
+I002.svg,crawling,turtle / tortoise,3,
+I003.svg,lurking,crocodile,3,
+I007.svg,hopping,frog,3,dedup of 'leaping'
+I009.svg,snaking,horned viper,3,shortened from 'slithering'
+I010.svg,rearing,cobra,3,
+I011A.svg,coiling,two cobras,3,dedup of 'rearing'
+I012.svg,rearingup,erect cobra (uraeus),4,"dedup of 'rearing'; plain word, was 'uprearing'"
+I013.svg,hooding,erect cobra on basket,3,dedup of 'rearing'; shortened from 'striking-cobra'
+I015.svg,creeping,snake / serpent,3,dedup of 'slithering'; shortened from 'gliding-low'
+K003.svg,finning,mullet fish,3,dedup of 'swimming'
+L001.svg,scuttling,dung beetle / scarab,3,dedup of 'crawling'; shortened from 'scrabbling'
+L002.svg,buzzing,bee,3,
+L002A.svg,humming,bee (variant),3,dedup of 'buzzing'
+L003.svg,droning,fly,3,dedup of 'buzzing'
+L004.svg,springing,locust / grasshopper,3,dedup of 'leaping'
+L007.svg,stinging,scorpion,3,
+M021.svg,sprouting,reeds sprouting from ground,4,
+N027.svg,dawning,sun rising over mountain,3,
+N028.svg,shining,rays of sun over hill (sunrise),3,
+N040.svg,fording,pool with walking legs,3,dedup of 'wading'
+P002.svg,sailing,ship under sail,4,
+P008.svg,oaring,oar,3,dedup of 'rowing'
+R007.svg,burning,bowl with burning incense,3,
+S038.svg,governing,crook (heqa-sceptre),3,dedup of 'ruling'; heqa=rule
+T003.svg,smashing,mace with pear-shaped head,3,was 'smiting'
+T007A.svg,fighting,battle-axe,3,
+T010.svg,shooting,composite bow,4,
+T011.svg,loosing,arrow,4,dedup of 'shooting'
+T011A.svg,firing,arrow variant,4,dedup of 'shooting'
+T017.svg,riding,chariot,3,
+T028.svg,chopping,butcher's chopping block,3,
+T028.svg,carving,butcher's chopping block,3,shortened from 'butchering'
+T030.svg,cutting,knife,4,
+T036.svg,defending,round-topped shield,3,
+U028.svg,drilling,fire-drill / borer,3,
+U042.svg,weighing,pair of scales / balance,3,
+V009.svg,ringing,shen-ring / circular cord,3,shortened from 'encircling'
+V017.svg,shielding,"herdsman's shelter (sa, protection)",3,shortened from 'protecting'
+V023.svg,lashing,whip,3,dedup of 'whipping'
+V024.svg,binding,cord wound on a stick (wedj),3,
+V037.svg,wrapping,bandage / roll of linen,3,dedup of 'binding'
+Y003.svg,writing,"scribe's outfit (palette, pen-case)",3,
+Y004.svg,penning,scribe's outfit variant,3,dedup of 'writing'; shortened from 'inscribing'
+Z009.svg,crossing,two crossed diagonal strokes,3,

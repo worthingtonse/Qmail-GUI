@@ -2,7 +2,7 @@
 const SOUND_ENABLED_STORAGE_KEY = "qmail.sound.enabled";
 const SOUND_VOLUME_STORAGE_KEY = "qmail.sound.volume";
 const SOUND_MAIL_FILE_STORAGE_KEY = "qmail.sound.mailFile";
-const DEFAULT_MAIL_SOUND_FILE = "ding-80828.mp3";
+const DEFAULT_MAIL_SOUND_FILE = "default.mp3";
 
 const readStoredBoolean = (key, fallback) => {
   try {
@@ -29,11 +29,11 @@ const readStoredVolume = (fallback) => {
   return fallback;
 };
 
-const readStoredString = (key, fallback) => {
+const readStoredSoundFile = (fallback) => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return fallback;
-    const stored = window.localStorage.getItem(key);
-    return stored && stored.trim() ? stored.trim() : fallback;
+    const stored = window.localStorage.getItem(SOUND_MAIL_FILE_STORAGE_KEY);
+    return stored === null ? fallback : normalizeSoundFile(stored);
   } catch {
     /* ignore */
   }
@@ -50,6 +50,10 @@ const persistSetting = (key, value) => {
 };
 
 const normalizeSoundFile = (filename) => String(filename || "").trim();
+const buildSoundSrc = (filename) => {
+  const normalized = normalizeSoundFile(filename);
+  return normalized ? `./sounds/${encodeURIComponent(normalized)}` : null;
+};
 
 class SoundService {
   constructor() {
@@ -57,7 +61,7 @@ class SoundService {
     this.isEnabled = readStoredBoolean(SOUND_ENABLED_STORAGE_KEY, true);
     this.volume = readStoredVolume(0.3); // Default volume (30%)
     this.mailSoundFile = normalizeSoundFile(
-      readStoredString(SOUND_MAIL_FILE_STORAGE_KEY, DEFAULT_MAIL_SOUND_FILE),
+      readStoredSoundFile(DEFAULT_MAIL_SOUND_FILE),
     );
     this.preloadSounds();
   }
@@ -67,14 +71,15 @@ class SoundService {
     if (typeof Audio === "undefined") return;
 
     const soundFiles = {
-      glassClick: '/sounds/ding-80828.mp3',
-      glassHover: '/sounds/ding-80828.mp3',
-      glassTab: '/sounds/ding-80828.mp3',
-      glassSuccess: '/sounds/ding-80828.mp3',
-      glassError: '/sounds/ding-80828.mp3',
+      glassClick: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+      glassHover: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+      glassTab: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+      glassSuccess: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+      glassError: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
     };
 
     Object.entries(soundFiles).forEach(([key, src]) => {
+      if (!src) return;
       const audio = new Audio();
       audio.src = src;
       audio.preload = 'auto';
@@ -92,13 +97,35 @@ class SoundService {
   // Play a specific sound
   play(soundType, { force = false } = {}) {
     if ((!this.isEnabled && !force) || typeof Audio === "undefined") return;
-    
-    const sound = this.sounds[soundType];
+
+    let sound = this.sounds[soundType];
+
+    // Lazy-load sound if not preloaded
+    if (!sound) {
+      const soundFiles = {
+        glassClick: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+        glassHover: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+        glassTab: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+        glassSuccess: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+        glassError: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
+      };
+      const src = soundFiles[soundType];
+      if (!src) return;
+      sound = new Audio();
+      sound.src = src;
+      sound.preload = 'auto';
+      sound.volume = this.volume;
+      sound.onerror = () => {
+        console.warn(`Could not load sound: ${src}`);
+      };
+      this.sounds[soundType] = sound;
+    }
+
     if (sound) {
       // Clone the audio to allow overlapping plays
       const audioClone = sound.cloneNode();
       audioClone.volume = this.volume;
-      
+
       // Reset to beginning and play
       audioClone.currentTime = 0;
       audioClone.play().catch(error => {
@@ -135,17 +162,17 @@ class SoundService {
   }
 
   getMailSoundFile() {
-    return this.mailSoundFile || DEFAULT_MAIL_SOUND_FILE;
+    return this.mailSoundFile;
   }
 
   getMailSoundSrc() {
     const filename = this.getMailSoundFile();
     if (!filename) return null;
-    return `/sounds/${encodeURIComponent(filename)}`;
+    return buildSoundSrc(filename);
   }
 
   setMailSoundFile(filename) {
-    this.mailSoundFile = normalizeSoundFile(filename) || DEFAULT_MAIL_SOUND_FILE;
+    this.mailSoundFile = normalizeSoundFile(filename);
     persistSetting(SOUND_MAIL_FILE_STORAGE_KEY, this.mailSoundFile);
   }
 

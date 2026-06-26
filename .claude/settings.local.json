@@ -85,7 +85,22 @@
       "Bash(sed -n '1,15p' electron.cjs)",
       "Bash(sed -n '195,215p' electron.cjs)",
       "Bash(php -l qmail-commands/net-object-transfers.php)",
-      "PowerShell(npm test *)"
+      "PowerShell(npm test *)",
+      "Bash(ctest)",
+      "Bash(xargs grep -l \"receipt\")",
+      "Bash(sed -n '563,580p' protocol/spec/tools/generate-qmail-object-transfer-v1-vectors.php)",
+      "Bash(sed -n '95,110p' protocol/spec/tools/validate-qmail-object-transfer-v1.php)",
+      "Bash(sed -n '180,192p' protocol/spec/tools/validate-qmail-object-transfer-v1.php)",
+      "Bash(php -l protocol/qmail-tell.php)",
+      "Bash(php -l protocol/qmail-object-transfer-v1.php)",
+      "Bash(php -l protocol/spec/tools/generate-qmail-object-transfer-v1-vectors.php)",
+      "Bash(php -l protocol/spec/tools/validate-qmail-object-transfer-v1.php)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('spec/qmail-object-transfer-v1.json'\\)\\); print\\(list\\(d.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \"import json; d=json.load\\(open\\('spec/qmail-object-transfer-v1-vectors.json'\\)\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\([v.get\\('command'\\) if isinstance\\(v,dict\\) else v for v in \\(d.get\\('vectors'\\) or []\\)][:20] if 'vectors' in d else ''\\)\")",
+      "PowerShell(Get-Process *)",
+      "Bash([ -f \"$f\" ])",
+      "Bash(xargs grep -l \"typedef.*exec_config_t\")",
+      "PowerShell(ctest *)"
     ]
   }
 }

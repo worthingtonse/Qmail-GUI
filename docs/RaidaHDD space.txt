@@ -1,0 +1,31 @@
+Filesystem      Size  Used Avail Use% Mounted on
+
+QMAIL SERVERS: 
+
+  R0: /dev/sda1        19G  8.8G  9.0G  50% /
+  R1: /dev/sda2        229G   18G  199G   9% / ***
+  R2: /dev/mapp       196G   47G  139G  26% /
+  R9: /dev/nvme0n1p2  1.8T   38G  1.7T   3% /
+  R11: /dev/mapper/u   98G   64G   30G  69% /
+  R13: /dev/nvme0n1p  1.8T  8.7G  1.7T   1% /
+  R14: /dev/nvme0n12  1.8T  1.2T  589G  67% /
+  R18: /dev/sda2       228G   40G  177G  19% / **
+  R20: /dev/nvme0n1p2  467G   13G  431G   3% / ***
+  R21: ssh: connect to host 127.0.0.1 port 13021: Connection refused
+  R22: /dev/nvme0np2  227G   13G  204G   6% /
+  R24: /dev/sda2       109G   36G   69G  34% /
+
+OTHER RAIDA SERVERS
+  R3: /dev/sda1         38G   16G   21G  43% /
+  R4: /dev/sda1         74G   32G   40G  45% /
+  R5: /dev/mapper/-1    64G   19G   42G  31% /
+  R6: /dev/xvda1        20G   14G    5G  73% /
+  R7: /dev/sda3         47G   18G   28G  40% /
+  R8: /dev/root         29G    9G   19G  34% /
+  R10: /dev/root        29G    7G   21G  27% /
+  R12: /dev/xvda1       20G   15G    4G  79% /
+  R15: /dev/sda1        32G   13G   18G  41% /
+  R17: /dev/sda1        32G   11G   20G  37% /
+  R19: /dev/vda1        60G   28G   29G  50% /
+  R23: /dev/vda1       9.3G    5G    3G  63% /
+

@@ -77,19 +77,47 @@ const ComingSoonToggle = ({ title, description }) => (
   </div>
 );
 
-const DEFAULT_SOUND_FILE = "ding-80828.mp3";
+const NO_SOUND_FILE = "";
+const DEFAULT_SOUND_FILE = "default.mp3";
+const NO_SOUND_OPTION = {
+  filename: NO_SOUND_FILE,
+  label: "No sound",
+  src: null,
+};
 const FALLBACK_SOUND_FILES = [
   DEFAULT_SOUND_FILE,
-  "floraphonic-arcade-ui-1-229498.mp3",
-  "driken5482-retro-coin-3-236679.mp3",
-  "u_jlnmxtfupk-notice-313085.mp3",
+  "DingDing.mp3",
+  "Floraphonic.mp3",
+  "Notice.mp3",
+  "Ploops.mp3",
 ];
 
 const buildSoundLabel = (filename) => {
   const base = String(filename || "").replace(/\.[^.]+$/, "");
-  const cleaned = base.replace(/[._-]+/g, " ").trim();
-  if (!cleaned) return filename || "Sound";
-  return cleaned.replace(/\b\w/g, (match) => match.toUpperCase());
+  return base.trim() || filename || "Sound";
+};
+
+const buildSoundSrc = (filename) => {
+  const normalized = String(filename || "").trim();
+  return normalized ? `./sounds/${encodeURIComponent(normalized)}` : null;
+};
+
+const buildFallbackSounds = () =>
+  FALLBACK_SOUND_FILES.map((filename) => ({
+    filename,
+    label: buildSoundLabel(filename),
+    src: buildSoundSrc(filename),
+  }));
+
+const withNoSoundOption = (sounds) => [
+  NO_SOUND_OPTION,
+  ...sounds.filter((sound) => sound && sound.filename),
+];
+
+const resolveSelectedSound = (sounds, current) => {
+  if (current === NO_SOUND_FILE) return NO_SOUND_FILE;
+  if (sounds.some((sound) => sound.filename === current)) return current;
+  return sounds.find((sound) => sound.filename)?.filename || NO_SOUND_FILE;
 };
 
 const SoundSettings = () => {
@@ -118,34 +146,28 @@ const SoundSettings = () => {
           : [];
         if (cancelled) return;
 
-        const sounds = Array.isArray(remoteSounds) && remoteSounds.length > 0
+        const soundFiles = Array.isArray(remoteSounds) && remoteSounds.length > 0
           ? remoteSounds
-          : FALLBACK_SOUND_FILES.map((filename) => ({
-              filename,
-              label: buildSoundLabel(filename),
-              src: `/sounds/${encodeURIComponent(filename)}`,
-            }));
+          : buildFallbackSounds();
+        const sounds = withNoSoundOption(soundFiles);
 
         setAvailableSounds(sounds);
 
         const current = soundService.getMailSoundFile();
-        const next = sounds.some((sound) => sound.filename === current)
-          ? current
-          : sounds[0]?.filename || DEFAULT_SOUND_FILE;
+        const next = resolveSelectedSound(sounds, current);
 
-        if (next && next !== current) {
+        if (next !== current) {
           soundService.setMailSoundFile(next);
         }
         setSelectedSoundFile(next);
       } catch (error) {
         if (!cancelled) {
-          const fallbackSounds = FALLBACK_SOUND_FILES.map((filename) => ({
-            filename,
-            label: buildSoundLabel(filename),
-            src: `/sounds/${encodeURIComponent(filename)}`,
-          }));
+          const fallbackSounds = withNoSoundOption(buildFallbackSounds());
           setAvailableSounds(fallbackSounds);
-          const next = fallbackSounds[0]?.filename || DEFAULT_SOUND_FILE;
+          const next = resolveSelectedSound(
+            fallbackSounds,
+            soundService.getMailSoundFile(),
+          );
           soundService.setMailSoundFile(next);
           setSelectedSoundFile(next);
         }
@@ -172,9 +194,13 @@ const SoundSettings = () => {
     const next = event.target.value;
     setSelectedSoundFile(next);
     soundService.setMailSoundFile(next);
+    if (next) {
+      soundService.playMailReceived({ force: true });
+    }
   };
 
   const handlePreview = () => {
+    if (!selectedSoundFile) return;
     soundService.playMailReceived({ force: true });
   };
 
@@ -209,6 +235,7 @@ const SoundSettings = () => {
             type="button"
             className="btn btn--secondary account-pane__sound-preview"
             onClick={handlePreview}
+            disabled={!selectedSoundFile}
             title="Play a preview sound"
           >
             <Play size={14} />

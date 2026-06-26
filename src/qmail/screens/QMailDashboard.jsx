@@ -20,7 +20,7 @@ import {
   getEmailAttachments,
   getQMailWalletBalance,
   getQMailCanSend,
-  checkMailNow,
+  peekBeacon,
   echoRaida,
   markEmailRead,
   moveEmail,
@@ -1550,11 +1550,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         return result;
       }, RAIDA_REFRESH_TIMEOUT_MS);
 
-      await runRefreshStep("Beacon ping", async () => {
-        const result = await checkMailNow();
+      await runRefreshStep("Beacon peek", async () => {
+        const result = await peekBeacon();
         if (!result.success) {
-          throw new Error(result.error || "Beacon ping failed");
+          throw new Error(result.error || "Beacon peek failed");
         }
+        mergePendingNotifications(result.data?.messages || []);
         return result;
       });
 

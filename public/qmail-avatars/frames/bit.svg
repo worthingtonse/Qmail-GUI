@@ -41,10 +41,15 @@
          dangerous. The interior stays dark enough that the colored symbols
          drawn on top remain legible. -->
     <defs>
-      <radialGradient id="bit-alarm" cx="50%" cy="42%" r="62%">
-        <stop offset="0%" stop-color="#5a1414" />
-        <stop offset="100%" stop-color="#3a0c0c" />
-      </radialGradient>
+      <linearGradient id="bit-alarm" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#4a1010" />
+        <stop offset="18%" stop-color="#3d0d0d" />
+        <stop offset="34%" stop-color="#270808" />
+        <stop offset="50%" stop-color="#140404" />
+        <stop offset="66%" stop-color="#270808" />
+        <stop offset="82%" stop-color="#3d0d0d" />
+        <stop offset="100%" stop-color="#4a1010" />
+      </linearGradient>
     </defs>
 
 

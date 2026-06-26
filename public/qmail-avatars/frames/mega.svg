@@ -18,12 +18,21 @@
         <stop offset="40%"  stop-color="#c3ccd5" />
         <stop offset="100%" stop-color="#6b757f" />
       </linearGradient>
+      <linearGradient id="mega-body" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#1c2d3f" />
+        <stop offset="18%" stop-color="#172737" />
+        <stop offset="34%" stop-color="#0e1b29" />
+        <stop offset="50%" stop-color="#050d17" />
+        <stop offset="66%" stop-color="#0e1b29" />
+        <stop offset="82%" stop-color="#172737" />
+        <stop offset="100%" stop-color="#1c2d3f" />
+      </linearGradient>
     </defs>
 
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="#23364b" stroke="url(#mega-rim)" stroke-width="3.9" />
+    <rect x="24" y="10" width="52" height="76" rx="16" fill="url(#mega-body)" stroke="url(#mega-rim)" stroke-width="3.9" />
     <!-- specular sheen on the upper-left rim -->
     <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#ffffff" stroke-width="1.0" stroke-linecap="round" opacity="0.8" />
-    <rect x="22" y="78" width="56" height="8" fill="#23364b" />
+    <rect x="22" y="78" width="56" height="8" fill="url(#mega-body)" />
     <!-- inner highlight line: flush against the rim's inner edge, no gap -->
     <rect x="26.3" y="12.3" width="47.4" height="71.4" rx="14" fill="none" stroke="#e7ecf1" stroke-width="1.2" />
 

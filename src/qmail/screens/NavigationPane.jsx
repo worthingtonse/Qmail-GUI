@@ -172,7 +172,17 @@ const NavigationPane = ({
     data.raidas.forEach((raida, fallbackIndex) => {
       const index = Number.isInteger(raida.index) ? raida.index : fallbackIndex;
       if (index >= 0 && index < RAIDA_COUNT) {
-        statuses[index] = raida.status === "Ready";
+        if (raida.status === "Ready") {
+          statuses[index] = true;
+        } else if (
+          raida.status === "Error" ||
+          raida.status === "Timeout" ||
+          raida.status === "Offline"
+        ) {
+          statuses[index] = false;
+        } else {
+          statuses[index] = null;
+        }
         details[index] = raida;
       }
     });
@@ -209,6 +219,41 @@ const NavigationPane = ({
       showUnknownQmailHealth();
     }
   }, [applyQmailServers, showUnknownQmailHealth]);
+  const applyCachedServerStatus = useCallback(async () => {
+    const loader = window.electronAPI?.getRaidaCachedStatus;
+    if (typeof loader !== "function") return false;
+
+    try {
+      const cached = await loader();
+      if (!cached?.success || !Array.isArray(cached.raidas)) return false;
+
+      const echoLikeData = {
+        raidas: cached.raidas.map((raida) => ({
+          index: raida.index,
+          status:
+            raida.is_available === true
+              ? "Ready"
+              : raida.is_available === false
+                ? "Offline"
+                : "Unknown",
+          latency_ms: raida.last_response_ms,
+          ip: raida.ip,
+          port: raida.port,
+        })),
+        totalAvailable: cached.totalAvailable,
+        totalError: cached.totalError,
+        totalTimeout: 0,
+        arrayUsable: (cached.totalAvailable ?? 0) >= 16,
+      };
+
+      applyRaidaEcho(echoLikeData);
+      applyQmailServers(cached.qmailServers || []);
+      return true;
+    } catch (error) {
+      console.warn("Cached RAIDA status unavailable:", error);
+      return false;
+    }
+  }, [applyQmailServers, applyRaidaEcho]);
 
   const checkServerHealth = useCallback(async () => {
     /* Re-entrancy guard: the interval, the mount effect, and the isRefreshing
@@ -223,24 +268,29 @@ const NavigationPane = ({
        * derives its availability from this same result — no second echo, no
        * extra round trip to the beacon. */
       const raidaResult = await echoRaida();
+      let usedCachedStatus = false;
       if (raidaResult.success) {
         applyRaidaEcho(raidaResult.data);
       } else {
-        showUnknownRaidaHealth();
+        usedCachedStatus = await applyCachedServerStatus();
+        if (!usedCachedStatus) showUnknownRaidaHealth();
       }
 
       // Merge the shared echo into the mail-server topology (topology is cached
       // after the first call, and skipEcho prevents a second echo on failure).
-      const echoForServers = raidaResult.success
-        ? raidaResult.data
-        : null;
-      await applyQmailServersFromEcho(echoForServers);
+      if (raidaResult.success) {
+        await applyQmailServersFromEcho(raidaResult.data);
+      } else if (!usedCachedStatus) {
+        showUnknownQmailHealth();
+      }
     } finally {
       checkInFlightRef.current = false;
     }
   }, [
+    applyCachedServerStatus,
     applyRaidaEcho,
     applyQmailServersFromEcho,
+    showUnknownQmailHealth,
     showUnknownRaidaHealth,
   ]);
 
@@ -250,12 +300,21 @@ const NavigationPane = ({
       return undefined;
     }
 
+    let cancelled = false;
     const justFinishedRefresh = wasRefreshingRef.current;
     wasRefreshingRef.current = false;
-    if (!justFinishedRefresh) checkServerHealth();
+    if (!justFinishedRefresh) {
+      (async () => {
+        await applyCachedServerStatus();
+        if (!cancelled) checkServerHealth();
+      })();
+    }
     const interval = setInterval(checkServerHealth, 120000);
-    return () => clearInterval(interval);
-  }, [checkServerHealth, isRefreshing]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [applyCachedServerStatus, checkServerHealth, isRefreshing]);
 
   useEffect(() => {
     if (isRefreshing) {

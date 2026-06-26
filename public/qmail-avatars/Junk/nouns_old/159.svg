@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+
+    <path d="M35.5 24 H64.5 V48 C64.5 62, 58 70, 50 76 C42 70, 35.5 62, 35.5 48 Z" fill="#f4edd1" />
+    <g transform="translate(50 50) scale(1) translate(-50 -50)"><path d="M50 40 L53.5 48 H62 L55 53.3 L57.8 62 L50 56.8 L42.2 62 L45 53.3 L38 48 H46.5 Z" fill="#fff4bf" /></g>
+    <path d="M30 76 H70" stroke="#fff4bf" stroke-width="4" stroke-linecap="round" />
+  
+</svg>

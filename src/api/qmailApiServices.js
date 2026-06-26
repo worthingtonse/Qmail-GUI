@@ -26,6 +26,7 @@ const API_PORT =
   "8080";
 const API_BASE_URL = `http://localhost:${API_PORT}/api`;
 const parsedApiPort = Number(API_PORT);
+const BEACON_CHECK_TIMEOUT_MS = 5000;
 
 // SSE event stream listens on http_port + 100 — see rest_core sse_server.c
 // and docs/opu.sse.plan.txt. Multi-instance (8080/8081/8082) maps to
@@ -671,7 +672,7 @@ export const peekBeacon = async () => {
     throw new Error("Invalid response from qmail check endpoint");
   } catch (error) {
     console.error("QMail check failed:", error);
-    const errorMessage = `Error: ${error.message}\n\nFailed to ping QMail server.`;
+    const errorMessage = `Error: ${error.message}\n\nFailed to check QMail server.`;
     return { success: false, error: errorMessage };
   }
 };
@@ -680,9 +681,11 @@ export const peekBeacon = async () => {
  * Forces an immediate QMail beacon check.
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const checkMailNow = async () => {
+export const checkMailNow = async ({ timeoutMs = BEACON_CHECK_TIMEOUT_MS } = {}) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/qmail/net/beacon/ping`, {
+    const url = new URL(`${API_BASE_URL}/qmail/net/beacon/ping`);
+    url.searchParams.set("timeout_ms", String(timeoutMs));
+    const response = await fetch(url.toString(), {
       method: "POST",
     });
     const data = await handleResponse(response);

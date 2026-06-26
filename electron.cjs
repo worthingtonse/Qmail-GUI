@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
@@ -13,6 +13,7 @@ let backendProcess = null;
 let backendPort = 0; // resolved before the backend is spawned
 let activeThemeMenuItem = 'dark';
 let backendDataDir = null;
+let titleBarColor = '#C9CC3F';
 const selectedAttachmentPaths = new Set();
 
 // R-2 hardening: per-session random token. core.exe requires it as a bearer
@@ -29,17 +30,157 @@ const THEME_MENU_ITEMS = [
 ];
 
 const SOUND_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac']);
+const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
+const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
 
 function isPathInside(rootPath, candidatePath) {
   const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+const DEFAULT_QMAIL_RAIDAS = new Set([0, 1, 11, 13, 14, 18, 20, 22, 24]);
+
+function readTextFileIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function parseRaidaIpsCsv(content) {
+  const rows = new Map();
+  if (!content) return rows;
+
+  let index = 0;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const comma = line.lastIndexOf(',');
+    const endpoint = comma >= 0 ? line.slice(0, comma).trim() : line;
+    const flag = comma >= 0 ? line.slice(comma + 1).trim().toUpperCase() : '';
+    const colon = endpoint.lastIndexOf(':');
+    if (colon <= 0) {
+      index += 1;
+      continue;
+    }
+
+    const ip = endpoint.slice(0, colon).trim();
+    const port = Number(endpoint.slice(colon + 1).trim());
+    if (!ip || !Number.isInteger(port)) {
+      index += 1;
+      continue;
+    }
+
+    rows.set(index, {
+      index,
+      ip,
+      port,
+      is_qmail: flag === 'Q' || (!flag && DEFAULT_QMAIL_RAIDAS.has(index)),
+      qmail_flag: flag === 'Q' || flag === 'R' ? flag : null,
+    });
+    index += 1;
+  }
+  return rows;
+}
+
+function parseRaidaStatsCsv(content) {
+  const rows = new Map();
+  if (!content) return rows;
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const parts = line.split(',').map((part) => part.trim());
+    if (parts.length < 3) continue;
+
+    const index = Number(parts[0]);
+    const lastResponseMs = Number(parts[1]);
+    const isAvailable = Number(parts[2]);
+    if (!Number.isInteger(index) || index < 0 || index >= 25) continue;
+
+    rows.set(index, {
+      index,
+      last_response_ms: Number.isFinite(lastResponseMs) ? lastResponseMs : null,
+      is_available: isAvailable === 1 ? true : isAvailable === 0 ? false : null,
+    });
+  }
+  return rows;
+}
+
+function buildCachedRaidaStatus() {
+  if (!backendDataDir) {
+    return { success: false, error: 'Backend data directory is not set yet' };
+  }
+
+  const clientDataDir = path.join(backendDataDir, 'Client_Data');
+  const ipsPath = path.join(clientDataDir, 'raida_ips.csv');
+  const statsPath = path.join(clientDataDir, 'raida_stats.csv');
+  const topology = parseRaidaIpsCsv(readTextFileIfExists(ipsPath));
+  const stats = parseRaidaStatsCsv(readTextFileIfExists(statsPath));
+
+  if (topology.size === 0 && stats.size === 0) {
+    return {
+      success: false,
+      error: 'No cached RAIDA topology or stats files found',
+      clientDataDir,
+      files: {
+        raida_ips: fs.existsSync(ipsPath),
+        raida_stats: fs.existsSync(statsPath),
+      },
+    };
+  }
+
+  const raidas = Array.from({ length: 25 }, (_, index) => {
+    const topo = topology.get(index) || null;
+    const stat = stats.get(index) || null;
+    return {
+      index,
+      ip: topo ? topo.ip : '',
+      port: topo ? topo.port : 50000 + index,
+      is_qmail: topo ? topo.is_qmail : DEFAULT_QMAIL_RAIDAS.has(index),
+      qmail_flag: topo ? topo.qmail_flag : null,
+      is_available: stat ? stat.is_available : null,
+      last_response_ms: stat ? stat.last_response_ms : null,
+    };
+  });
+
+  const qmailServers = raidas
+    .filter((raida) => raida.is_qmail)
+    .map((raida) => ({
+      raida_index: raida.index,
+      server_id: raida.index,
+      ip: raida.ip,
+      ip_address: raida.ip,
+      port: raida.port,
+      is_available: raida.is_available,
+      latency_ms: raida.last_response_ms,
+    }));
+
+  return {
+    success: true,
+    source: 'csv',
+    clientDataDir,
+    files: {
+      raida_ips: fs.existsSync(ipsPath),
+      raida_stats: fs.existsSync(statsPath),
+    },
+    raidas,
+    qmailServers,
+    totalAvailable: raidas.filter((raida) => raida.is_available === true).length,
+    totalError: raidas.filter((raida) => raida.is_available === false).length,
+    qmailAvailable: qmailServers.filter((server) => server.is_available === true).length,
+  };
+}
 function resolveSoundLibraryDir() {
-  const candidates = [
-    path.join(app.getAppPath(), 'dist', 'sounds'),
-    path.join(app.getAppPath(), 'public', 'sounds'),
-  ];
+  const candidates = isDev
+    ? [
+        path.join(app.getAppPath(), 'public', 'sounds'),
+        path.join(app.getAppPath(), 'dist', 'sounds'),
+      ]
+    : [
+        path.join(app.getAppPath(), 'dist', 'sounds'),
+        path.join(app.getAppPath(), 'public', 'sounds'),
+      ];
 
   for (const dir of candidates) {
     try {
@@ -60,6 +201,225 @@ function isStandardTheme(themeId) {
 
 function log(msg) {
   process.stdout.write(`[ELECTRON] ${msg}\n`);
+}
+
+function runPowerShell(script, extraEnv = {}) {
+  return spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, ...extraEnv },
+    windowsHide: true
+  });
+}
+
+function terminateProcessTree(pid, reason) {
+  if (!pid) return;
+
+  try {
+    if (process.platform === 'win32') {
+      const result = spawnSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+        encoding: 'utf8',
+        windowsHide: true
+      });
+      const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+      if (result.error) {
+        log(`Backend ${reason}: taskkill failed for PID ${pid}: ${result.error.message}`);
+      } else if (result.status === 0) {
+        log(`Backend ${reason}: terminated PID ${pid}` + (output ? ` (${output})` : ''));
+      } else {
+        log(`Backend ${reason}: taskkill exited ${result.status} for PID ${pid}` + (output ? ` (${output})` : ''));
+      }
+      return;
+    }
+
+    process.kill(pid, 'SIGTERM');
+    log(`Backend ${reason}: sent SIGTERM to PID ${pid}`);
+  } catch (error) {
+    log(`Backend ${reason}: terminate PID ${pid} failed: ${error.message}`);
+  }
+}
+
+function cleanupOrphanedBackendsForDataDir(dataDir) {
+  if (process.platform !== 'win32' || !dataDir) return;
+
+  const script = [
+    "$target = [Environment]::GetEnvironmentVariable('QMAIL_TARGET_DATA_DIR')",
+    "if ([string]::IsNullOrWhiteSpace($target)) { exit 0 }",
+    "$target = [IO.Path]::GetFullPath($target).TrimEnd('\\')",
+    "$targetLower = $target.ToLowerInvariant()",
+    "$pattern = '(?i)(^|\\s)-data-dir\\s+\"?' + [Regex]::Escape($targetLower) + '\\\\?\"?(?=\\s|$)'",
+    "$processes = Get-CimInstance Win32_Process -Filter \"Name = 'core.exe'\"",
+    "foreach ($proc in $processes) {",
+    "  $cmd = $proc.CommandLine",
+    "  if ([string]::IsNullOrWhiteSpace($cmd)) { continue }",
+    "  $normalized = ($cmd -replace '/', '\\').ToLowerInvariant()",
+    "  if ($normalized -notmatch $pattern) { continue }",
+    "  $parent = Get-CimInstance Win32_Process -Filter (\"ProcessId = {0}\" -f $proc.ParentProcessId) -ErrorAction SilentlyContinue",
+    "  if ($parent -and ($parent.Name -eq 'QMail.exe' -or $parent.Name -eq 'electron.exe')) { continue }",
+    "  try {",
+    "    Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop",
+    "    Write-Output (\"Killed orphaned core.exe PID={0} dataDir={1}\" -f $proc.ProcessId, $target)",
+    "  } catch {",
+    "    Write-Output (\"Failed to kill orphaned core.exe PID={0}: {1}\" -f $proc.ProcessId, $_.Exception.Message)",
+    "  }",
+    "}"
+  ].join('\n');
+
+  const result = runPowerShell(script, { QMAIL_TARGET_DATA_DIR: dataDir });
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  if (result.error) {
+    log('Orphan backend cleanup failed: ' + result.error.message);
+  } else if (output) {
+    log('Orphan backend cleanup: ' + output);
+  }
+}
+
+function normalizeHexColor(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(trimmed)) return null;
+  return trimmed.toUpperCase();
+}
+
+function colorRefFromHex(color) {
+  const normalized = normalizeHexColor(color) || DEFAULT_TITLE_BAR_COLOR;
+  const r = parseInt(normalized.slice(1, 3), 16);
+  const g = parseInt(normalized.slice(3, 5), 16);
+  const b = parseInt(normalized.slice(5, 7), 16);
+  return (b << 16) | (g << 8) | r;
+}
+
+function titleBarTextColorFor(backgroundColor) {
+  const normalized = normalizeHexColor(backgroundColor) || DEFAULT_TITLE_BAR_COLOR;
+  const r = parseInt(normalized.slice(1, 3), 16) / 255;
+  const g = parseInt(normalized.slice(3, 5), 16) / 255;
+  const b = parseInt(normalized.slice(5, 7), 16) / 255;
+  const linear = [r, g, b].map((channel) =>
+    channel <= 0.03928
+      ? channel / 12.92
+      : Math.pow((channel + 0.055) / 1.055, 2.4)
+  );
+  const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  return luminance > 0.45 ? '#000000' : '#FFFFFF';
+}
+
+function getWindowSettingsPath() {
+  const rootDir = backendDataDir || app.getPath('userData');
+  return path.join(rootDir, WINDOW_SETTINGS_FILE);
+}
+
+function readWindowSettings() {
+  try {
+    const settingsPath = getWindowSettingsPath();
+    if (!fs.existsSync(settingsPath)) return {};
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    log('Window settings read failed: ' + error.message);
+    return {};
+  }
+}
+
+function loadWindowSettings() {
+  const settings = readWindowSettings();
+  titleBarColor = normalizeHexColor(settings.titleBarColor) || DEFAULT_TITLE_BAR_COLOR;
+}
+
+function saveWindowSettings(nextSettings) {
+  try {
+    const settingsPath = getWindowSettingsPath();
+    const current = readWindowSettings();
+    const merged = { ...current, ...nextSettings };
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+    return true;
+  } catch (error) {
+    log('Window settings save failed: ' + error.message);
+    return false;
+  }
+}
+
+function getNativeWindowHandleDecimal(windowRef) {
+  if (!windowRef || windowRef.isDestroyed()) return null;
+  const handle = windowRef.getNativeWindowHandle();
+  if (!Buffer.isBuffer(handle) || handle.length < 4) return null;
+  if (handle.length >= 8) {
+    return handle.readBigUInt64LE(0).toString();
+  }
+  return BigInt(handle.readUInt32LE(0)).toString();
+}
+
+function applyNativeTitleBarColor(windowRef, color) {
+  const normalized = normalizeHexColor(color) || DEFAULT_TITLE_BAR_COLOR;
+  if (!windowRef || windowRef.isDestroyed()) return;
+
+  if (typeof windowRef.setBackgroundColor === 'function') {
+    windowRef.setBackgroundColor(normalized);
+  }
+
+  if (process.platform !== 'win32') return;
+
+  const hwnd = getNativeWindowHandleDecimal(windowRef);
+  if (!hwnd) return;
+
+  const script = [
+    "$source = @'",
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "public static class QmailDwmApi {",
+    "  [DllImport(\"dwmapi.dll\")]",
+    "  public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);",
+    "}",
+    "'@",
+    "Add-Type -TypeDefinition $source -ErrorAction Stop",
+    "$hwndValue = [UInt64]::Parse([Environment]::GetEnvironmentVariable('QMAIL_WINDOW_HWND'))",
+    "$hwnd = [IntPtr]([Int64]$hwndValue)",
+    "$caption = [Int32]::Parse([Environment]::GetEnvironmentVariable('QMAIL_TITLE_BAR_COLORREF'))",
+    "$text = [Int32]::Parse([Environment]::GetEnvironmentVariable('QMAIL_TITLE_BAR_TEXT_COLORREF'))",
+    "$border = $caption",
+    "$captionResult = [QmailDwmApi]::DwmSetWindowAttribute($hwnd, 35, [ref]$caption, 4)",
+    "$textResult = [QmailDwmApi]::DwmSetWindowAttribute($hwnd, 36, [ref]$text, 4)",
+    "$borderResult = [QmailDwmApi]::DwmSetWindowAttribute($hwnd, 34, [ref]$border, 4)",
+    "if ($captionResult -ne 0 -or $textResult -ne 0 -or $borderResult -ne 0) {",
+    "  Write-Output (\"DwmSetWindowAttribute results caption={0} text={1} border={2}\" -f $captionResult, $textResult, $borderResult)",
+    "}",
+  ].join('\n');
+
+  const result = runPowerShell(script, {
+    QMAIL_WINDOW_HWND: hwnd,
+    QMAIL_TITLE_BAR_COLORREF: String(colorRefFromHex(normalized)),
+    QMAIL_TITLE_BAR_TEXT_COLORREF: String(colorRefFromHex(titleBarTextColorFor(normalized))),
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  if (result.error) {
+    log('Title bar color failed: ' + result.error.message);
+  } else if (output) {
+    log('Title bar color: ' + output);
+  }
+}
+
+function setTitleBarColor(color, { persist = true } = {}) {
+  const normalized = normalizeHexColor(color);
+  if (!normalized) {
+    return { success: false, error: 'Color must be in #RRGGBB format' };
+  }
+
+  titleBarColor = normalized;
+  applyNativeTitleBarColor(mainWindow, titleBarColor);
+  if (persist) {
+    saveWindowSettings({ titleBarColor });
+  }
+  buildApplicationMenu();
+  return { success: true, color: titleBarColor, defaultColor: DEFAULT_TITLE_BAR_COLOR };
+}
+
+function resetTitleBarColor() {
+  return setTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
 }
 
 // BUG-51: CLI surface for QMail.exe. Parses our own flags; everything
@@ -214,17 +574,20 @@ function startBackend(port) {
   log('Backend args: ' + coreArgs.join(' '));
 
   try {
-    backendProcess = spawn(backendPath, coreArgs, {
+    cleanupOrphanedBackendsForDataDir(dataDir);
+
+    const child = spawn(backendPath, coreArgs, {
       cwd: dataDir,
       env: { ...process.env, QMAIL_API_TOKEN: apiSessionToken },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
       windowsHide: true
     });
+    backendProcess = child;
 
-    log('Backend started PID: ' + backendProcess.pid + ' on port ' + port);
+    log('Backend started PID: ' + child.pid + ' on port ' + port);
 
-    backendProcess.stdout.on('data', (data) => {
+    child.stdout.on('data', (data) => {
       const output = data.toString().trim();
       log('BACKEND: ' + output);
 
@@ -238,13 +601,22 @@ function startBackend(port) {
       }
     });
 
-    backendProcess.stderr.on('data', (data) => {
+    child.stderr.on('data', (data) => {
       log('ERR: ' + data.toString().trim());
     });
 
-    backendProcess.on('exit', (code) => {
-      log('Backend exit: ' + code);
-      backendProcess = null;
+    child.on('error', (error) => {
+      log('Backend process error: ' + error.message);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+    });
+
+    child.on('exit', (code, signal) => {
+      log(`Backend exit: code=${code} signal=${signal || 'none'}`);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
     });
 
   } catch (error) {
@@ -379,6 +751,14 @@ function sendQmailMenuCommand(command) {
   mainWindow.webContents.send('qmail:menu-command', command);
 }
 
+function sendTitleBarColorPickerCommand() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('titlebar:pick-color', {
+    color: titleBarColor,
+    defaultColor: DEFAULT_TITLE_BAR_COLOR,
+  });
+}
+
 function setThemeFromMenu(themeId) {
   if (!isStandardTheme(themeId)) return;
   activeThemeMenuItem = themeId;
@@ -452,6 +832,16 @@ function buildApplicationMenu() {
           })),
         },
         { type: 'separator' },
+        {
+          label: 'Title Bar Color...',
+          click: () => sendTitleBarColorPickerCommand(),
+        },
+        {
+          label: 'Reset Title Bar Color',
+          enabled: titleBarColor !== DEFAULT_TITLE_BAR_COLOR,
+          click: () => resetTitleBarColor(),
+        },
+        { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
@@ -504,6 +894,7 @@ function createMainWindow(port) {
       spellcheck: true,
     },
   });
+  applyNativeTitleBarColor(mainWindow, titleBarColor);
   // setSpellCheckerLanguages must be called on the session AFTER the
   // window exists; safe to do here.
   mainWindow.webContents.session.setSpellCheckerLanguages(['en-US']);
@@ -573,6 +964,7 @@ function createMainWindow(port) {
   // ready-to-show because it waits for the first render.
   mainWindow.once('ready-to-show', () => {
     log('Main window ready');
+    applyNativeTitleBarColor(mainWindow, titleBarColor);
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.close();
       splashWindow = null;
@@ -599,6 +991,20 @@ ipcMain.handle('show-error-dialog', async (event, title, message) => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('titlebar:get-color', () => ({
+  success: true,
+  color: titleBarColor,
+  defaultColor: DEFAULT_TITLE_BAR_COLOR,
+}));
+
+ipcMain.handle('titlebar:set-color', (_event, color) => {
+  return setTitleBarColor(color);
+});
+
+ipcMain.handle('titlebar:reset-color', () => {
+  return resetTitleBarColor();
 });
 
 ipcMain.on('theme:changed', (_event, themeId) => {
@@ -786,6 +1192,13 @@ ipcMain.handle('get-downloads-dir', async () => app.getPath('downloads'));
 
 ipcMain.handle('get-backend-data-dir', async () => backendDataDir || null);
 
+ipcMain.handle('get-raida-cached-status', async () => {
+  try {
+    return buildCachedRaidaStatus();
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 ipcMain.handle('get-api-token', async () => apiSessionToken);
 
 // Filenames that are NOT coins — OS/editor cruft that can litter a wallet
@@ -898,8 +1311,8 @@ ipcMain.handle('list-sound-files', async () => {
       .sort((a, b) => a.localeCompare(b))
       .map((filename) => ({
         filename,
-        label: filename.replace(/\.[^.]+$/, '').replace(/[._-]+/g, ' ').trim(),
-        src: `/sounds/${encodeURIComponent(filename)}`,
+        label: filename.replace(/\.[^.]+$/, '').trim() || filename,
+        src: `./sounds/${encodeURIComponent(filename)}`,
       }));
   } catch (error) {
     log('list-sound-files failed for ' + dir + ': ' + error.message);
@@ -929,24 +1342,37 @@ async function boot() {
 
   // Start backend first so it has time to initialize while splash is showing
   startBackend(backendPort);
+  loadWindowSettings();
   createSplashWindow();
   createMainWindow(backendPort);
 }
 
 app.whenReady().then(boot);
 
-// BUG-24 FIX: Kill backend on all exit paths, not just window-all-closed
-const killBackend = () => {
-  if (backendProcess) {
-    backendProcess.kill();
-    backendProcess = null;
+// BUG-24 FIX: Kill backend on all exit paths, not just window-all-closed.
+// On Windows, ChildProcess.kill() can leave the backend alive after the GUI
+// exits, so terminate the exact spawned PID and its children.
+const killBackend = (reason = 'shutdown') => {
+  const child = backendProcess;
+  backendProcess = null;
+
+  if (child && child.pid) {
+    terminateProcessTree(child.pid, reason);
+  } else if (backendDataDir) {
+    cleanupOrphanedBackendsForDataDir(backendDataDir);
   }
 };
 
-app.on('before-quit', killBackend);
+app.on('before-quit', () => killBackend('before-quit'));
 app.on('window-all-closed', () => {
-  killBackend();
+  killBackend('window-all-closed');
   app.quit();
 });
-process.on('SIGTERM', killBackend);
-process.on('SIGINT', killBackend);
+process.on('SIGTERM', () => {
+  killBackend('SIGTERM');
+  process.exit(0);
+});
+process.on('SIGINT', () => {
+  killBackend('SIGINT');
+  process.exit(0);
+});

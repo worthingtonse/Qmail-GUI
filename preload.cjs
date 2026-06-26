@@ -15,11 +15,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHomeDir: () => ipcRenderer.invoke('get-home-dir'),
   getDownloadsDir: () => ipcRenderer.invoke('get-downloads-dir'),
   getBackendDataDir: () => ipcRenderer.invoke('get-backend-data-dir'),
+  getRaidaCachedStatus: () => ipcRenderer.invoke('get-raida-cached-status'),
   revealPath: (targetPath) => ipcRenderer.invoke('reveal-path', targetPath),
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   listSoundFiles: () => ipcRenderer.invoke('list-sound-files'),
   hasIdCoin: () => ipcRenderer.invoke('has-id-coin'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  getTitleBarColor: () => ipcRenderer.invoke('titlebar:get-color'),
+  setTitleBarColor: (color) => ipcRenderer.invoke('titlebar:set-color', color),
+  resetTitleBarColor: () => ipcRenderer.invoke('titlebar:reset-color'),
   // FIX-02 (Batch 5): open a multi-select file picker for ComposeModal
   // attachments. Resolves to an Array<{path, name, size}>, or [] if
   // the user cancels. ComposeModal checks for window.electronAPI
@@ -40,6 +44,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, command) => callback(command);
     ipcRenderer.on('qmail:menu-command', handler);
     return () => ipcRenderer.removeListener('qmail:menu-command', handler);
+  },
+  onTitleBarColorPick: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('titlebar:pick-color', handler);
+    return () => ipcRenderer.removeListener('titlebar:pick-color', handler);
   },
   onBackendReady: (callback) => {
     if (typeof callback !== 'function') return () => {};

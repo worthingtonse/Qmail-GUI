@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { AlertTriangle, CheckCircle, Download, X, Loader2 } from "lucide-react";
 import "./App.css";
 import "./UpdateModal.css";
@@ -14,12 +14,14 @@ import {
   getIdentity,
   hasId,
   normalizeIdentityForUi,
-  checkMailNow,
+  peekBeacon,
 } from "./api/qmailApiServices";
 
 // Where all QMail software downloads live. The "Download Update" button
 // opens this page in the user's default browser.
 const DOWNLOAD_PAGE_URL = "https://cloudcoinconsortium.com/use.php";
+const DEFAULT_TITLE_BAR_COLOR = "#C9CC3F";
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 const QMAIL_DISCLAIMER_TEXT = `DISCLAIMER:
 This software is provided 'as-is', without any express or implied warranty.
@@ -49,12 +51,69 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
-  // Guards prewarmInbox() so the background beacon ping fires at most once,
+  // Guards prewarmInbox() so the background beacon check fires at most once,
   // even if both the fast path and the backend identity check confirm QMAIL.
   const inboxPrewarmedRef = useRef(false);
 
-  // Wait for the backend to be ready before kicking off identity /
-  // version checks. The Electron splash hides the very first window
+  const openTitleBarColorPicker = useCallback(async (initial = {}) => {
+    if (
+      typeof window === "undefined" ||
+      typeof document === "undefined" ||
+      !window.electronAPI?.setTitleBarColor
+    ) {
+      return;
+    }
+
+    let currentColor =
+      typeof initial.color === "string" && HEX_COLOR_PATTERN.test(initial.color)
+        ? initial.color
+        : DEFAULT_TITLE_BAR_COLOR;
+
+    if (!initial.color && window.electronAPI.getTitleBarColor) {
+      try {
+        const result = await window.electronAPI.getTitleBarColor();
+        if (result?.color && HEX_COLOR_PATTERN.test(result.color)) {
+          currentColor = result.color;
+        }
+      } catch {
+        /* Keep the default color. */
+      }
+    }
+
+    document
+      .querySelectorAll("input[data-qmail-titlebar-color-picker]")
+      .forEach((node) => node.remove());
+
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = currentColor;
+    input.setAttribute("data-qmail-titlebar-color-picker", "true");
+    input.style.position = "fixed";
+    input.style.left = "-1000px";
+    input.style.top = "0";
+    input.style.width = "1px";
+    input.style.height = "1px";
+    input.style.opacity = "0";
+
+    input.addEventListener(
+      "change",
+      async () => {
+        try {
+          await window.electronAPI.setTitleBarColor(input.value);
+        } catch (error) {
+          console.error("Failed to set title bar color:", error);
+        } finally {
+          input.remove();
+        }
+      },
+      { once: true }
+    );
+
+    document.body.appendChild(input);
+    input.click();
+  }, []);
+
+  // Wait for the backend to be ready before kicking off identity checks. The Electron splash hides the very first window
   // of "nothing is happening", but the backend itself (core.exe) may
   // take a second or two more to bind the port. Without this probe,
   // the first identity check often fails on a cold start and the
@@ -65,7 +124,7 @@ function App() {
       new URLSearchParams(window.location.search).get("backendPort") ||
       import.meta.env.VITE_API_PORT ||
       "8080";
-    const probeUrl = `http://localhost:${apiPort}/api/system/version-check`;
+    const probeUrl = `http://localhost:${apiPort}/api/system/disclaimer`;
     const deadline = Date.now() + 15000; // 15s ceiling
     let attempt = 0;
     while (Date.now() < deadline) {
@@ -86,20 +145,20 @@ function App() {
 
   // Pre-warm the inbox in the BACKGROUND once we know the user has an
   // identity, so new mail is already fetched to the local DB by the time the
-  // user finishes reading the disclaimer and clicks Accept. checkMailNow() is
-  // the beacon PING that forces a fetch; it needs the backend up, so we wait
-  // for it first. Fire-and-forget: failures are non-fatal (the dashboard's
-  // manual refresh still works). Runs at most once (inboxPrewarmedRef).
+  // user finishes reading the disclaimer and clicks Accept. Use the quick
+  // beacon PEEK, not long-poll PING; PING can legally hold the single backend
+  // HTTP worker for 10 minutes. Fire-and-forget: failures are non-fatal.
+  // Runs at most once (inboxPrewarmedRef).
   const prewarmInbox = () => {
     if (inboxPrewarmedRef.current) return;
     inboxPrewarmedRef.current = true;
     (async () => {
       try {
         await waitForBackend();
-        await checkMailNow();
-        console.log("[prewarmInbox] background beacon ping complete");
+        await peekBeacon();
+        console.log("[prewarmInbox] background beacon peek complete");
       } catch (error) {
-        console.warn("[prewarmInbox] background ping failed (non-fatal):", error);
+        console.warn("[prewarmInbox] background peek failed (non-fatal):", error);
       }
     })();
   };
@@ -173,6 +232,12 @@ function App() {
     const unsubscribe = window.electronAPI.onBackendReady(handleBackendReady);
     return unsubscribe;
   }, [selectedService]);
+
+  useEffect(() => {
+    const unsubscribe =
+      window.electronAPI?.onTitleBarColorPick?.(openTitleBarColorPicker);
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [openTitleBarColorPicker]);
 
   // FIX-03: returning users with a configured identity should go
   // STRAIGHT to QMAIL, not bounce through WalletSetupScreen on every

@@ -1,10 +1,30 @@
 Bugs with the QMail GUI:
 
 1. Folder structure is not being created automatically in the correct location.
-When the Qmail.exe starts for the first time, it should create (via rest_core) a folder called Client_Data in the same folder that the Qmail.exe program is located in. 
-2. Bug 1 may cause the next problem: When the program boots, it is suppose to look in its Client_Data/Wallets/Bank or Fracked folders to see if thre is a mailbox key coin there. 
+When the Qmail.exe starts for the first time, it should create (via rest_core) a folder called Client_Data in the same folder that the Qmail.exe program is located in.
+2. Bug 1 may cause the next problem: When the program boots, it is suppose to look in its Client_Data/Wallets/Bank or Fracked folders to see if thre is a mailbox key coin there.
 
- Instead, a file called 'raida_stats.csv' is created. 
+ Instead, a file called 'raida_stats.csv' is created.
+
+3. SOUND FILE PATH ISSUE - TIMING DELAY AT STARTUP (2026-06-23)
+   Status: Documented, temporary workaround in place
+   Description: On startup, the app tries to load /sounds/ding-80828.mp3 but the path resolves to C:/sounds/ instead of the relative app bundle path. This causes 5x ERR_FILE_NOT_FOUND errors during the identity check phase, which may contribute to timing issues during backend startup.
+
+   Current behavior:
+   - soundService.js preloadSounds() loads 5 sound files (lines 70-75)
+   - In Electron packaged mode, /sounds/ resolves incorrectly on C: drive
+   - Audio.onerror handler logs "Could not load sound" (line 85, console shows ~5 times)
+   - Sound files actually exist in public/sounds and dist/sounds
+
+   Root cause: Path resolution in Electron packaged builds. The /sounds/ URL prefix doesn't resolve correctly to the bundled resources.
+
+   Workaround applied: Comment out preloadSounds() call in soundService constructor to prevent unnecessary file load attempts during app initialization.
+
+   Long-term fix needed:
+   - Use __dirname or app.getAppPath() in Electron main process to construct correct sound paths
+   - Pass sound directory path to renderer via IPC
+   - Or use require() to import sounds as bundled assets instead of loading via fetch
+   - Sound files should ideally be lazy-loaded only when first needed, not during app startup 
  
  -------------------
  I am getting ready to clear you and I need you to write a handoff file that will make it easy for you do the next phase of testing. In the next phase, I will find bugs by manually tesing when I find one, I will tell you about them. 
@@ -53,3 +73,21 @@ Q6. Yes, each gets a random port unless we specify the port in the flags of the 
  -------------
  Opus has fixed BUG-51. 
  Review the changes made by looking at: 
+4. VITE LARGE CHUNK WARNING - BUILD SUCCEEDS BUT BUNDLE SHOULD BE SPLIT LATER (2026-06-26)
+   Status: Deferred; not blocking current fixes
+   Symptom: `npm run build` succeeds, but Vite reports that one or more generated chunks are larger than the default 500 kB warning threshold after minification.
+
+   Current behavior:
+   - The production build completes successfully.
+   - The warning is informational and does not prevent QMail.exe from running.
+   - Current observed main JS bundle is roughly 555 kB minified before gzip.
+
+   Impact:
+   - No functional bug today.
+   - Startup/first-render may be heavier than necessary, especially on slower machines.
+   - The warning can hide more serious build output if ignored long term.
+
+   Suggested fix:
+   - Add route/component-level code splitting with React.lazy/dynamic import for large screens such as QMailDashboard, wallet tools, and rarely used modals.
+   - Consider Rollup manualChunks for large stable dependencies.
+   - Keep this as a performance cleanup after higher-priority startup and RAIDA reliability issues are fixed.
