@@ -33,6 +33,9 @@ lh/
 backend/
 release/
 
+# Mailbox mass-production / USB deployment workspace (not tracked).
+Deploy/
+
 # css-analysis tool intermediate cache (regeneratable; outputs in
 # docs/css-audit/*.{csv,md} are committed for reviewer convenience).
 docs/css-audit/cache/

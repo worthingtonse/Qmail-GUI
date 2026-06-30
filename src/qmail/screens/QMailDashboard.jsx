@@ -63,7 +63,7 @@ import {
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
-import { BUILD_DATE, formatBuildDateForDisplay } from "../../version";
+import { buildWindowTitle } from "./windowTitle";
 
 import "./QMailDashboard.css";
 
@@ -78,38 +78,6 @@ const PAYMENT_STATUS_CLAIMED = 1;
 const PAYMENT_STATUS_REFUNDED = 3;
 const PAYMENT_REJECTION_MESSAGE =
   "The payment you sent was rejected by the receiver. The inbox fee you included has been refunded. Your qmail may or may not have been read.";
-
-const capitalizeWord = (value) => {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-};
-
-const formatTitleQmailAddress = (address) => {
-  const text = String(address || "").trim();
-  if (!text) return "";
-
-  const atIndex = text.lastIndexOf("@");
-  if (atIndex === -1) return text;
-
-  const localPart = text.slice(0, atIndex);
-  const denomination = text.slice(atIndex + 1);
-  return `${localPart}@${capitalizeWord(denomination)}`;
-};
-
-const buildWindowTitle = ({ folder, unread, qmailAddress }) => {
-  const unreadPrefix = unread > 0 ? `(${unread}) ` : "";
-  const folderTitle = capitalizeWord(folder || "Inbox");
-  const parts = [`${unreadPrefix}QMail ${folderTitle}`];
-  const formattedAddress = formatTitleQmailAddress(qmailAddress);
-
-  if (formattedAddress) {
-    parts.push(`QMail Address: ${formattedAddress}`);
-  }
-
-  parts.push(`Version: ${formatBuildDateForDisplay(BUILD_DATE)}`);
-  return parts.join("    ");
-};
 
 const normalizeMailIdentifier = (identifier) => {
   if (!identifier) return "";
@@ -1242,15 +1210,10 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     };
   }, [selectedEmail]);
 
-  // BUG-25 FIX: Sync document.title with state via useEffect
+  // Keep the native window title stable across folder and unread-count changes.
   useEffect(() => {
-    const unread = mailCounts[currentFolder]?.unread || 0;
-    document.title = buildWindowTitle({
-      folder: currentFolder,
-      unread,
-      qmailAddress,
-    });
-  }, [currentFolder, mailCounts, qmailAddress]);
+    document.title = buildWindowTitle({ qmailAddress });
+  }, [qmailAddress]);
 
   const loadInitialData = async () => {
     setLoading(true);

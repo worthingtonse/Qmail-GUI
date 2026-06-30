@@ -43,6 +43,23 @@ const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
 const QMAIL_BUILD_DATE = '2026-06-26';
 const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
+const QMAIL_HELP_MESSAGE =
+`Mailbox authenticity numbers can be changed at any time.
+
+To request this change, open the following file in your Client_Data folder:
+
+${CHANGE_PASSWORDS_NEXT_BOOT_FILE}
+
+Set the pown_on_restart key to true:
+
+pown_on_restart=true
+
+Save the file, then restart QMail. The authenticity-number change will run the next time QMail starts.
+
+Contact
+Telegram group: t.me/distributedmailsystem
+QMail: 126.40@kilo
+Email: CloudCoin@Protonmail.com`;
 const CHANGE_PASSWORDS_NEXT_BOOT_TEXT =
 `# QMail mailbox authenticity-number rotation
 #
@@ -422,16 +439,21 @@ function getNativeWindowHandleDecimal(windowRef) {
 
 function applyNativeTitleBarColor(windowRef, color) {
   const normalized = normalizeHexColor(color) || DEFAULT_TITLE_BAR_COLOR;
-  if (!windowRef || windowRef.isDestroyed()) return;
-
-  if (typeof windowRef.setBackgroundColor === 'function') {
-    windowRef.setBackgroundColor(normalized);
+  if (!windowRef || windowRef.isDestroyed()) {
+    return { success: false, error: 'The application window is not available.' };
   }
 
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32') {
+    if (typeof windowRef.setBackgroundColor === 'function') {
+      windowRef.setBackgroundColor(normalized);
+    }
+    return { success: true, color: normalized, nativeCaptionApplied: false };
+  }
 
   const hwnd = getNativeWindowHandleDecimal(windowRef);
-  if (!hwnd) return;
+  if (!hwnd) {
+    return { success: false, error: 'Could not resolve the native window handle.' };
+  }
 
   const script = [
     "$source = @'",
@@ -452,21 +474,37 @@ function applyNativeTitleBarColor(windowRef, color) {
     "$textResult = [QmailDwmApi]::DwmSetWindowAttribute($hwnd, 36, [ref]$text, 4)",
     "$borderResult = [QmailDwmApi]::DwmSetWindowAttribute($hwnd, 34, [ref]$border, 4)",
     "if ($captionResult -ne 0 -or $textResult -ne 0 -or $borderResult -ne 0) {",
-    "  Write-Output (\"DwmSetWindowAttribute results caption={0} text={1} border={2}\" -f $captionResult, $textResult, $borderResult)",
+    "  Write-Error (\"DwmSetWindowAttribute results caption={0} text={1} border={2}\" -f $captionResult, $textResult, $borderResult)",
+    "  exit 1",
     "}",
   ].join('\n');
 
   const result = runPowerShell(script, {
+    // Windows PowerShell's Add-Type inherits compiler search paths. Developer
+    // environments can leave stale LIB/INCLUDE entries behind, which prevents
+    // this small framework-only P/Invoke wrapper from compiling at all.
+    LIB: '',
+    INCLUDE: '',
     QMAIL_WINDOW_HWND: hwnd,
     QMAIL_TITLE_BAR_COLORREF: String(colorRefFromHex(normalized)),
     QMAIL_TITLE_BAR_TEXT_COLORREF: String(colorRefFromHex(titleBarTextColorFor(normalized))),
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
   if (result.error) {
-    log('Title bar color failed: ' + result.error.message);
-  } else if (output) {
-    log('Title bar color: ' + output);
+    const error = result.error.message || 'PowerShell could not be started.';
+    log('Title bar color failed: ' + error);
+    return { success: false, error };
   }
+  if (result.status !== 0) {
+    const error = output || `PowerShell exited with status ${result.status}.`;
+    log('Title bar color failed: ' + error);
+    return { success: false, error };
+  }
+
+  if (typeof windowRef.setBackgroundColor === 'function') {
+    windowRef.setBackgroundColor(normalized);
+  }
+  return { success: true, color: normalized, nativeCaptionApplied: true };
 }
 
 function setTitleBarColor(color, { persist = true } = {}) {
@@ -475,10 +513,25 @@ function setTitleBarColor(color, { persist = true } = {}) {
     return { success: false, error: 'Color must be in #RRGGBB format' };
   }
 
+  const applyResult = applyNativeTitleBarColor(mainWindow, normalized);
+  if (!applyResult.success) {
+    return {
+      success: false,
+      error: applyResult.error || 'Could not apply the title bar color.',
+      color: titleBarColor,
+      defaultColor: DEFAULT_TITLE_BAR_COLOR,
+    };
+  }
+
   titleBarColor = normalized;
-  applyNativeTitleBarColor(mainWindow, titleBarColor);
-  if (persist) {
-    saveWindowSettings({ titleBarColor });
+  if (persist && !saveWindowSettings({ titleBarColor })) {
+    buildApplicationMenu();
+    return {
+      success: false,
+      error: 'The title bar color changed, but its setting could not be saved.',
+      color: titleBarColor,
+      defaultColor: DEFAULT_TITLE_BAR_COLOR,
+    };
   }
   buildApplicationMenu();
   return { success: true, color: titleBarColor, defaultColor: DEFAULT_TITLE_BAR_COLOR };
@@ -535,7 +588,10 @@ function showNativeTitleBarColorPicker() {
     log('Title bar color picker returned invalid color: ' + output);
     return;
   }
-  setTitleBarColor(normalized);
+  const setResult = setTitleBarColor(normalized);
+  if (!setResult.success) {
+    log('Title bar color selection failed: ' + setResult.error);
+  }
 }
 
 // BUG-51: CLI surface for QMail.exe. Parses our own flags; everything
@@ -1032,6 +1088,17 @@ function buildApplicationMenu() {
     {
       label: 'Help',
       submenu: [
+        {
+          label: 'QMail Help',
+          click: () => dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            title: 'QMail Help',
+            message: 'QMail Help',
+            detail: QMAIL_HELP_MESSAGE,
+            buttons: ['OK'],
+          }),
+        },
+        { type: 'separator' },
         {
           label: `About ${app.name}`,
           click: () => dialog.showMessageBox(mainWindow, {

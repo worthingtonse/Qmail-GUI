@@ -53,6 +53,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
+  const [showSoundPrompt, setShowSoundPrompt] = useState(false);
   // Guards prewarmInbox() so the background beacon check fires at most once,
   // even if both the fast path and the backend identity check confirm QMAIL.
   const inboxPrewarmedRef = useRef(false);
@@ -240,6 +241,31 @@ function App() {
       window.electronAPI?.onTitleBarColorPick?.(openTitleBarColorPicker);
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openTitleBarColorPicker]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const handleSoundPlaybackBlocked = () => {
+      setShowSoundPrompt(true);
+    };
+
+    window.addEventListener(
+      "qmail-sound-playback-blocked",
+      handleSoundPlaybackBlocked,
+    );
+    return () =>
+      window.removeEventListener(
+        "qmail-sound-playback-blocked",
+        handleSoundPlaybackBlocked,
+      );
+  }, []);
+
+  const handleEnableSounds = async () => {
+    const enabled = await soundService.enablePlayback();
+    if (enabled) {
+      setShowSoundPrompt(false);
+    }
+  };
 
   useEffect(() => {
     const dispatchAlertSoundChanged = () => {
@@ -521,6 +547,50 @@ function App() {
         )}
 
         {renderService()}
+        {showSoundPrompt && (
+          <div className="app-shell__sound-prompt-overlay" role="presentation">
+            <section
+              className="app-shell__sound-prompt"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="qmail-sound-prompt-title"
+            >
+              <header className="app-shell__sound-prompt-header">
+                <AlertTriangle size={22} className="app-shell__sound-prompt-icon" />
+                <h2 id="qmail-sound-prompt-title">Enable QMail Sounds</h2>
+                <button
+                  type="button"
+                  className="app-shell__sound-prompt-close"
+                  onClick={() => setShowSoundPrompt(false)}
+                  aria-label="Close sound prompt"
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              <p>
+                QMail tried to play an alert sound, but audio playback is
+                currently blocked. Click Enable Sounds to allow message alerts
+                and preview sounds in this window.
+              </p>
+              <div className="app-shell__sound-prompt-actions">
+                <button
+                  type="button"
+                  className="app-shell__sound-prompt-enable"
+                  onClick={handleEnableSounds}
+                >
+                  Enable Sounds
+                </button>
+                <button
+                  type="button"
+                  className="app-shell__sound-prompt-dismiss"
+                  onClick={() => setShowSoundPrompt(false)}
+                >
+                  Not Now
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
       </div>
       <NotificationContainer />
     </NotificationProvider>

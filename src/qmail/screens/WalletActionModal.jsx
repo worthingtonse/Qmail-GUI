@@ -147,17 +147,36 @@ const RECEIPT_TYPE_LABELS = {
   locker_upload: "Locker Upload",
 };
 
+// Sum one or more receipt total fields, treating missing/non-numeric as 0.
+const sumTotals = (totals, keys) =>
+  keys.reduce((acc, key) => {
+    const n = Number(totals[key]);
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
+// "Authentic" is every coin that passed authentication, i.e. Bank + Fracked.
+// Fracked coins are authentic too — they are just stored in the Fracked folder
+// because not all 25 RAIDA agreed — so they are a SUBSET of Authentic. We show
+// Authentic as the computed total (Bank + Fracked) and keep a separate Fracked
+// row as the subset breakdown. (Backend already counts both toward
+// total_deposited, so this is a display-only correction.)
 const RECEIPT_TOTAL_ROWS = [
-  { countKey: "bank_count", valueKey: "value_bank", label: "Authentic", alwaysShow: true },
-  { countKey: "fracked_count", valueKey: "value_fracked", label: "Fracked" },
-  { countKey: "limbo_count", valueKey: "value_limbo", label: "Limbo" },
-  { countKey: "counterfeit_count", valueKey: "value_counterfeit", label: "Counterfeit" },
-  { countKey: "duplicate_count", label: "Duplicates" },
-  { countKey: "error_count", label: "Errors" },
-  { countKey: "converted_count", label: "Converted" },
-  { countKey: "expired_count", label: "Expired" },
-  { countKey: "legacy_counterfeit_count", label: "Legacy Counterfeit" },
-  { countKey: "move_failures", label: "Move Failures" },
+  {
+    key: "authentic",
+    label: "Authentic",
+    alwaysShow: true,
+    count: (t) => sumTotals(t, ["bank_count", "fracked_count"]),
+    value: (t) => sumTotals(t, ["value_bank", "value_fracked"]),
+  },
+  { key: "fracked", label: "Fracked", count: (t) => sumTotals(t, ["fracked_count"]), value: (t) => sumTotals(t, ["value_fracked"]) },
+  { key: "limbo", label: "Limbo", count: (t) => sumTotals(t, ["limbo_count"]), value: (t) => sumTotals(t, ["value_limbo"]) },
+  { key: "counterfeit", label: "Counterfeit", count: (t) => sumTotals(t, ["counterfeit_count"]), value: (t) => sumTotals(t, ["value_counterfeit"]) },
+  { key: "duplicate", label: "Duplicates", count: (t) => sumTotals(t, ["duplicate_count"]) },
+  { key: "error", label: "Errors", count: (t) => sumTotals(t, ["error_count"]) },
+  { key: "converted", label: "Converted", count: (t) => sumTotals(t, ["converted_count"]) },
+  { key: "expired", label: "Expired", count: (t) => sumTotals(t, ["expired_count"]) },
+  { key: "legacy_counterfeit", label: "Legacy Counterfeit", count: (t) => sumTotals(t, ["legacy_counterfeit_count"]) },
+  { key: "move_failures", label: "Move Failures", count: (t) => sumTotals(t, ["move_failures"]) },
 ];
 
 const formatReceiptDate = (value) => {
@@ -187,7 +206,7 @@ const ReceiptDetails = ({ receipt }) => {
   const typeLabel = RECEIPT_TYPE_LABELS[receipt.type] || "Wallet Operation";
   const dateLabel = formatReceiptDate(receipt.date);
   const totalRows = RECEIPT_TOTAL_ROWS.filter(
-    (row) => row.alwaysShow || Number(totals[row.countKey]) > 0,
+    (row) => row.alwaysShow || row.count(totals) > 0,
   );
 
   return (
@@ -235,10 +254,10 @@ const ReceiptDetails = ({ receipt }) => {
         </thead>
         <tbody>
           {totalRows.map((row) => (
-            <tr key={row.countKey}>
+            <tr key={row.key}>
               <th scope="row">{row.label}</th>
-              <td>{Number(totals[row.countKey] || 0).toLocaleString()}</td>
-              <td>{row.valueKey ? formatCcAmount(totals[row.valueKey]) : "—"}</td>
+              <td>{row.count(totals).toLocaleString()}</td>
+              <td>{row.value ? formatCcAmount(row.value(totals)) : "—"}</td>
             </tr>
           ))}
         </tbody>

@@ -100,7 +100,9 @@
       "PowerShell(Get-Process *)",
       "Bash([ -f \"$f\" ])",
       "Bash(xargs grep -l \"typedef.*exec_config_t\")",
-      "PowerShell(ctest *)"
+      "PowerShell(ctest *)",
+      "Bash(git worktree *)",
+      "Bash(node --check electron.cjs)"
     ]
   }
 }

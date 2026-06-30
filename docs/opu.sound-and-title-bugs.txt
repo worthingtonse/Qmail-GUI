@@ -1,0 +1,293 @@
+==============================================================================
+ QMail-GUI — Title Bar & Alert Sound Bug Investigation
+ Author: Opus (claude-opus-4-8)
+ Date:   2026-06-29
+ Scope:  DIAGNOSIS ONLY — no code was changed by this investigation.
+==============================================================================
+
+SUMMARY
+-------
+All three bugs share a single root cause family: the title-bar color is
+applied through an OUT-OF-PROCESS PowerShell + DWM call that is slow and
+racy, and the alert "preview" relies on that same renderer path. None of
+the bugs are "missing files" — the sound assets ARE shipped.
+
+Key constants (electron.cjs):
+  - DEFAULT_TITLE_BAR_COLOR = '#C9CC3F'   <- this IS the "Pear" green-yellow
+  - Sound files present in BOTH public/sounds/ and dist/sounds/:
+        default.mp3 (138 KB), DingDing.mp3, Floraphonic.mp3,
+        Notice.mp3, Ploops.mp3
+  - Renderer is loaded with loadFile(dist/index.html), so the renderer's
+    "./sounds/<file>" resolves to dist/sounds/<file> — which EXISTS.
+
+------------------------------------------------------------------------------
+ BUG 1 — Title bar is dark gray at startup instead of Pear (#C9CC3F)
+------------------------------------------------------------------------------
+WHAT HAPPENS
+  On launch the title bar shows the OS default (dark gray) rather than the
+  intended Pear color. The user observed that "after a few minutes the
+  titlebar did change to the last color" — i.e. it eventually applies.
+  That delayed success is the smoking gun.
+
+ROOT CAUSE
+  The color is NOT set with a native Electron API at window-create time.
+  Instead, applyNativeTitleBarColor() (electron.cjs ~line 440) shells out
+  to powershell.exe, compiles C# via Add-Type, and calls
+  DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR=35, ...).
+
+  This is invoked twice during startup:
+    - createMainWindow()  line ~1094  (before the window has an HWND that
+      DWM will honor / before first paint)
+    - 'ready-to-show'     line ~1164  (right before mainWindow.show())
+
+  Problems that make it look dark-gray at first:
+    1. runPowerShell spins up a fresh PowerShell process AND JIT-compiles
+       C# with Add-Type on every call. That is hundreds of ms to several
+       seconds of latency. The window is shown by 'ready-to-show' BEFORE
+       the PowerShell process has finished applying the attribute, so the
+       user sees the default frame until DWM finally repaints.
+    2. The call is fire-and-forget (result is only logged). Nothing waits
+       for it and nothing retries on the visible window, so whichever PS
+       invocation wins the race determines when the color appears.
+    3. DWMWA_CAPTION_COLOR only takes effect on Windows 11 with a standard
+       (server-side) title bar. The main window IS a standard frame
+       (frame:false is only on the SPLASH window, line 780 — the main
+       window at ~line 1080 has a normal frame), so the API is correct;
+       it is purely a timing/latency problem, not an applicability one.
+
+WHY IT "FIXED ITSELF AFTER A FEW MINUTES"
+  The slow PowerShell/DWM call eventually completed and DWM repainted the
+  caption. The config file you saw appear (qmail-window-settings.json, see
+  Bug 2) is written by saveWindowSettings() when a color is committed.
+
+WHAT WOULD FIX IT (options, easiest first)
+  A. Set the color with Electron's native API at construction so it is
+     correct on the very first paint, independent of PowerShell:
+        new BrowserWindow({ ..., backgroundColor: titleBarColor })
+     and (Windows 11) prefer Electron's built-in titleBarOverlay /
+     setTitleBarOverlay({ color, symbolColor }) instead of the external
+     DWM shell-out. Native calls are synchronous and paint immediately.
+  B. If the PowerShell/DWM path must stay, eliminate its latency:
+       - Precompile/scope the Add-Type once, or call dwmapi.dll via a
+         tiny persistent helper instead of a new PS process per call.
+       - Re-apply on 'show' AND after a short post-show retry so a slow
+         first call cannot leave the default frame visible.
+  C. Apply the color BEFORE mainWindow.show() and gate show() on the
+     apply completing (await the PS call) so the window never appears
+     with the wrong caption. (Trades a little startup delay for
+     correctness.)
+
+  Recommended: Option A — drop the external PowerShell DWM dependency for
+  the default-color case and let BrowserWindow paint Pear natively. Keep
+  the DWM path (if at all) only for live recoloring.
+
+------------------------------------------------------------------------------
+ BUG 2 — Title Bar Color picker: pick + OK does not change the color
+          (sometimes blinks; does not persist visibly)
+------------------------------------------------------------------------------
+WHAT HAPPENS
+  View > "Title Bar Color..." opens the Windows ColorDialog. After OK the
+  bar may blink but does not appear to change. The user later confirmed it
+  DID change "after a few minutes" and that qmail-window-settings.json now
+  records the chosen color.
+
+ROOT CAUSE  (same latency race as Bug 1)
+  Flow: showNativeTitleBarColorPicker() (line ~508) runs a SECOND
+  PowerShell process (System.Windows.Forms.ColorDialog) to pick a color,
+  then calls setTitleBarColor() (line ~489) which:
+     - updates the in-memory titleBarColor,
+     - calls applyNativeTitleBarColor()  -> ANOTHER slow PowerShell+DWM
+       process,
+     - saveWindowSettings({ titleBarColor })  -> writes the config file,
+     - buildApplicationMenu().
+
+  So by the time you click OK, the code does the right thing — it persists
+  immediately (that is why the config file is correct and the color
+  eventually shows). The VISIBLE caption just lags because the apply step
+  is the same fire-and-forget PowerShell+Add-Type+DWM call that takes
+  seconds. The "blink" is DWM/menu rebuild; the actual recolor lands later.
+
+  Persistence itself is NOT broken: loadWindowSettings() (line ~411) reads
+  titleBarColor back on next boot and applyNativeTitleBarColor() is called
+  at startup — but again with the Bug 1 latency, so on a fresh launch it
+  also looks dark-gray until the PS call lands.
+
+WHAT WOULD FIX IT
+  Same fixes as Bug 1. Specifically:
+    - Make the apply step synchronous/native (setTitleBarOverlay or a
+      direct in-process DWM call via FFI), so OK -> immediate recolor.
+    - Or await the PS apply and only then close/return so the user sees the
+      change as part of the click.
+  Once the apply is immediate, Bug 2 disappears because the persistence and
+  read-back logic are already correct.
+
+NOTE
+  Because the apply is async and unawaited, rapid color changes can also
+  race each other (last PS process to finish wins, not last click). A
+  single synchronous apply removes that ambiguity too.
+
+------------------------------------------------------------------------------
+ BUG 3 — "Preview Alert Sound" produces no audible sound
+------------------------------------------------------------------------------
+ARE THE FILES INCLUDED?  YES.
+  - public/sounds/ and dist/sounds/ both contain default.mp3 (138 KB) and
+    the four others. The packaged renderer loads from dist/, and the
+    preview src "./sounds/default.mp3" resolves to dist/sounds/default.mp3,
+    which exists. So this is NOT a missing-asset bug.
+
+IS THE VOLUME TOO LOW?  PROBABLY NOT THE PRIMARY CAUSE.
+  - soundService default volume is 0.3 (30%) — quiet but audible.
+  - previewMailReceived() calls playSource(src, { force: true }), which
+    BYPASSES the isEnabled flag, so a disabled-sound setting does not block
+    the preview.
+  - Autoplay is NOT the blocker: electron.cjs line 10 sets
+    app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required').
+
+SO WHY IS IT SILENT?  Most likely the chain breaks before audio plays.
+  Trace of the preview path:
+    menu "Preview Alert Sound" (line ~1037)
+      -> sendAlertSoundCommand({ action:'preview' })   (main, line ~895)
+      -> IPC 'alerts:sound-command'
+      -> preload onAlertSoundCommand  (preload.cjs line 56) [VERIFIED OK]
+      -> App.jsx listener (line ~283) -> soundService.previewMailReceived()
+      -> playSource -> new Audio('./sounds/default.mp3').play()
+
+  The wiring (channel name, preload bridge, listener) all match and are
+  correct. The remaining suspects, in order of likelihood:
+
+    (S1) TIMING / LISTENER NOT MOUNTED YET.
+         The App.jsx useEffect that registers onAlertSoundCommand only runs
+         after App mounts. If the user triggers Preview during the splash/
+         setup phase (App not yet mounted, or a different early screen),
+         sendAlertSoundCommand fires into a window with NO listener -> the
+         payload is dropped SILENTLY (no error, no sound). main-side
+         sendAlertSoundCommand also early-returns if mainWindow is not
+         ready. This matches "nothing happens, no error."
+
+    (S2) playSource() swallows failures.
+         audio.play() rejects are caught and only console.warn'd; a decode
+         or load failure (e.g. mp3 codec not available in the packaged
+         Chromium, or a path/case mismatch on the resolved src) would be
+         invisible to the user. Worth checking DevTools console for
+         "Could not play sound source ./sounds/default.mp3".
+
+    (S3) currentTime set before load.
+         playSource sets audio.currentTime = 0 immediately after setting
+         src and before metadata loads; on some builds this throws/aborts
+         the play. Lower probability given force:true path, but possible.
+
+  Volume (0.3) is a secondary contributor — even when it plays, 30% on a
+  short clip is easy to miss. Not the root cause, but worth raising the
+  default or exposing it more prominently.
+
+WHAT WOULD FIX IT
+  1. Diagnose first (no code change): open DevTools (F12) in the running
+     app, trigger Preview, and watch the Console. You will see one of:
+       - nothing at all          -> listener not mounted (S1)
+       - "Could not play sound source ..." -> load/decode/codec (S2/S3)
+     This single observation tells you which fix below to apply.
+  2. For S1 (most likely): register the alert-sound IPC listener as early
+     as possible (e.g. at module scope / top-level, not behind a screen
+     gate), or have main-side queue/re-send the preview once the renderer
+     signals ready. Also disable/grey the "Preview Alert Sound" menu item
+     until the renderer has reported ready.
+  3. For S2/S3: surface play() failures (toast or the existing
+     qmail-sound-playback-blocked event) instead of console.warn only, and
+     wait for 'canplaythrough' (or drop the premature currentTime=0)
+     before calling play(). Confirm the packaged Chromium ships the mp3
+     codec; if any doubt, ship a .wav fallback.
+  4. Raise the default preview volume (e.g. 0.6) or force full volume for
+     the explicit Preview action so the test is clearly audible.
+
+------------------------------------------------------------------------------
+ CROSS-CUTTING RECOMMENDATION
+------------------------------------------------------------------------------
+  Bugs 1 & 2 are the SAME defect (slow, unawaited, out-of-process DWM
+  recolor racing window show). Replacing the PowerShell+Add-Type+DWM
+  shell-out with a native, synchronous Electron path (backgroundColor at
+  construction + setTitleBarOverlay, or an in-process DWM FFI call) fixes
+  both at once and also removes multi-click race conditions.
+
+  Bug 3 is independent and almost certainly a renderer-listener timing /
+  silently-swallowed-error issue, NOT missing files and NOT (primarily)
+  low volume. Confirm via DevTools console before coding a fix.
+
+  (Reminder: per the request, NO code was modified during this
+  investigation.)
+
+------------------------------------------------------------------------------
+ BUG 4 — Title bar TEXT: drop "Inbox"/changing folder + "QMail Address:"
+          label; reorder and pad the address
+------------------------------------------------------------------------------
+CURRENT (observed)
+  QMail Inbox    QMail Address: 127.103@Kilo    Version: June 26, 2026
+  - "Inbox" changes to the current folder name as you click around.
+  - Address is labeled "QMail Address:".
+  - Order is: <app+folder>  <address>  <version>.
+
+DESIRED
+  QMail Version June 26, 2026<20 spaces>127.103@Kilo
+  - No folder word at all (no "Inbox", and it must NOT change per click).
+  - No "QMail Address:" label — bare address only.
+  - Order is: "QMail Version <date>" then 20 spaces then the address.
+
+WHERE IT IS BUILT  (this is renderer text, NOT the native caption color)
+  src/qmail/screens/QMailDashboard.jsx
+    - buildWindowTitle({ folder, unread, qmailAddress })   lines ~100-112
+        const unreadPrefix = unread > 0 ? `(${unread}) ` : "";
+        const folderTitle  = capitalizeWord(folder || "Inbox");
+        const parts = [`${unreadPrefix}QMail ${folderTitle}`];   // "QMail Inbox"
+        if (formattedAddress)
+          parts.push(`QMail Address: ${formattedAddress}`);      // labeled addr
+        parts.push(`Version: ${formatBuildDateForDisplay(BUILD_DATE)}`);
+        return parts.join("    ");                                // 4-space joins
+    - The result is assigned to document.title in a useEffect
+      (lines ~1246-1253) keyed on [currentFolder, mailCounts, qmailAddress].
+      Because currentFolder is a dependency, the title is REBUILT every time
+      you change folders — that is why "Inbox" turns into "Sent", etc.
+
+ROOT CAUSE
+  buildWindowTitle intentionally includes the folder name and an
+  "QMail Address:" label, joins the three parts with 4 spaces, and orders
+  them app/folder -> address -> version. All three of your asks (remove
+  folder, remove label, reorder, 20-space gap) are choices made entirely
+  inside this one function. Nothing else needs to change.
+
+WHAT WOULD FIX IT  (single function rewrite; no other call sites affected)
+  Replace the body of buildWindowTitle so it produces, conceptually:
+
+      "QMail Version " + formatBuildDateForDisplay(BUILD_DATE)
+      + (formattedAddress ? (" ".repeat(20) + formattedAddress) : "")
+
+  Concretely:
+    - Drop the `folder` / `folderTitle` / `capitalizeWord(folder)` usage.
+    - Drop the "QMail Address: " prefix; keep formatTitleQmailAddress() so
+      the denomination still capitalizes ("@Kilo").
+    - Change the leading token from "QMail Inbox" to "QMail Version <date>"
+      (i.e. fold the version into the first segment; remove the separate
+      "Version:" part).
+    - Use a literal 20-space separator between version and address instead
+      of parts.join("    ").
+
+  Notes / decisions to confirm with product:
+    1. UNREAD COUNT: today an unread prefix "(N) " is prepended. Your target
+       string has no count. Decide whether to keep "(N) " (mail clients
+       usually do) or drop it. The spec as written implies dropping it.
+       If dropped, `unread`/`mailCounts` can be removed from the function
+       and from the useEffect dependency array.
+    2. FOLDER DEPENDENCY: once the folder word is gone, `currentFolder`
+       (and `mailCounts`, if unread is also dropped) no longer needs to be
+       in the useEffect deps — removing it stops the title from being
+       rebuilt on every navigation (matches "does not change when we click
+       different parts").
+    3. TRAILING-SPACE CAVEAT: Windows/Electron and many fonts collapse or
+       trim runs of spaces in the native caption, so a literal 20 spaces
+       may render as fewer. If exact spacing matters visually, consider a
+       fixed-width filler or non-breaking spaces ( ) instead of plain
+       spaces; otherwise expect the gap to look smaller than 20 chars.
+    4. NO ADDRESS YET: if qmailAddress is empty (pre-login), the function
+       should still return "QMail Version <date>" with no trailing gap.
+
+  This is a pure-text change in one renderer helper. It is INDEPENDENT of
+  Bugs 1/2 (native caption COLOR) and Bug 3 (sound) — different subsystem.
+==============================================================================

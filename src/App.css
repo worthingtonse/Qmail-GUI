@@ -103,6 +103,99 @@
 .app-shell__disclaimer-accept:hover:not(:disabled) {
   box-shadow: var(--shadow-md), var(--glow-primary);
 }
+
+.app-shell__sound-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 72%, transparent);
+  backdrop-filter: var(--glass-blur);
+}
+
+.app-shell__sound-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: min(28rem, 100%);
+  padding: var(--space-xl);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  background: var(--secondary-bg);
+  box-shadow: var(--shadow-xl);
+}
+
+.app-shell__sound-prompt-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.app-shell__sound-prompt-header h2 {
+  flex: 1;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+}
+
+.app-shell__sound-prompt-icon {
+  flex: none;
+  color: var(--status-warning);
+}
+
+.app-shell__sound-prompt p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+}
+
+.app-shell__sound-prompt-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: var(--space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.app-shell__sound-prompt-close:hover:not(:disabled) {
+  border-color: var(--border-medium);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.app-shell__sound-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.app-shell__sound-prompt-enable,
+.app-shell__sound-prompt-dismiss {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+.app-shell__sound-prompt-enable {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  color: var(--secondary-bg);
+  font-weight: 700;
+}
+
+.app-shell__sound-prompt-dismiss {
+  border: 1px solid var(--border-medium);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+}
+
 .spinning {
   animation: app-shell-spin calc(1s * var(--motion-scale)) linear infinite;
 }

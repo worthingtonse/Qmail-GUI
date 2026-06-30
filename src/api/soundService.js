@@ -19,7 +19,10 @@ const readStoredBoolean = (key, fallback) => {
 const readStoredVolume = (fallback) => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return fallback;
-    const stored = Number(window.localStorage.getItem(SOUND_VOLUME_STORAGE_KEY));
+    const raw = window.localStorage.getItem(SOUND_VOLUME_STORAGE_KEY);
+    if (raw === null || String(raw).trim() === "") return fallback;
+
+    const stored = Number(raw);
     if (Number.isFinite(stored)) {
       return Math.max(0, Math.min(1, stored));
     }
@@ -55,6 +58,27 @@ const buildSoundSrc = (value) => {
   const normalized = normalizeSoundValue(value);
   if (isExternalSoundValue(normalized)) return normalized;
   return normalized ? `./sounds/${encodeURIComponent(normalized)}` : null;
+};
+const isPlaybackBlockedError = (error) => {
+  const name = String(error?.name || "");
+  const message = String(error?.message || "");
+  return (
+    name === "NotAllowedError" ||
+    /user gesture|user activation|interact|not allowed|autoplay/i.test(message)
+  );
+};
+
+const dispatchSoundPlaybackBlocked = (src, error) => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("qmail-sound-playback-blocked", {
+      detail: {
+        src,
+        errorName: error?.name || "",
+        errorMessage: error?.message || "",
+      },
+    }),
+  );
 };
 
 class SoundService {
@@ -132,6 +156,9 @@ class SoundService {
       audioClone.currentTime = 0;
       audioClone.play().catch(error => {
         console.warn(`Could not play sound ${soundType}:`, error);
+        if (isPlaybackBlockedError(error)) {
+          dispatchSoundPlaybackBlocked(audioClone.currentSrc || audioClone.src, error);
+        }
       });
     }
   }
@@ -194,7 +221,37 @@ class SoundService {
     audio.currentTime = 0;
     audio.play().catch((error) => {
       console.warn(`Could not play sound source ${src}:`, error);
+      if (isPlaybackBlockedError(error)) {
+        dispatchSoundPlaybackBlocked(src, error);
+      }
     });
+  }
+
+  async enablePlayback() {
+    if (typeof Audio === "undefined") return false;
+    this.setEnabled(true);
+    if (this.volume <= 0) {
+      this.setVolume(0.3);
+    }
+
+    const src = this.getMailSoundSrc() || buildSoundSrc(DEFAULT_MAIL_SOUND_FILE);
+    if (!src) return false;
+
+    const audio = new Audio();
+    audio.src = src;
+    audio.preload = "auto";
+    audio.volume = this.volume;
+    audio.currentTime = 0;
+    try {
+      await audio.play();
+      return true;
+    } catch (error) {
+      console.warn(`Could not enable sound playback with ${src}:`, error);
+      if (isPlaybackBlockedError(error)) {
+        dispatchSoundPlaybackBlocked(src, error);
+      }
+      return false;
+    }
   }
 
   // Volume control (0.0 to 1.0)
