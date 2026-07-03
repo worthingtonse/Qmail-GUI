@@ -300,6 +300,10 @@ const QMAIL_DENOMINATION_CODE_TO_VALUE = {
 // deriving them from this cache would give inconsistent results.
 const sentAttachmentCountCache = new Map();
 
+// Sent email ids are 32-hex file_guids; anything else (e.g. the synthetic
+// Date.now()+Math.random() ids some search rows get) has no receipt.
+const RECEIPT_GUID_RE = /^[0-9a-f]{32}$/i;
+
 const readNumericSenderField = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined || value === "") continue;
@@ -569,6 +573,10 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const searchDebounceTimerRef = useRef(null);
   // BUG-21 FIX: Track current folder load to prevent race conditions
   const loadEmailsRequestRef = useRef(0);
+  // Monotonic counter for attachment loads: each new selection invalidates
+  // in-flight attachment fetches (stored rows AND receipt fallback) from the
+  // previous one, so a slow response for A can't fill B's attachment pane.
+  const attachmentLoadRequestRef = useRef(0);
   // gpt-batch1: ref-mirror of selectedEmail so async hydrate
   // completion can detect "user has moved on" without relying on a
   // stale closure of selectedEmail.
@@ -1345,7 +1353,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const applySentAttachmentFlags = async (rows, requestId) => {
     const pending = rows.filter(
       (row) =>
-        row.id &&
+        RECEIPT_GUID_RE.test(String(row.id)) &&
         row.folder === "sent" &&
         !row.hasAttachments &&
         !sentAttachmentCountCache.has(String(row.id)),
@@ -1729,6 +1737,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleSelectEmail = async (email) => {
     if (!email) return;
 
+    const attachmentRequestId = ++attachmentLoadRequestRef.current;
     const emailFolder = email.folder || currentFolder;
     const shouldShowDecryptAnimation =
       emailFolder === "inbox" &&
@@ -1845,23 +1854,33 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
           if (storedAttachments.length === 0 && emailFolder === "sent") {
             const receiptRes = await getSentAttachmentMetadata(email.id);
             if (receiptRes.success) {
-              sentAttachmentCountCache.set(
-                String(email.id),
-                receiptRes.data.attachments.length,
-              );
+              const receiptCount = receiptRes.data.attachments.length;
+              sentAttachmentCountCache.set(String(email.id), receiptCount);
+              // Light this row's paperclip right away instead of waiting for
+              // the next folder reload.
+              if (receiptCount > 0) {
+                setEmails((prev) =>
+                  prev.map((row) =>
+                    String(row.id) === String(email.id) && !row.hasAttachments
+                      ? {
+                          ...row,
+                          hasAttachments: true,
+                          attachmentCount: receiptCount,
+                        }
+                      : row,
+                  ),
+                );
+              }
             }
-            // The receipt lookup awaited: only apply it if this email is
-            // still the selected one (rapid A→B clicks must not let A's
-            // slower receipt overwrite B's attachment pane).
-            if (String(selectedEmailRef.current?.id) === String(email.id)) {
+            if (attachmentRequestId === attachmentLoadRequestRef.current) {
               setEmailAttachments(
                 receiptRes.success ? receiptRes.data.attachments : [],
               );
             }
-          } else {
+          } else if (attachmentRequestId === attachmentLoadRequestRef.current) {
             setEmailAttachments(storedAttachments);
           }
-        } else {
+        } else if (attachmentRequestId === attachmentLoadRequestRef.current) {
           setEmailAttachments([]);
         }
 
@@ -1917,7 +1936,9 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         }
       } catch (e) {
         console.error("Failed to load full email payload", e);
-        setEmailAttachments([]);
+        if (attachmentRequestId === attachmentLoadRequestRef.current) {
+          setEmailAttachments([]);
+        }
       }
       // FIX: Removed setLoading(false)
     } else {

@@ -685,4 +685,28 @@ build passes. The two pre-existing App.jsx hook lint warnings and the
 missing live-backend verification (test clients still down) remain open.
 Race handling and paperclip rendering remain manually-verified-only — they
 live in QMailDashboard, which has no test harness today.
+
+--------------------------------------------------------------------------------
+SELF-REVIEW FIXES (Fable, 2026-07-02, third pass)
+--------------------------------------------------------------------------------
+Self-review of the committed attachment code found no breaking bugs; three
+improvements were applied (QMailDashboard.jsx only):
+
+1. Opening a sent message with receipt attachments now lights that row's
+   paperclip immediately (setEmails map after caching the count) instead of
+   waiting for the next folder reload.
+2. Attachment-pane staleness is now guarded by a monotonic
+   attachmentLoadRequestRef counter bumped at handleSelectEmail entry; every
+   setEmailAttachments in the async select flow (stored rows, receipt
+   fallback, error/catch paths) checks it. This replaces the selectedEmailRef
+   comparison and also closes the PRE-EXISTING race on the stored-rows path,
+   which the second-pass fix had left unguarded.
+3. applySentAttachmentFlags now requires a 32-hex id (RECEIPT_GUID_RE) before
+   looking up a receipt, so synthetic search-row ids (Date.now()+Math.random())
+   no longer trigger pointless lookups or throwaway cache entries.
+
+Noted but deliberately not changed: duplicated sanitizer (keep-in-sync
+comments stand), renderer-supplied port on the IPC (superseded by the future
+backend-sanitized endpoint), paperclip title/aria placement on the Lucide svg.
+Verification: eslint clean, vitest 124/124, production build passes.
 ================================================================================
