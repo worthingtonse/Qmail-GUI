@@ -3,25 +3,30 @@ import { describe, expect, it } from "vitest";
 import {
   buildWindowTitle,
   formatTitleQmailAddress,
-  TITLE_ADDRESS_GAP,
+  TITLE_ADDRESS_SEPARATOR,
+  TITLE_ADDRESS_SEPARATOR_COUNT,
 } from "./windowTitle";
 
+const TITLE_PREFIX =
+  "QMail Alpha      Limited Functionality. Attachment Max Size and Count: 250KB and 2     ";
+
 describe("buildWindowTitle", () => {
-  it("uses the stable version/address format with exactly 20 spaces", () => {
+  it("uses the stable version/address format with 10 spaced periods", () => {
     const title = buildWindowTitle({
-      qmailAddress: "127.103@kilo",
+      qmailAddress: "15:33@mega",
       buildDate: "2026-06-26",
     });
 
     expect(title).toBe(
-      `QMail Version June 26, 2026${" ".repeat(20)}127.103@Kilo`,
+      `${TITLE_PREFIX}June 26, 2026 ${".  ".repeat(9)}. Your Qmail Address: 15:33@mega`,
     );
-    expect(TITLE_ADDRESS_GAP).toBe(20);
+    expect(TITLE_ADDRESS_SEPARATOR_COUNT).toBe(10);
+    expect(TITLE_ADDRESS_SEPARATOR).toBe(`${".  ".repeat(9)}.`);
   });
 
   it("omits the gap while the address is unavailable", () => {
     expect(buildWindowTitle({ buildDate: "2026-06-26" })).toBe(
-      "QMail Version June 26, 2026",
+      `${TITLE_PREFIX}June 26, 2026`,
     );
   });
 
@@ -39,7 +44,8 @@ describe("buildWindowTitle", () => {
 });
 
 describe("formatTitleQmailAddress", () => {
-  it("normalizes the denomination without adding a label", () => {
-    expect(formatTitleQmailAddress("127.103@kILO")).toBe("127.103@Kilo");
+  it("normalizes the denomination while preserving the local address", () => {
+    expect(formatTitleQmailAddress("127.103@kILO")).toBe("127.103@kilo");
+    expect(formatTitleQmailAddress("15:33@MEGA")).toBe("15:33@mega");
   });
 });

@@ -667,13 +667,20 @@ const ComposeModal = ({
   // gpt-batch5 #2: defensive limits tracking the backend's real
   // capacity for the comma/semicolon-joined attachment string buffer
   // (MAX_PATH_LEN * 4 = 16384 bytes) and UPLOAD_MAX_ATTACHMENTS = 245.
-  // We cap WELL below both — 50 files and 12000 bytes of combined
-  // path length — to leave headroom for future backend changes and
-  // for the comma separators themselves. Overflow is silently dropped
-  // by the backend today (no error returned), so the guard has to be
-  // GUI-side.
-  const MAX_ATTACHMENT_COUNT = 50;
+  // We cap WELL below both — 12000 bytes of combined path length —
+  // to leave headroom for future backend changes and for the comma
+  // separators themselves. Overflow is silently dropped by the
+  // backend today (no error returned), so the guard has to be
+  // GUI-side. MVP: the file count is capped at 2 (far below the
+  // backend's 245) until larger transfers are supported.
+  const MAX_ATTACHMENT_COUNT = 2;
   const MAX_ATTACHMENT_PATH_BYTES = 12000;
+
+  // MVP: individual attachments are capped at 250 KB. The native file
+  // picker can't hide larger files, so oversized picks are rejected
+  // here with an explanation, and re-checked at send time in case the
+  // file grew on disk between staging and send.
+  const MAX_ATTACHMENT_FILE_BYTES = 250 * 1024;
 
   // gpt-batch5 #1: the backend serializes the attachment list to a
   // comma/semicolon-joined string and then strtok_r-splits it on
@@ -722,6 +729,13 @@ const ComposeModal = ({
               name,
               reason:
                 "filename contains a comma or semicolon (not yet supported)",
+            });
+            continue;
+          }
+          if (!(Number(entry.size) <= MAX_ATTACHMENT_FILE_BYTES)) {
+            rejected.push({
+              name,
+              reason: `file is ${formatAttachmentSize(Number(entry.size)) || "too large"} — attachments are limited to 250 KB each for now`,
             });
             continue;
           }
@@ -1124,6 +1138,16 @@ const ComposeModal = ({
         );
         setAttachError(
           "An attachment was removed or changed after selection. Review the attachment list and send again.",
+        );
+        return;
+      }
+      // Sizes verified unchanged above, so the staged sizes are current.
+      const oversized = attachments.find(
+        (attachment) => !(Number(attachment.size) <= MAX_ATTACHMENT_FILE_BYTES),
+      );
+      if (oversized) {
+        setAttachError(
+          `"${oversized.name}" is larger than the 250 KB attachment limit. Remove it to send this qmail.`,
         );
         return;
       }
@@ -1876,7 +1900,7 @@ const ComposeModal = ({
   return (
     <div className="compose-modal__overlay">
       <section
-        className="compose-modal glass-container"
+        className="compose-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="compose-modal-title"
@@ -2026,152 +2050,137 @@ const ComposeModal = ({
               rows={12}
             />
           </div>
+        </div>
 
-          {/* FIX-02 (Batch 5): attachment staging area.
-              - Button opens Electron's native file picker
-                (window.electronAPI.pickAttachments).
-              - Picked files render as removable chips with size.
-              - In a browser/Vite build (no electronAPI), the button
-                renders disabled with an explanatory tooltip. */}
-          <div className="compose-modal__attachments">
+        {(attachError || attachments.length > 0) && (
+          <div className="compose-modal__attachment-bar">
+            <div className="compose-modal__attachments">
+              {attachError && (
+                <span className="compose-modal__attach-error">
+                  {attachError}
+                </span>
+              )}
+
+              {attachments.length > 0 && (
+                <ul className="compose-modal__attachment-chips">
+                  {attachments.map((a) => (
+                    <li
+                      key={a.path}
+                      className="compose-modal__attachment-chip"
+                      title={a.path}
+                    >
+                      <Paperclip size={12} />
+                      <span className="compose-modal__attachment-name">
+                        {a.name}
+                      </span>
+                      <span className="compose-modal__attachment-size">
+                        {formatAttachmentSize(a.size)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(a.path)}
+                        disabled={isSending}
+                        title="Remove attachment"
+                        aria-label={`Remove ${a.name}`}
+                        className="compose-modal__attachment-remove"
+                      >
+                        <X size={12} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+        <footer className="compose-modal__footer">
+          {/* The attachment picker stays in the fixed action row so it never
+              scrolls away with the recipient and message fields. */}
+          <button
+            type="button"
+            className="compose-modal__attach-files-button"
+            onClick={handleAttachClick}
+            disabled={isSending || !attachmentsSupported}
+            title={
+              attachmentsSupported
+                ? "Attach files to this message (max 2 files, 250 KB each)"
+                : "File attachments require the desktop build"
+            }
+          >
+            <Paperclip size={14} />
+            {attachments.length === 0
+              ? "Attach files"
+              : `Attach files (${attachments.length} attached)`}
+          </button>
+
+          <div className="compose-modal__footer-actions">
             <button
               type="button"
-              className="compose-modal__attach-files-button"
-              onClick={handleAttachClick}
-              disabled={isSending || !attachmentsSupported}
+              className="compose-modal__send-button"
+              onClick={handleSend}
+              disabled={sendControlsLocked || canSend === null}
               title={
-                attachmentsSupported
-                  ? "Attach files to this message"
-                  : "File attachments require the desktop build"
+                canSend === null
+                  ? "Checking RAIDA network status"
+                  : canSend === false
+                    ? "Send anyway; the backend will make the final network decision"
+                    : "Send qmail"
               }
             >
-              <Paperclip size={14} />
-              {attachments.length === 0
-                ? "Attach files"
-                : `Attach files (${attachments.length} attached)`}
+              {sendingStatus === "sending" ? (
+                <>
+                  <Loader size={16} className="spinning" />
+                  Sending...
+                </>
+              ) : sendingStatus === "completed" ? (
+                <>
+                  <CheckCircle size={16} />
+                  Sent!
+                </>
+              ) : canSend === null ? (
+                <>
+                  <Loader size={16} className="spinning" />
+                  Checking network...
+                </>
+              ) : canSend === false ? (
+                <>
+                  <Send size={16} />
+                  Send anyway
+                </>
+              ) : (
+                <>
+                  <Send size={16} />
+                  Send
+                </>
+              )}
             </button>
 
-            {attachError && (
-              <span className="compose-modal__attach-error">
-                {attachError}
-              </span>
-            )}
-
-            {attachments.length > 0 && (
-              <ul className="compose-modal__attachment-chips">
-                {attachments.map((a) => (
-                  <li
-                    key={a.path}
-                    className="compose-modal__attachment-chip"
-                    title={a.path}
-                  >
-                    <Paperclip size={12} />
-                    <span className="compose-modal__attachment-name">
-                      {a.name}
-                    </span>
-                    <span className="compose-modal__attachment-size">
-                      {formatAttachmentSize(a.size)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAttachment(a.path)}
-                      disabled={isSending}
-                      title="Remove attachment"
-                      aria-label={`Remove ${a.name}`}
-                      className="compose-modal__attachment-remove"
-                    >
-                      <X size={12} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <button
+              type="button"
+              className="compose-modal__draft-button"
+              onClick={() => handleSaveDraft()}
+              disabled={
+                sendControlsLocked ||
+                isSavingDraft ||
+                (!subject.trim() && !body.trim())
+              }
+              title="Save as draft"
+            >
+              {isSavingDraft ? (
+                <>
+                  <Loader size={16} className="spinning" />
+                  Saving...
+                </>
+              ) : draftSaved ? (
+                <>
+                  <CheckCircle size={16} />
+                  Saved
+                </>
+              ) : (
+                <>Save Draft</>
+              )}
+            </button>
           </div>
-
-          {/* gpt-batch5 #3: attachments aren't persisted with drafts
-              (backend ticket CORE-N). Without this warning, a user
-              who attached files and clicked Save Draft would expect
-              them to be preserved when reopened — they aren't.
-              Make the trade-off visible so they can decide whether
-              to send now or remove the attachments before saving. */}
-          {attachments.length > 0 && (
-            <div role="note" className="compose-modal__attachment-note">
-              <AlertCircle size={14} className="compose-modal__attachment-note-icon" />
-              <span>
-                Attachments are sent with this message but are <strong>not saved</strong>{" "}
-                with a draft. Save the draft first, then re-attach files when you&apos;re
-                ready to send.
-              </span>
-            </div>
-          )}
-        </div>
-        <footer className="compose-modal__footer">
-          <button
-            type="button"
-            className="compose-modal__send-button"
-            onClick={handleSend}
-            disabled={sendControlsLocked || canSend === null}
-            title={
-              canSend === null
-                ? "Checking RAIDA network status"
-                : canSend === false
-                  ? "Send anyway; the backend will make the final network decision"
-                  : "Send qmail"
-            }
-          >
-            {sendingStatus === "sending" ? (
-              <>
-                <Loader size={16} className="spinning" />
-                Sending...
-              </>
-            ) : sendingStatus === "completed" ? (
-              <>
-                <CheckCircle size={16} />
-                Sent!
-              </>
-            ) : canSend === null ? (
-              <>
-                <Loader size={16} className="spinning" />
-                Checking network...
-              </>
-            ) : canSend === false ? (
-              <>
-                <Send size={16} />
-                Send anyway
-              </>
-            ) : (
-              <>
-                <Send size={16} />
-                Send
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className="compose-modal__draft-button"
-            onClick={() => handleSaveDraft()}
-            disabled={
-              sendControlsLocked ||
-              isSavingDraft ||
-              (!subject.trim() && !body.trim())
-            }
-            title="Save as draft"
-          >
-            {isSavingDraft ? (
-              <>
-                <Loader size={16} className="spinning" />
-                Saving...
-              </>
-            ) : draftSaved ? (
-              <>
-                <CheckCircle size={16} />
-                Saved
-              </>
-            ) : (
-              <>Save Draft</>
-            )}
-          </button>
         </footer>
       </section>
 

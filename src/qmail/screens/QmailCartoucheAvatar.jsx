@@ -1,9 +1,14 @@
 /* eslint-disable react/prop-types */
 import { getQmailAvatarAssetHref, getQmailAvatarModel } from "../avatar/qmailAvatar";
 
+// MVP: cartouches/qcons are hidden until the cartouche system is secured.
+// The svg still renders (layout keeps its space) but is invisible.
+// Set to false to bring all cartouches back.
+const HIDE_CARTOUCHES_FOR_MVP = true;
+
 // Inner content area of the 100x100 frame: the frames/*.svg draw an
-// upright cartouche (rounded rect x=24..76, y=10..86 with a 3px border
-// and a base bar from y=82). Stay inside it.
+// upright chamfered placard (plate x=24..76, y=10..86 with a ~3px metal
+// edge and a status strip below y=80). Stay inside it.
 const CONTENT_X = 27;
 const CONTENT_WIDTH = 46;
 const CONTENT_Y = 14;
@@ -33,6 +38,7 @@ const QmailCartoucheAvatar = ({
       viewBox="0 0 100 100"
       aria-hidden="true"
       focusable="false"
+      style={HIDE_CARTOUCHES_FOR_MVP ? { visibility: "hidden" } : undefined}
     >
       <image
         href={getQmailAvatarAssetHref("frame", tierName)}

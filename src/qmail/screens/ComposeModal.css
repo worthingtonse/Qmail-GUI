@@ -2,48 +2,43 @@
 
 /* ==================== COMPOSE MODAL ==================== */
 
-/* was: .compose-modal-overlay */
-.compose-modal__overlay {
+/* The dashboard applies position:relative to every direct child. Include the
+   parent here so this fixed compose workspace wins that cascade reliably. */
+.compose-modal__overlay,
+.qmail-dashboard > .compose-modal__overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  /* `align-items: center` previously combined with `contain: layout` and
-     the tall scroll height of the dashboard after a Reply caused the modal
-     to be anchored below the visible viewport (only the header was
-     visible at the bottom). Switching to flex-start + a controlled top
-     padding keeps the modal near the visible top regardless of how tall
-     the overlay's containing block ends up. */
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   justify-content: center;
-  padding: 5vh var(--space-lg) var(--space-lg);
-  overflow-y: auto;
-  background: color-mix(in srgb, var(--secondary-bg) 72%, transparent);
-  backdrop-filter: var(--glass-blur);
+  padding: 0;
+  overflow: hidden;
+  background: var(--primary-bg);
 }
 
 .compose-modal {
   display: flex;
   flex-direction: column;
-  width: min(50rem, 100%);
-  max-height: 90vh;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  padding: 0;
   overflow: hidden;
-  border: var(--glass-border);
-  border-radius: var(--radius-xl);
-  background: var(--secondary-bg);
-  box-shadow: var(--shadow-xl);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   animation: compose-modal-enter calc(250ms * var(--motion-scale)) ease both;
 }
 
 @keyframes compose-modal-enter {
   from {
     opacity: 0;
-    transform: scale(0.97) translateY(var(--space-md));
   }
 
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
   }
 }
 
@@ -55,9 +50,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-xl);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--glass-bg);
+  flex: none;
+  padding: var(--space-lg) clamp(var(--space-lg), 4vw, var(--space-2xl));
+  border: 0;
+  background: transparent;
 }
 
 .compose-modal__header-main {
@@ -111,11 +107,13 @@
 .compose-modal__body {
   display: flex;
   flex: 1;
+  min-height: 0;
   flex-direction: column;
-  gap: var(--space-lg);
-  padding: var(--space-xl);
+  gap: var(--space-md);
+  padding: 0 clamp(var(--space-lg), 4vw, var(--space-2xl)) var(--space-md);
   overflow-y: auto;
-  background: var(--primary-bg);
+  background: transparent;
+  scrollbar-gutter: stable;
 }
 
 /* ==================== FORM FIELDS ==================== */
@@ -145,7 +143,7 @@
 .compose-modal__field input,
 .compose-modal__field textarea {
   width: 100%;
-  padding: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-md);
   background: var(--card-bg);
@@ -185,14 +183,14 @@
 /* was: .form-group-textarea */
 .compose-modal__field--message {
   display: flex;
-  flex: 1;
+  flex: 1 0 auto;
   flex-direction: column;
-  min-height: 12.5rem;
+  min-height: clamp(22rem, 52vh, 44rem);
 }
 
 .compose-modal__field--message textarea {
   flex: 1;
-  min-height: 12.5rem;
+  min-height: clamp(20rem, 48vh, 42rem);
   resize: vertical;
   line-height: 1.6;
 }
@@ -374,8 +372,7 @@
 /* was: .send-progress, .error-message, .network-warning */
 .compose-modal__send-progress,
 .compose-modal__error,
-.compose-modal__network-warning,
-.compose-modal__attachment-note {
+.compose-modal__network-warning {
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
@@ -515,8 +512,7 @@
   background: color-mix(in srgb, var(--accent-warning) 10%, transparent);
 }
 
-.compose-modal__network-warning > svg,
-.compose-modal__attachment-note-icon {
+.compose-modal__network-warning > svg {
   flex: none;
   margin-top: 0.125rem;
 }
@@ -530,8 +526,7 @@
   min-width: 0;
 }
 
-.compose-modal__network-warning-copy span,
-.compose-modal__attachment-note {
+.compose-modal__network-warning-copy span {
   color: var(--text-secondary);
 }
 
@@ -564,17 +559,28 @@
 
 /* ==================== ATTACHMENTS ==================== */
 
+.compose-modal__attachment-bar {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-sm) clamp(var(--space-lg), 4vw, var(--space-2xl));
+  background: transparent;
+}
+
 /* was: .attachments-row */
 .compose-modal__attachments {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: var(--space-sm);
-  margin-top: var(--space-md);
+  min-width: 0;
+  margin: 0;
 }
 
 /* was: .attach-files-btn */
 .compose-modal__attach-files-button {
-  align-self: flex-start;
+  align-self: center;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -662,11 +668,6 @@
   opacity: 0.5;
 }
 
-.compose-modal__attachment-note {
-  border-color: color-mix(in srgb, var(--accent-warning) 45%, var(--border-medium));
-  background: color-mix(in srgb, var(--accent-warning) 8%, transparent);
-}
-
 /* ==================== DRAFT INFO ==================== */
 
 /* was: .draft-count */
@@ -683,11 +684,21 @@
 /* was: .compose-modal-footer */
 .compose-modal__footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-xl);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--glass-bg);
+  flex: none;
+  padding: var(--space-sm) clamp(var(--space-lg), 4vw, var(--space-2xl)) var(--space-lg);
+  border: 0;
+  background: transparent;
+}
+
+.compose-modal__footer-actions {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
 }
 
 /* was: .send-button, .attach-button */
@@ -697,7 +708,8 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-xl);
+  min-height: 2.5rem;
+  padding: var(--space-sm) var(--space-lg);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
@@ -757,54 +769,72 @@
 
 @media (max-width: 1024px) {
   .compose-modal__overlay {
-    padding: var(--space-md);
+    padding: 0;
   }
 
   .compose-modal {
-    max-height: 95vh;
+    height: 100%;
+    max-height: none;
   }
 
-  .compose-modal__header,
-  .compose-modal__body,
-  .compose-modal__footer {
-    padding: var(--space-lg);
+  .compose-modal__header {
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .compose-modal__body {
+    padding: 0 var(--space-lg) var(--space-md);
+  }
+
+  .compose-modal__attachment-bar {
+    padding: var(--space-sm) var(--space-lg);
   }
 
   .compose-modal__footer {
-    flex-direction: column;
+    padding: var(--space-sm) var(--space-lg) var(--space-md);
+  }
+
+  .compose-modal__footer-actions {
+    min-width: 0;
   }
 
   .compose-modal__send-button,
   .compose-modal__draft-button {
-    width: 100%;
+    flex: 1;
   }
 
-  .compose-modal__recipient-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .compose-modal__contact-suggestions {
-    position: static;
-    margin-top: var(--space-sm);
+  .compose-modal__field--message,
+  .compose-modal__field--message textarea {
+    min-height: clamp(18rem, 48vh, 34rem);
   }
 }
 
 @media (max-width: 768px) {
   .compose-modal__overlay {
-    align-items: flex-start;
-    padding: var(--space-sm);
-    padding-top: var(--space-lg);
+    align-items: stretch;
+    padding: 0;
   }
 
   .compose-modal {
-    max-height: calc(100vh - var(--space-xl));
+    height: 100%;
+    max-height: none;
   }
 
-  .compose-modal__header,
-  .compose-modal__body,
-  .compose-modal__footer {
+  .compose-modal__header {
     padding: var(--space-md);
+  }
+
+  .compose-modal__body {
+    padding: 0 var(--space-md) var(--space-sm);
+  }
+
+  .compose-modal__attachment-bar {
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .compose-modal__footer {
+    padding: var(--space-sm) var(--space-md) var(--space-md);
   }
 
   .compose-modal__title {
@@ -813,21 +843,18 @@
 
   .compose-modal__field--message,
   .compose-modal__field--message textarea {
-    min-height: 9.375rem;
+    min-height: clamp(16rem, 44vh, 28rem);
   }
 
   .compose-modal__field input[type="number"] {
     max-width: 100%;
   }
 
-  .compose-modal__network-warning,
-  .compose-modal__attachment-note,
-  .compose-modal__footer {
+  .compose-modal__network-warning {
     flex-direction: column;
   }
 
-  .compose-modal__network-retry-button,
-  .compose-modal__attach-files-button {
+  .compose-modal__network-retry-button {
     width: 100%;
   }
 }
@@ -849,9 +876,19 @@
     border-radius: 0;
   }
 
+  .compose-modal__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .compose-modal__attach-files-button,
+  .compose-modal__footer-actions {
+    width: 100%;
+  }
+
   .compose-modal__field--message,
   .compose-modal__field--message textarea {
-    min-height: 7.5rem;
+    min-height: 14rem;
   }
 
   .compose-modal__contact-suggestions {

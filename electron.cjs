@@ -663,6 +663,7 @@ function parseQMailArgs(argv) {
 
 const qmailArgs = parseQMailArgs(process.argv) || { port: null, debug: false, dev: false };
 const isDev = qmailArgs.dev;
+const windowIconPath = path.join(__dirname, isDev ? 'public' : 'dist', 'icon.png');
 log(`Args: port=${qmailArgs.port ?? 'random'} debug=${qmailArgs.debug} dev=${qmailArgs.dev}`);
 
 // Multi-instance support: ask the OS for a free TCP port. We bind a
@@ -690,11 +691,16 @@ function startBackend(port) {
 
   let backendDir, backendPath, dataDir;
 
+  // Platform-specific backend binary name: Windows ships core.exe,
+  // Linux/macOS ship a bare `core` ELF. Both are placed under backend/
+  // (in the repo for dev, in resources/backend for packaged builds).
+  const backendBinary = process.platform === 'win32' ? 'core.exe' : 'core';
+
   if (isDev) {
     // Dev: binary lives next to the repo, data lives next to it too.
     // Keeps the dev loop simple.
     backendDir = path.join(__dirname, 'backend');
-    backendPath = path.join(backendDir, 'core.exe');
+    backendPath = path.join(backendDir, backendBinary);
     dataDir = backendDir;
   } else {
     // Packaged: the binary itself ships inside the packaged resources
@@ -707,7 +713,7 @@ function startBackend(port) {
     // (regular packaged install, or running the unpacked binary
     // directly), fall back to the directory of the running .exe.
     backendDir = path.join(process.resourcesPath, 'backend');
-    backendPath = path.join(backendDir, 'core.exe');
+    backendPath = path.join(backendDir, backendBinary);
     dataDir =
       process.env.PORTABLE_EXECUTABLE_DIR
       || path.dirname(app.getPath('exe'));
@@ -744,6 +750,17 @@ function startBackend(port) {
   const coreArgs = ['-port', String(port), '-data-dir', dataDir];
   if (qmailArgs.debug) coreArgs.push('-debug');
   log('Backend args: ' + coreArgs.join(' '));
+
+  // On Linux/macOS the bundled `core` ELF must be executable. Depending
+  // on how the resource was staged, the exec bit may be missing — set it
+  // defensively so spawn() doesn't fail with EACCES. No-op on Windows.
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(backendPath, 0o755);
+    } catch (e) {
+      log('WARN: could not chmod backend ' + backendPath + ': ' + e.message);
+    }
+  }
 
   try {
     cleanupOrphanedBackendsForDataDir(dataDir);
@@ -816,6 +833,7 @@ function createSplashWindow() {
   splashWindow = new BrowserWindow({
     width: 460,
     height: 340,
+    icon: windowIconPath,
     frame: false,
     resizable: false,
     movable: false,
@@ -834,7 +852,7 @@ function createSplashWindow() {
 <html>
 <head>
 <meta charset="utf-8">
-<title>QMail</title>
+<title>QMail Alpha</title>
 <style>
   html, body {
     margin: 0;
@@ -899,7 +917,7 @@ function createSplashWindow() {
 </head>
 <body>
   <div class="container">
-    <div class="logo">QMail</div>
+    <div class="logo">QMail Alpha</div>
     <div class="tagline">Quantum-safe secure mail</div>
     <div class="status"><span class="spinner"></span>Starting QMail&hellip;</div>
     <div class="disclaimer">${SPLASH_DISCLAIMER}</div>
@@ -1119,6 +1137,7 @@ function createMainWindow(port) {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: windowIconPath,
     show: false, // Don't flash an empty window — splash is handling that.
     webPreferences: {
       nodeIntegration: false,

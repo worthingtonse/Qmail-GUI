@@ -1,12 +1,12 @@
-import { BUILD_DATE, formatBuildDateForDisplay } from "../../version";
+import { BUILD_DATE, formatBuildDateForDisplay } from "../../version.js";
 
-export const TITLE_ADDRESS_GAP = 20;
+export const TITLE_ADDRESS_SEPARATOR_COUNT = 10;
+export const TITLE_ADDRESS_SEPARATOR = Array(TITLE_ADDRESS_SEPARATOR_COUNT)
+  .fill(".")
+  .join("  ");
 
-const capitalizeWord = (value) => {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-};
+// TLD names (bit, byte, kilo, mega, giga) always display lowercase.
+const lowercaseWord = (value) => String(value || "").trim().toLowerCase();
 
 export const formatTitleQmailAddress = (address) => {
   const text = String(address || "").trim();
@@ -17,14 +17,14 @@ export const formatTitleQmailAddress = (address) => {
 
   const localPart = text.slice(0, atIndex);
   const denomination = text.slice(atIndex + 1);
-  return `${localPart}@${capitalizeWord(denomination)}`;
+  return `${localPart}@${lowercaseWord(denomination)}`;
 };
 
 export const buildWindowTitle = ({ qmailAddress, buildDate = BUILD_DATE } = {}) => {
-  const prefix = `QMail Version ${formatBuildDateForDisplay(buildDate)}`;
+  const prefix = `QMail Alpha      Limited Functionality. Attachment Max Size and Count: 250KB and 2     ${formatBuildDateForDisplay(buildDate)}`;
   const formattedAddress = formatTitleQmailAddress(qmailAddress);
 
   return formattedAddress
-    ? `${prefix}${" ".repeat(TITLE_ADDRESS_GAP)}${formattedAddress}`
+    ? `${prefix} ${TITLE_ADDRESS_SEPARATOR} Your Qmail Address: ${formattedAddress}`
     : prefix;
 };

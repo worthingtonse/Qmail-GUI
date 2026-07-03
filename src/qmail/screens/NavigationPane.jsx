@@ -113,11 +113,8 @@ const ALLOWED_FOLDER_ICONS = {
 const normalizeIconName = (value) =>
   String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 
-const capitalizeWord = (value) => {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-};
+// TLD names (bit, byte, kilo, mega, giga) always display lowercase.
+const lowercaseWord = (value) => String(value || "").trim().toLowerCase();
 
 const formatQmailAddressForDisplay = (address) => {
   const text = String(address || "").trim();
@@ -126,7 +123,7 @@ const formatQmailAddressForDisplay = (address) => {
   const atIndex = text.lastIndexOf("@");
   if (atIndex === -1) return text;
 
-  return `${text.slice(0, atIndex)}@${capitalizeWord(text.slice(atIndex + 1))}`;
+  return `${text.slice(0, atIndex)}@${lowercaseWord(text.slice(atIndex + 1))}`;
 };
 
 const getFolderIcon = (folder) => {
