@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
 
-    <!-- .mega is a "real silver" frame. Same metallic trick as gold/copper:
-         a diagonal gradient (steel -> bright white highlight -> dark steel)
-         plus a thin specular sheen makes the cool gray read as polished
-         metal rather than flat gray. -->
+    <!-- .mega: solid silver tech placard. The diagonal steel gradient on the
+         edge (steel -> white highlight -> dark steel) keeps the polished-
+         metal read; the chamfered plate body stays dark so the colored
+         symbols drawn on top remain legible. -->
     <defs>
       <linearGradient id="mega-rim" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%"   stop-color="#7d8794" />
@@ -12,11 +12,6 @@
         <stop offset="62%"  stop-color="#aeb7c2" />
         <stop offset="84%"  stop-color="#6b757f" />
         <stop offset="100%" stop-color="#9aa3ad" />
-      </linearGradient>
-      <linearGradient id="mega-bar" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%"   stop-color="#f3f6f9" />
-        <stop offset="40%"  stop-color="#c3ccd5" />
-        <stop offset="100%" stop-color="#6b757f" />
       </linearGradient>
       <linearGradient id="mega-body" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%" stop-color="#1c2d3f" />
@@ -29,19 +24,16 @@
       </linearGradient>
     </defs>
 
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="url(#mega-body)" stroke="url(#mega-rim)" stroke-width="3.9" />
-    <!-- specular sheen on the upper-left rim -->
-    <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#ffffff" stroke-width="1.0" stroke-linecap="round" opacity="0.8" />
-    <rect x="22" y="78" width="56" height="8" fill="url(#mega-body)" />
-    <!-- inner highlight line: flush against the rim's inner edge, no gap -->
-    <rect x="26.3" y="12.3" width="47.4" height="71.4" rx="14" fill="none" stroke="#e7ecf1" stroke-width="1.2" />
+    <!-- solid chamfered plate -->
+    <path d="M31 10 H69 L76 17 V79 L69 86 H31 L24 79 V17 Z"
+          fill="url(#mega-body)" stroke="url(#mega-rim)" stroke-width="3.7" />
 
-      <path d="M31 13 C39 9.5, 61 9.5, 69 13" fill="none" stroke="#e7ecf1" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M31 83 C39 86.5, 61 86.5, 69 83" fill="none" stroke="#e7ecf1" stroke-width="1.6" stroke-linecap="round" />
+    <!-- inner bevel line -->
+    <path d="M32 12.5 H68 L73.5 18 V78 L68 83.5 H32 L26.5 78 V18 Z"
+          stroke="#e7ecf1" stroke-width="0.8" opacity="0.5" />
 
-    <rect x="16.2" y="80.8" width="67.6" height="9.05" rx="4" fill="url(#mega-bar)" />
-    <rect x="24" y="78.8" width="52" height="4.9" rx="3" fill="#f3f6f9" />
-
-        <path d="M30 86 H70" stroke="#6b757f" stroke-width="1.6" stroke-linecap="round" />
+    <!-- status strip: etched groove + tier LED -->
+    <path d="M33 81 H59" stroke="#39424c" stroke-width="1.2" stroke-linecap="round" />
+    <circle cx="65" cy="81" r="1.4" fill="#f3f6f9" />
 
 </svg>

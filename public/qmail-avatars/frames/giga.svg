@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
 
-    <!-- .giga is the top denomination: a "real gold" frame. Gold isn't a
-         single color — it reads as metal because of how light plays across
-         it. We fake that with gradients running dark-bronze -> bright
-         highlight -> deep-bronze, plus a thin specular sheen on the rim. -->
+    <!-- .giga is the top denomination: a solid gold tech placard. The
+         diagonal gold gradient on the edge (dark bronze -> bright highlight
+         -> deep bronze) keeps the polished-metal read, and a second inner
+         bevel marks the top tier in place of the old crown. The chamfered
+         plate body stays dark so the colored symbols drawn on top remain
+         legible. -->
     <defs>
-      <!-- Rim/border metal: diagonal so one edge catches the light. -->
       <linearGradient id="giga-rim" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%"   stop-color="#a86a16" />
         <stop offset="22%"  stop-color="#f6d35a" />
@@ -14,19 +15,7 @@
         <stop offset="82%"  stop-color="#9c5e12" />
         <stop offset="100%" stop-color="#e1aa2b" />
       </linearGradient>
-      <!-- Base bar metal: vertical, brightest near the top edge. -->
-      <linearGradient id="giga-bar" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%"   stop-color="#fff3b0" />
-        <stop offset="40%"  stop-color="#f2c64b" />
-        <stop offset="100%" stop-color="#9c5e12" />
-      </linearGradient>
-      <!-- Crown / chevron metal. -->
-      <linearGradient id="giga-crown" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%"   stop-color="#fff6c4" />
-        <stop offset="100%" stop-color="#d39a23" />
-      </linearGradient>
-	  
-	  <linearGradient id="bg-frame" x1="0%" y1="0%" x2="100%" y2="0%">
+      <linearGradient id="giga-body" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%" stop-color="#756d28" />
         <stop offset="18%" stop-color="#625b21" />
         <stop offset="34%" stop-color="#3d3814" />
@@ -35,33 +24,20 @@
         <stop offset="82%" stop-color="#625b21" />
         <stop offset="100%" stop-color="#756d28" />
       </linearGradient>
-	  
     </defs>
 
-    <path d="M39 10 L50 3 L61 10" fill="url(#giga-crown)" />
-	
-	
-    <path d="M39 10 H61" stroke="#fff8df" stroke-width="1.8" stroke-linecap="round" />
+    <!-- solid chamfered plate -->
+    <path d="M31 10 H69 L76 17 V79 L69 86 H31 L24 79 V17 Z"
+          fill="url(#giga-body)" stroke="url(#giga-rim)" stroke-width="4" />
 
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="url(#bg-frame)" stroke="url(#giga-rim)" stroke-width="4.2" />
-    <!-- specular sheen: a brighter thin arc on the upper-left of the rim -->
-    <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#fff8df" stroke-width="1.1" stroke-linecap="round" opacity="0.85" />
-    <rect x="22" y="78" width="56" height="8" fill="#23364b" />
-    <!-- inner highlight line: flush against the rim's inner edge, no gap -->
-    <rect x="26.2" y="12.2" width="47.6" height="71.6" rx="14" 
-	fill="url(#bg-frame)" 
-	stroke="#fff4cf" stroke-width="1.2" />
+    <!-- double inner bevel: top-tier marker -->
+    <path d="M32 12.5 H68 L73.5 18 V78 L68 83.5 H32 L26.5 78 V18 Z"
+          stroke="#fff4cf" stroke-width="0.9" opacity="0.6" />
+    <path d="M33.2 14 H66.8 L72 19.2 V76.8 L66.8 82 H33.2 L28 76.8 V19.2 Z"
+          stroke="#fff4cf" stroke-width="0.6" opacity="0.35" />
 
-      <path d="M31 13 C39 9.5, 61 9.5, 69 13" fill="none" stroke="#fff4cf" stroke-width="1.6" stroke-linecap="round" />
-    
-	<path d="M31 83 C39 86.5, 61 86.5, 69 83" fill="none" stroke="#fff4cf" stroke-width="1.6" stroke-linecap="round" />
-
-    <rect x="15.6" y="80.4" width="68.8" height="9.4" rx="4" fill="url(#giga-bar)" />
-    <rect x="24" y="78.4" width="52" height="5.2" rx="3" fill="#fff8df" />
-
-      <path d="M19 88 L10 93 L19 96" fill="url(#giga-crown)" />
-      <path d="M81 88 L90 93 L81 96" fill="url(#giga-crown)" />
-      <path d="M29 87 H71" stroke="#7a4a0e" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M30 91 H70" stroke="#fff8df" stroke-width="1.1" stroke-linecap="round" />
+    <!-- status strip: etched groove + tier LED -->
+    <path d="M33 81 H59" stroke="#4a3c10" stroke-width="1.2" stroke-linecap="round" />
+    <circle cx="65" cy="81" r="1.4" fill="#fff6c4" />
 
 </svg>

@@ -1,0 +1,144 @@
+================================================================================
+ FEEDBACK ON docs/gpt.qcons.txt  (public profile / qcon directory plan)
+ Reviewer: Claude Fable 5
+ Date:     2026-07-01
+ Companion plan: docs/fab.qcons.txt (rev 2, updated after this review)
+================================================================================
+
+OVERALL
+-------
+Strong plan. The repository findings are accurate (I independently verified
+the key ones), the security analysis is the best part of the document, and
+several points were good catches that my own plan missed - I have adopted
+them into fab.qcons.txt rev 2. The main weaknesses are scope inflation for
+what is presumably an alpha feature, and a hard sequencing dependency on
+rest_core schema changes that would block shipping anything.
+
+--------------------------------------------------------------------------------
+VERIFIED / AGREE
+--------------------------------------------------------------------------------
+
+1. Endpoint 404s (finding #6): CONFIRMED independently on 2026-07-01. All
+   four routes (update_users, user_hints, with and without .php) return 404.
+   Good instinct to actually probe the server instead of assuming.
+
+2. Address width (finding #1 / blocking Q1): agreed. qmailAddress.js uses a
+   3-byte serial + 1-byte denomination today; the requested 5-byte key
+   implies a 4-byte serial. This is the single most important question to
+   resolve before coding, and both plans flag it.
+
+3. "Four byte index numbers" ambiguity (blocking Q2): good catch - my
+   original plan silently assumed one-byte indexes and did not flag the
+   phrase. Adopted as fab.qcons.txt open question #7.
+
+4. contacts/create is create-only, not upsert (finding #5): correct and
+   consequential. Re-publishing the self profile would fail or require
+   delete/recreate, which loses is_favorite / trust_level / user_notes.
+   Adopted (B5 caveats + open question #8).
+
+5. Never auto-save from a name-prefix match; only an exact
+   (denomination, serial_number) match is safe (Phase 3.5): correct and
+   important. A prefix hit is a search suggestion, not an identity.
+   Adopted.
+
+6. Do not create an empty local contact on a directory miss (Phase 5.4):
+   subtle and correct - under the local-first rule an empty row would
+   permanently suppress future lookups. Adopted.
+
+7. Truthiness hazard for numeric 0 (Phase 3.2): real. Denomination 0 (bit)
+   and qcon index 0 are both valid; the existing addContact code already
+   has special handling for falsy denomination. Adopted as an explicit
+   caution.
+
+8. Unauthenticated update_users lets anyone overwrite anyone (Phase 0.3):
+   agreed, and my plan carries the same warning. GPT's stronger stance
+   ("do not ship unauthenticated") is defensible; whether it blocks v1 is
+   a product decision for Sean, not an engineering one.
+
+9. Precise local-first definition (Phase 2.4): "any existing row for the
+   exact key blocks lookup, even with empty fields" is the right reading
+   of the requirement. Adopted verbatim in spirit.
+
+10. Partial-failure UX for publish (Phase 4.7): "Published, but local
+    refresh failed" with a local-only retry is the right shape. Adopted.
+
+--------------------------------------------------------------------------------
+DISAGREE / WOULD SCOPE DOWN
+--------------------------------------------------------------------------------
+
+1. Hard dependency on rest_core schema changes (Phase 2 as a prerequisite).
+   The delivery order makes extending the core.exe SQLite schema + adding an
+   upsert endpoint a blocker for everything downstream. That is the "right"
+   long-term home for inbox_fee/qcons, but it gates a GUI feature on a
+   separate C codebase and its release cycle. A GUI-side sidecar store
+   (JSON keyed by address) ships the whole feature now and migrates to the
+   backend schema later. Recommend: sidecar for v1, rest_core migration as
+   fast-follow. (fab.qcons.txt open question #5 poses exactly this choice.)
+
+2. Server-contract over-engineering for v1: revision numbers with 409
+   conflict handling, idempotency keys, cursor pagination, versioned frozen
+   JSON contracts. For a single-writer-per-record public directory where
+   the owner republishing simply overwrites their own row, last-write-wins
+   plus a LIMIT cap is adequate for v1. These are fine Phase-2 hardening
+   items; as launch requirements they roughly double the PHP work for
+   little user-visible value.
+
+3. Proxying directory calls through the Electron main process or a new
+   rest_core proxy (Phase 0.4). The repo already has a precedent: the
+   version check (qmailApiServices.js:2326-2341) is a plain renderer fetch
+   to the same host, deliberately not proxied. Unless/until an ownership
+   proof must be minted from wallet secrets (which must NOT touch the
+   renderer - GPT is right there), a renderer fetch with a CORS header on
+   the PHP side is simpler and consistent with existing code. Decide the
+   transport AFTER deciding the auth story, not before.
+
+4. JSON request body vs form-encoded POST (Phase 1.2). The logging-hygiene
+   argument favors a body over query-string params either way (agreed -
+   my plan also posts a body). JSON vs URLSearchParams is a coin flip for
+   a PHP consumer; pick one and write it down. Not worth the "freeze a
+   versioned contract" ceremony.
+
+5. Test matrix size (Phase 6). The unit/integration list is good as a
+   menu, but as written it is a bigger effort than the feature itself.
+   For v1: resolver local-hit-makes-zero-remote-calls, negative-cache,
+   exact-match enforcement, qcon-0/denomination-0 boundaries, and the
+   publish partial-failure path are the tests that actually protect
+   against regressions. The rest can trail.
+
+--------------------------------------------------------------------------------
+GAPS IN GPT'S PLAN (things fab.qcons.txt covers that gpt.qcons.txt omits)
+--------------------------------------------------------------------------------
+
+1. No concrete MySQL DDL and no concrete parameter list for update_users -
+   "suggested columns" prose vs a runnable CREATE TABLE. Minor, but the PHP
+   work starts faster from DDL.
+
+2. No concrete code anchors for the GUI work. The plan names files but not
+   the attachment points (buildApplicationMenu electron.cjs:984-1134, Edit
+   submenu ~1006-1036, handleQmailMenuCommand QMailDashboard.jsx:~2763,
+   getQmailAvatarAssetHref qmailAvatar.js:69, addContact
+   qmailApiServices.js:1650-1681, checkVersion pattern :2326-2341). An
+   implementer needs these; they are in fab.qcons.txt.
+
+3. qmail_address_starts_with server-side semantics: matching a dotted-
+   decimal prefix requires the server to store/derive the canonical address
+   string for LIKE matching - GPT's Phase 1.4 lists the parameter but not
+   how the server matches it.
+
+4. Suggested build order granularity: GPT's ordering is contract-first
+   (correct in principle) but every step gates the next. fab.qcons.txt
+   orders the work so curl-testable PHP, the modal, and the avatar override
+   can proceed in parallel once question #1 (serial width) is answered.
+
+--------------------------------------------------------------------------------
+BOTTOM LINE
+--------------------------------------------------------------------------------
+Use GPT's plan as the security/hardening checklist and the source of the
+local-first and exact-match-only rules; use fab.qcons.txt for concrete
+implementation anchors, DDL, and a v1 scope that ships without waiting on
+rest_core. The two plans agree on every load-bearing design point:
+5-byte-key question must be answered first, qcons override the cartouche
+symbols with deterministic fallback, exact-match-only auto-save,
+local-first with no empty-row poisoning, and update_users needs an auth
+story before public release.
+================================================================================

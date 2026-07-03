@@ -119,6 +119,9 @@ const ReadingPane = ({
     attachmentDownloadProgress.transferError?.canRetry !== false;
 
   const handleDownloadAttachment = async (attachmentId, attachment) => {
+    // Sent-box receipt metadata has no downloadable content (see
+    // docs/attachment.views.txt) — the card is informational only.
+    if (attachment?.metadataOnly) return;
     if (
       attachmentTransferResumable &&
       String(attachmentDownloadProgress.attachmentId) === String(attachmentId)
@@ -473,6 +476,13 @@ const ReadingPane = ({
               <Paperclip size={16} />
               Attachments ({attachments.length})
             </h3>
+            {attachments.every((attachment) => attachment.metadataOnly) && (
+              <p className="reading-pane__attachments-note">
+                Attachment files are not stored in your Sent box — they were
+                included when this qmail was sent. The original file locations
+                are shown for reference.
+              </p>
+            )}
             {activeAttachmentDownload && (
               <div className="reading-pane__attachment-decrypt-panel">
                 <SevenStripeDecryptAnimation active={attachmentTransferRunning} />
@@ -562,6 +572,9 @@ const ReadingPane = ({
                 // PENDING (storage_mode 2): bytes haven't been downloaded yet;
                 // they're fetched on demand the first time the user clicks.
                 const isPending = attachment.isDownloaded === false;
+                // Receipt-derived Sent metadata: render an informational
+                // card with no click/download affordances.
+                const isMetadataOnly = attachment.metadataOnly === true;
                 const isDownloading =
                   attachmentTransferRunning &&
                   String(attachmentDownloadProgress.attachmentId) ===
@@ -576,16 +589,20 @@ const ReadingPane = ({
                     key={attachmentId || index}
                     className={`reading-pane__attachment${
                       isPending ? " reading-pane__attachment--pending" : ""
-                    }${isDownloading ? " reading-pane__attachment--downloading" : ""}`}
-                    onClick={() =>
-                      handleDownloadAttachment(attachmentId, attachment)
-                    }
-                    onKeyDown={(event) =>
-                      handleAttachmentKeyDown(event, attachmentId, attachment)
-                    }
-                    aria-busy={isDownloading}
-                    role="button"
-                    tabIndex={0}
+                    }${isDownloading ? " reading-pane__attachment--downloading" : ""}${
+                      isMetadataOnly ? " reading-pane__attachment--metadata" : ""
+                    }`}
+                    {...(isMetadataOnly
+                      ? {}
+                      : {
+                          onClick: () =>
+                            handleDownloadAttachment(attachmentId, attachment),
+                          onKeyDown: (event) =>
+                            handleAttachmentKeyDown(event, attachmentId, attachment),
+                          "aria-busy": isDownloading,
+                          role: "button",
+                          tabIndex: 0,
+                        })}
                   >
                     <div className="reading-pane__attachment-icon">
                       {isDownloading ? (
@@ -629,6 +646,10 @@ const ReadingPane = ({
                             )}
                             %
                           </span>
+                        ) : isMetadataOnly ? (
+                          <span className="reading-pane__attachment-status reading-pane__attachment-status--metadata">
+                            Not stored in Sent box
+                          </span>
                         ) : (
                           isPending && (
                             <span className="reading-pane__attachment-status reading-pane__attachment-status--pending">
@@ -637,7 +658,16 @@ const ReadingPane = ({
                           )
                         )}
                       </div>
+                      {isMetadataOnly && attachment.sourcePath && (
+                        <div
+                          className="reading-pane__attachment-source"
+                          title={attachment.sourcePath}
+                        >
+                          Sent from: {attachment.sourcePath}
+                        </div>
+                      )}
                     </div>
+                    {!isMetadataOnly && (
                     <div className="reading-pane__attachment-download">
                       <button
                         className="reading-pane__attachment-download-button"
@@ -670,6 +700,7 @@ const ReadingPane = ({
                         )}
                       </button>
                     </div>
+                    )}
                   </article>
                 );
               })}

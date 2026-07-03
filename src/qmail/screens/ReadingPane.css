@@ -550,6 +550,14 @@
   font-weight: 600;
 }
 
+/* Sent-box receipt metadata: explains why there is no download action. */
+.reading-pane__attachments-note {
+  margin: 0 0 var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
 /* was: .attachments-list */
 .reading-pane__attachments-list {
   display: flex;
@@ -836,6 +844,28 @@
 
 .reading-pane__attachment-status--decrypting {
   color: var(--accent-primary);
+}
+
+.reading-pane__attachment-status--metadata {
+  color: var(--text-muted);
+}
+
+/* Metadata-only cards are informational: no pointer, no hover affordance. */
+.reading-pane__attachment--metadata {
+  cursor: default;
+}
+
+.reading-pane__attachment--metadata:hover {
+  background-color: var(--tertiary-bg);
+}
+
+.reading-pane__attachment-source {
+  overflow: hidden;
+  margin-top: calc(var(--space-xs) / 2);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reading-pane__attachment-spinner {

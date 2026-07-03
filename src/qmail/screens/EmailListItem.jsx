@@ -6,6 +6,7 @@ import {
   Mail,
   MailOpen,
   Menu,
+  Paperclip,
   RotateCcw,
   ShieldAlert,
   Star,
@@ -281,6 +282,22 @@ const EmailListItem = ({
             )}
           </div>
           <div className="email-list-pane__sender-right">
+            {email.hasAttachments && (
+              <Paperclip
+                size={13}
+                className="email-list-pane__attachment-icon"
+                aria-label={
+                  email.attachmentCount > 1
+                    ? `${email.attachmentCount} attachments`
+                    : "Has attachment"
+                }
+                title={
+                  email.attachmentCount > 1
+                    ? `${email.attachmentCount} attachments`
+                    : "Has attachment"
+                }
+              />
+            )}
             <span className="email-list-pane__timestamp">{email.timestamp}</span>
             {!email.isPending && (
               <Star

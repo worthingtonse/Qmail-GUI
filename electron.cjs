@@ -1382,6 +1382,60 @@ ipcMain.handle('compose:statFiles', async (_event, filePaths) => {
   );
 });
 
+// Sent-box attachment metadata (docs/attachment.views.txt): fetch the send
+// receipt from the local backend and sanitize it HERE so the raw receipt
+// (wallet paths, locker codes, operation IDs, per-stripe transfer data)
+// never reaches the renderer. Keep the mapping in sync with
+// sanitizeReceiptAttachmentFiles in src/api/qmailApiServices.js, which is
+// the browser-build fallback.
+ipcMain.handle('qmail:sent-attachment-metadata', async (_event, apiPort, emailId) => {
+  const id = String(emailId || '');
+  const port = Number(apiPort);
+  if (!/^[0-9a-fA-F]{32}$/.test(id) || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    return { success: false, error: 'Invalid receipt request.' };
+  }
+
+  try {
+    const response = await fetch(`http://localhost:${port}/api/qmail/receipts?guid=${id}`);
+    // No receipt (send predates receipts): definitively no metadata.
+    if (response.status === 404) {
+      return { success: true, data: { attachments: [] } };
+    }
+    if (!response.ok) {
+      return { success: false, error: `Receipt request failed (${response.status}).` };
+    }
+
+    const data = await response.json();
+    const receipt = (data && data.receipt) || data;
+    const files =
+      (receipt && receipt.upload && receipt.upload.files) ||
+      (receipt && receipt.files);
+    const FAILED_STATUSES = new Set(['failed', 'error', 'cancelled']);
+    const attachments = (Array.isArray(files) ? files : [])
+      .filter((file) => String(file.role || '').toLowerCase() === 'attachment')
+      .filter((file) => !FAILED_STATUSES.has(String(file.status || '').toLowerCase()))
+      .map((file, index) => {
+        const sourcePath = typeof file.source === 'string' ? file.source : '';
+        const name =
+          file.name || sourcePath.split(/[\\/]/).pop() || `Attachment ${index + 1}`;
+        const dotIndex = name.lastIndexOf('.');
+        return {
+          attachmentId: `receipt-${index}`,
+          name,
+          fileExtension: dotIndex > 0 ? name.slice(dotIndex + 1) : '',
+          size: Number(file.size_bytes ?? file.size) || 0,
+          sourcePath,
+          metadataOnly: true,
+        };
+      });
+
+    return { success: true, data: { attachments } };
+  } catch (error) {
+    log('qmail:sent-attachment-metadata failed: ' + error.message);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('wallet:pickCoinFiles', async () => {
   let result;
   try {

@@ -36,14 +36,15 @@ const config = {
     ? undefined // all of them
     : ["en-US"],
 
+  // The wordlist ships on every platform. The backend binary is
+  // platform-specific (core.exe on Windows, bare `core` ELF on Linux),
+  // so it's added per-platform via win.extraResources / linux.extraResources
+  // below rather than here — bundling both on every OS would waste ~3 MB
+  // and ship a binary that can't run on the target.
   extraResources: [
     {
       from: "public/eff_large_wordlist.txt",
       to: "eff_large_wordlist.txt",
-    },
-    {
-      from: "backend/core.exe",
-      to: "backend/core.exe",
     },
   ],
 
@@ -60,6 +61,33 @@ const config = {
       },
     ],
     icon: "public/icon.ico",
+    extraResources: [
+      {
+        from: "backend/core.exe",
+        to: "backend/core.exe",
+      },
+    ],
+  },
+
+  linux: {
+    // AppImage: a single self-contained executable file, the Linux
+    // analogue of the portable Windows .exe — no install step, runs
+    // from anywhere including a USB stick.
+    target: [
+      {
+        target: "AppImage",
+        arch: ["x64"],
+      },
+    ],
+    artifactName: isIntl ? "QMail-intl.AppImage" : "QMail.AppImage",
+    category: "Network",
+    icon: "public/icon.png",
+    extraResources: [
+      {
+        from: "backend/core",
+        to: "backend/core",
+      },
+    ],
   },
 };
 

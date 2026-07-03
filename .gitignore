@@ -39,3 +39,6 @@ Deploy/
 # css-analysis tool intermediate cache (regeneratable; outputs in
 # docs/css-audit/*.{csv,md} are committed for reviewer convenience).
 docs/css-audit/cache/
+
+# Python bytecode from the avatar-sheet vectorizer scripts.
+__pycache__/

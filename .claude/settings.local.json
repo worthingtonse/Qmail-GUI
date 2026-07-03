@@ -102,7 +102,23 @@
       "Bash(xargs grep -l \"typedef.*exec_config_t\")",
       "PowerShell(ctest *)",
       "Bash(git worktree *)",
-      "Bash(node --check electron.cjs)"
+      "Bash(node --check electron.cjs)",
+      "Bash(awk '{print $1}')",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(where wsl.exe)",
+      "Bash(wsl.exe -l -v)",
+      "Bash(echo \"--- exit $? ---\")",
+      "Bash(wsl.exe *)",
+      "Bash(grep -nE \"core\\\\.exe|backend|process\\\\.platform|resourcesPath|extraResources|core['\\\\\"]|/core|\\\\\\\\\\\\\\\\core\" electron.cjs)",
+      "Read(//d/Code/src/C/raidax/**)",
+      "Bash(git checkout *)",
+      "Bash(wsl *)",
+      "Bash(cmake --build build --target core -j 4)",
+      "Bash(ctest --test-dir build -R type8 --output-on-failure)",
+      "Bash(git commit -m 'Add Type 8 handoff README and wire specification for the Linux server *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -oE '\\\\.\\(note-box|warning-box|quick-nav|parameter-table|code-block|status-table|byte-group-view|success-box|info-box\\)[ ,{]' protocol-common-styles.php)"
     ]
   }
 }

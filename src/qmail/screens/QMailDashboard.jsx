@@ -18,6 +18,7 @@ import {
   getEmailById,
   getDrafts,
   getEmailAttachments,
+  getSentAttachmentMetadata,
   getQMailWalletBalance,
   getQMailCanSend,
   peekBeacon,
@@ -291,6 +292,13 @@ const QMAIL_DENOMINATION_CODE_TO_VALUE = {
   3: 1000,
   4: 10000,
 };
+
+// Sent-folder attachment counts come from send receipts (see
+// getSentAttachmentMetadata / docs/attachment.views.txt). Cached per email id
+// for the session so pagination and folder revisits don't refetch receipts.
+// Sent-only by design: inbox rows must wait for backend attachment_count —
+// deriving them from this cache would give inconsistent results.
+const sentAttachmentCountCache = new Map();
 
 const readNumericSenderField = (...values) => {
   for (const value of values) {
@@ -1327,6 +1335,43 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
 
   // BUG-12 FIX: Accept optional page parameter to avoid stale currentPage
   // BUG-21 FIX: Track request ID to discard stale responses
+  // Quick paperclip support for Sent rows (docs/attachment.views.txt):
+  // derive per-row attachment counts from send receipts, then flag the rows.
+  // Accepts any row set (list, sort, search results) and only looks at rows
+  // that are Sent messages without a backend-provided flag. Lookups run a few
+  // at a time, and only definitive answers are cached (a missing receipt is
+  // definitive-empty; transport errors are retried on the next load). Stale
+  // responses are ignored via the loadEmails request counter.
+  const applySentAttachmentFlags = async (rows, requestId) => {
+    const pending = rows.filter(
+      (row) =>
+        row.id &&
+        row.folder === "sent" &&
+        !row.hasAttachments &&
+        !sentAttachmentCountCache.has(String(row.id)),
+    );
+    const RECEIPT_FETCH_CONCURRENCY = 6;
+    for (let start = 0; start < pending.length; start += RECEIPT_FETCH_CONCURRENCY) {
+      await Promise.all(
+        pending.slice(start, start + RECEIPT_FETCH_CONCURRENCY).map(async (row) => {
+          const res = await getSentAttachmentMetadata(row.id);
+          if (res.success) {
+            sentAttachmentCountCache.set(String(row.id), res.data.attachments.length);
+          }
+        }),
+      );
+    }
+    if (requestId !== loadEmailsRequestRef.current) return;
+    setEmails((prev) =>
+      prev.map((row) => {
+        const count = sentAttachmentCountCache.get(String(row.id)) || 0;
+        return count > 0 && !row.hasAttachments
+          ? { ...row, hasAttachments: true, attachmentCount: count }
+          : row;
+      }),
+    );
+  };
+
   const loadEmails = async (folder, page = null, options = {}) => {
     const { notifyOnError = true } = options;
     const requestId = ++loadEmailsRequestRef.current;
@@ -1417,6 +1462,8 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             inbox_fee: email.inbox_fee || email.inboxFee || 0,
             paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
             paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
+            attachmentCount: email.attachmentCount || 0,
+            hasAttachments: email.hasAttachments || false,
             senderStatus: "none",
             // FIX: Attach the folder identity so ReadingPane knows to use "Delete Permanently"
             folder: folder,
@@ -1425,6 +1472,9 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         });
 
         setEmails(transformedEmails);
+        if (folder === "sent") {
+          void applySentAttachmentFlags(transformedEmails, requestId);
+        }
         return result;
       } else {
         setEmails([]);
@@ -1501,12 +1551,17 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
               inbox_fee: email.inbox_fee || email.inboxFee || 0,
               paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
               paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
+              attachmentCount: email.attachmentCount || 0,
+              hasAttachments: email.hasAttachments || false,
               senderStatus: "none",
               folder: currentFolder,
               isTrashed: currentFolder === 'trash',
             };
           });
           setEmails(transformedEmails);
+          if (currentFolder === "sent") {
+            void applySentAttachmentFlags(transformedEmails, requestId);
+          }
         }
       })
       .catch((error) => {
@@ -1570,11 +1625,18 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
             inbox_fee: email.inbox_fee || email.inboxFee || 0,
             paymentStatus: email.paymentStatus ?? email.payment_status ?? null,
             paymentStatusText: email.paymentStatusText || email.payment_status_text || "",
+            attachmentCount: Number(email.attachment_count) || 0,
+            hasAttachments: (Number(email.attachment_count) || 0) > 0,
             senderStatus: "none",
             folder: resultFolder,
           };
         });
         setEmails(transformedEmails);
+        // Sent rows in search results get their paperclips from receipts too.
+        void applySentAttachmentFlags(
+          transformedEmails,
+          loadEmailsRequestRef.current,
+        );
         setTotalEmailCount(transformedEmails.length);
         setSearchResultCapHit(transformedEmails.length === SEARCH_RESULT_LIMIT);
         setSelectedEmail(
@@ -1776,7 +1838,29 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         ]);
 
         if (attRes.status === "fulfilled" && attRes.value.success) {
-          setEmailAttachments(attRes.value.data.attachments || []);
+          const storedAttachments = attRes.value.data.attachments || [];
+          // Sent mail has no local attachment rows (backend gap — see
+          // docs/attachment.views.txt). Fall back to the send receipt so the
+          // reading pane can at least show what was attached.
+          if (storedAttachments.length === 0 && emailFolder === "sent") {
+            const receiptRes = await getSentAttachmentMetadata(email.id);
+            if (receiptRes.success) {
+              sentAttachmentCountCache.set(
+                String(email.id),
+                receiptRes.data.attachments.length,
+              );
+            }
+            // The receipt lookup awaited: only apply it if this email is
+            // still the selected one (rapid A→B clicks must not let A's
+            // slower receipt overwrite B's attachment pane).
+            if (String(selectedEmailRef.current?.id) === String(email.id)) {
+              setEmailAttachments(
+                receiptRes.success ? receiptRes.data.attachments : [],
+              );
+            }
+          } else {
+            setEmailAttachments(storedAttachments);
+          }
         } else {
           setEmailAttachments([]);
         }

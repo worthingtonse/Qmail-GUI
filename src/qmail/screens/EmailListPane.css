@@ -655,6 +655,11 @@
   white-space: nowrap;
 }
 
+.email-list-pane__attachment-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
 /* was: .star-icon */
 .email-list-pane__star-icon {
   flex-shrink: 0;

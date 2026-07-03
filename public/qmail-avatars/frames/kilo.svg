@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
 
-    <!-- .kilo is a "real copper" frame. Same metallic trick as silver/gold:
-         a diagonal gradient (dark copper -> bright rose-gold highlight ->
-         deep brown) plus a thin specular sheen makes the warm reddish metal
-         read as polished copper. -->
+    <!-- .kilo: solid copper tech placard. The diagonal copper gradient on
+         the edge (dark copper -> rose-gold highlight -> deep brown) keeps
+         the polished-metal read; the chamfered plate body stays dark so the
+         colored symbols drawn on top remain legible. -->
     <defs>
       <linearGradient id="kilo-rim" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%"   stop-color="#7a3b1d" />
@@ -12,11 +12,6 @@
         <stop offset="62%"  stop-color="#c96a36" />
         <stop offset="84%"  stop-color="#6e3417" />
         <stop offset="100%" stop-color="#b1612f" />
-      </linearGradient>
-      <linearGradient id="kilo-bar" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%"   stop-color="#ffd9b8" />
-        <stop offset="40%"  stop-color="#d87a44" />
-        <stop offset="100%" stop-color="#6e3417" />
       </linearGradient>
       <linearGradient id="kilo-body" x1="0%" y1="0%" x2="100%" y2="0%">
         <stop offset="0%" stop-color="#1c2d3f" />
@@ -29,18 +24,16 @@
       </linearGradient>
     </defs>
 
-    <rect x="24" y="10" width="52" height="76" rx="16" fill="url(#kilo-body)" stroke="url(#kilo-rim)" stroke-width="3.6" />
-    <!-- specular sheen on the upper-left rim -->
-    <path d="M30 16 C26 22, 26 40, 26 50" fill="none" stroke="#ffe6cf" stroke-width="1.0" stroke-linecap="round" opacity="0.8" />
-    <rect x="22" y="78" width="56" height="8" fill="url(#kilo-body)" />
-    <!-- inner highlight line: sits flush against the rim's inner edge so
-         there is no dark gap between the two borders -->
-    <rect x="26.4" y="12.4" width="47.2" height="71.2" rx="14" fill="none" stroke="#f3c9a8" stroke-width="1.2" />
+    <!-- solid chamfered plate -->
+    <path d="M31 10 H69 L76 17 V79 L69 86 H31 L24 79 V17 Z"
+          fill="url(#kilo-body)" stroke="url(#kilo-rim)" stroke-width="3.4" />
 
-    <rect x="16.8" y="81.2" width="66.4" height="8.7" rx="4" fill="url(#kilo-bar)" />
-    <rect x="24" y="79.2" width="52" height="4.6" rx="3" fill="#ffd9b8" />
+    <!-- inner bevel line -->
+    <path d="M32 12.5 H68 L73.5 18 V78 L68 83.5 H32 L26.5 78 V18 Z"
+          stroke="#f3c9a8" stroke-width="0.8" opacity="0.5" />
 
-          <circle cx="22" cy="90" r="2.2" fill="#ffd9b8" />
-          <circle cx="78" cy="90" r="2.2" fill="#ffd9b8" />
+    <!-- status strip: etched groove + tier LED -->
+    <path d="M33 81 H59" stroke="#3a2618" stroke-width="1.2" stroke-linecap="round" />
+    <circle cx="65" cy="81" r="1.4" fill="#ffd2ab" />
 
 </svg>

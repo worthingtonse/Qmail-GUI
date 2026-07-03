@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // browser/Vite build.
   pickAttachments: () => ipcRenderer.invoke('compose:pickFiles'),
   statAttachments: (filePaths) => ipcRenderer.invoke('compose:statFiles', filePaths),
+  // Sent-box attachment metadata: fetched + sanitized in the main process so
+  // the raw send receipt never enters the renderer (docs/attachment.views.txt).
+  getSentAttachmentMetadata: (apiPort, emailId) =>
+    ipcRenderer.invoke('qmail:sent-attachment-metadata', apiPort, emailId),
   pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
   pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
   onThemeSelect: (callback) => {

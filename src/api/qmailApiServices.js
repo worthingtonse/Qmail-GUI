@@ -434,6 +434,11 @@ export const getMailList = async (folder = "inbox", limit = 50, offset = 0, sort
         // API-FIX: email.preview → email.body_preview
         preview: email.body_preview || "",
         inboxFee: email.inbox_fee || 0,
+        // Forward-compat (docs/attachment.views.txt Phase 2): the backend
+        // doesn't send attachment_count yet; map it now so the paperclip
+        // works in every folder the moment it does.
+        attachmentCount: Number(email.attachment_count) || 0,
+        hasAttachments: (Number(email.attachment_count) || 0) > 0,
 
         body: "",
       }));
@@ -1480,6 +1485,82 @@ export const getEmailAttachments = async (emailId) => {
     console.error("Get email attachments failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch attachments.`;
     return { success: false, error: errorMessage };
+  }
+};
+
+/**
+ * Reduce raw receipt upload entries to displayable attachment metadata.
+ * Keep in sync with the qmail:sent-attachment-metadata handler in
+ * electron.cjs, which performs the same sanitization in the main process.
+ */
+export const sanitizeReceiptAttachmentFiles = (files) => {
+  if (!Array.isArray(files)) return [];
+  const FAILED_STATUSES = new Set(["failed", "error", "cancelled"]);
+  return files
+    .filter((file) => String(file.role || "").toLowerCase() === "attachment")
+    .filter(
+      (file) => !FAILED_STATUSES.has(String(file.status || "").toLowerCase()),
+    )
+    .map((file, index) => {
+      const sourcePath = typeof file.source === "string" ? file.source : "";
+      const name =
+        file.name || sourcePath.split(/[\\/]/).pop() || `Attachment ${index + 1}`;
+      const dotIndex = name.lastIndexOf(".");
+      return {
+        attachmentId: `receipt-${index}`,
+        name,
+        fileExtension: dotIndex > 0 ? name.slice(dotIndex + 1) : "",
+        size: Number(file.size_bytes ?? file.size) || 0,
+        sourcePath,
+        metadataOnly: true,
+      };
+    });
+};
+
+/**
+ * Sent-mail attachment fallback (docs/attachment.views.txt): the local DB has
+ * no attachment rows for sent messages, but every modern send writes a durable
+ * receipt (Receipts/<file_guid>.json) served by GET /qmail/receipts?guid=.
+ * Modern Sent rows reuse file_guid as email_id, so the receipt is the
+ * authoritative record of what was attached. Returns sanitized metadata only
+ * (name/extension/size/sourcePath — never wallet paths, locker codes, or
+ * transfer internals), flagged metadataOnly so ReadingPane renders an
+ * informational card instead of a download control.
+ *
+ * A missing receipt (HTTP 404 — send predates receipts) is a DEFINITIVE empty
+ * result (success with no attachments); transport/server errors return
+ * success:false so callers can retry later instead of caching a false zero.
+ */
+export const getSentAttachmentMetadata = async (emailId) => {
+  try {
+    if (!emailId) throw new Error("Email ID is required");
+
+    // Electron: fetch AND sanitize in the trusted main process so the raw
+    // receipt (wallet paths, locker codes, operation IDs) never enters the
+    // renderer. The browser/Vite build has no main process and falls back
+    // to fetching directly below.
+    if (window.electronAPI?.getSentAttachmentMetadata) {
+      return await window.electronAPI.getSentAttachmentMetadata(
+        Number(API_PORT),
+        String(emailId),
+      );
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/receipts?guid=${encodeURIComponent(emailId)}`,
+    );
+    if (response.status === 404) {
+      return { success: true, data: { attachments: [] } };
+    }
+    const data = await handleResponse(response);
+    const receipt = data?.receipt || data;
+    const attachments = sanitizeReceiptAttachmentFiles(
+      receipt?.upload?.files || receipt?.files,
+    );
+    return { success: true, data: { attachments } };
+  } catch (error) {
+    console.warn("Sent attachment receipt lookup failed:", error.message);
+    return { success: false, error: error.message };
   }
 };
 

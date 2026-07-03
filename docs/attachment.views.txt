@@ -1,0 +1,688 @@
+================================================================================
+  ATTACHMENT VIEWS — RESEARCH FINDINGS AND IMPROVEMENT PLAN
+  docs/attachment.views.txt — 2026-07-02
+================================================================================
+
+Scope: how attachments behave after a qmail is sent, what the Sent box can
+show, paperclip indicators in the message list, and search/filter by
+attachment. Research was done against the GUI source; backend behavior is
+inferred from the API layer and docs/api-comparison-remaining.txt and should
+be confirmed against a running backend (see "Open questions").
+
+
+================================================================================
+  SECTION 1: HOW ATTACHMENTS WORK TODAY (research findings)
+================================================================================
+
+1.1  Compose and send
+------------------------------------------------------------------------------
+- The user picks files through a native picker in the Electron main process
+  (electron.cjs ~1298). The renderer gets back { path, name, size } entries,
+  staged in ComposeModal state (ComposeModal.jsx ~178). Limits: 250 KB per
+  file, 2 files max, combined path-length cap (~668-752).
+- On send, the GUI does NOT upload file bytes itself. It sends only the local
+  file PATHS to the backend:
+      POST /api/qmail/net/messages/upload_and_tell
+      body param: attachment_file_path=<local path> (repeated per file)
+  (qmailApiServices.js sendEmail, ~2212-2246). The C backend reads the files
+  from disk, encrypts/stripes them, and uploads to the qmail servers.
+
+1.2  "Is the attachment deleted once sent?"
+------------------------------------------------------------------------------
+No. Three different copies are involved:
+  a) The user's ORIGINAL file on disk — never touched. It stays exactly where
+     it was picked from.
+  b) The ENCRYPTED striped copy on the qmail servers — created by the send;
+     this is what the recipient downloads.
+  c) A LOCAL DB record of the attachment — for RECEIVED mail the backend
+     creates rows the GUI can list (/qmail/db/attachments/list) and download
+     (/qmail/db/attachments/get). For SENT mail the backend does not appear
+     to create these rows, so the Sent copy of the message has no attachment
+     records. THIS is why the Sent box shows nothing — the data was simply
+     never recorded, not deleted.
+Related known gap: attachments are also not persisted with drafts (old
+backend ticket "CORE-N", referenced by the since-removed compose warning).
+
+1.3  What the Sent box does today
+------------------------------------------------------------------------------
+- Folder list: GET /qmail/db/messages/list?folder=1. The GUI transform
+  (qmailApiServices.js getMailList ~401-439) maps subject/sender/timestamps/
+  fee etc. It maps NO attachment field — and per docs/api-comparison
+  the backend list rows don't include one either.
+- Opening a message: QMailDashboard handleEmailSelect (~1770) ALWAYS calls
+  getEmailAttachments(email.id) in parallel with getEmailById — including for
+  Sent mail. ReadingPane already renders an "Attachments (n)" section with
+  download buttons whenever that returns rows (ReadingPane.jsx ~470).
+  IMPORTANT CONSEQUENCE: if the backend starts recording sent-attachment
+  rows, the reading pane will show them with ZERO GUI changes.
+
+1.4  Paperclip indicator / search / filter today
+------------------------------------------------------------------------------
+- EmailListItem.jsx renders no paperclip and has no attachment data to
+  render one from (list rows carry no attachment field).
+- Search: GET /qmail/db/messages/search?query= (searchEmails ~1148) — text
+  query only, no attachment predicate.
+- Sort: EmailListPane SORT_OPTIONS = newest / unread / fee / starred, passed
+  to the list endpoint as &sort=. No attachment option.
+
+Summary of the gap: everything is missing one piece of data — per-message
+attachment metadata for sent mail (and an attachment count on list rows).
+Once that exists, the GUI work is small and additive.
+
+
+================================================================================
+  SECTION 2: GOALS
+================================================================================
+
+G1. Sent box shows what was attached (names, sizes; ideally re-downloadable).
+G2. Never mislead: if content is not available, say so explicitly rather
+    than showing nothing.
+G3. Show the original source path when we know it (with "may have moved"
+    caveat), and let the user jump to that file.
+G4. Paperclip indicator on list rows — all folders, not just Sent.
+G5. Search/filter for "messages with attachments".
+
+
+================================================================================
+  SECTION 3: PLAN
+================================================================================
+
+The plan is split so the GUI can ship value immediately (Phase A needs no
+backend change), while the real fix lands in the backend (Phase B).
+
+------------------------------------------------------------------------------
+PHASE A — client-only quick wins (no backend dependency)
+------------------------------------------------------------------------------
+
+A1. Local "sent attachment manifest".
+    At send success (ComposeModal send flow, after upload_and_tell returns
+    file_guid), persist a small record keyed by the sent message id:
+        { fileGuid, sentAt, attachments: [{ name, size, ext, sourcePath }] }
+    Storage: JSON file in Electron userData via a tiny IPC handler (mirrors
+    the existing picker/re-stat IPC in electron.cjs ~1298; localStorage is a
+    fallback for the browser build). Cap it (e.g. most recent 500 sends).
+
+A2. Sent-box reading pane uses the manifest.
+    When the open message is in Sent and /attachments/list returned nothing,
+    look up the manifest by email id (file_guid). If found, render the
+    existing attachments section in a "metadata-only" mode:
+      - name + size + extension chip (reuse ReadingPane attachment styles)
+      - no download button; instead a note:
+          "This attachment was sent with the message. The content is not
+           stored in your Sent box."
+      - "Source: <path>" with an Open-file-location button
+        (shell.showItemInFolder via IPC; the main process already has a
+        re-stat API restricted to picker-returned paths — extend that
+        allowlist to manifest paths). If re-stat fails, show
+        "Original file no longer at this location."
+    If the message is in Sent, had attachments per manifest, but nothing can
+    be shown at all, fall back to a single line:
+          "This message was sent with N attachment(s). They are not shown
+           in the Sent box."
+    This directly answers G1/G2/G3 for all NEW sends. Old sends (before the
+    manifest existed) simply show nothing, same as today.
+
+A3. Paperclip in the Sent list (partial G4).
+    Derive hasAttachments for Sent rows from the manifest (dashboard merges
+    it into the emails array after getMailList). EmailListItem renders a
+    <Paperclip size={12}> next to the timestamp when email.hasAttachments.
+    NOTE: inbox rows cannot get the icon this way — that needs Phase B2.
+
+Effort: A1+A2 ~1 day, A3 ~1-2 hours. Risk: low; purely additive.
+
+------------------------------------------------------------------------------
+PHASE B — backend changes (the proper fix)
+------------------------------------------------------------------------------
+
+B1. Record attachment rows for SENT messages.
+    When upload_and_tell stores the sent message in the local DB, also write
+    the same attachment metadata rows it writes for received mail
+    (name, extension, size_bytes, storage_mode). Two levels:
+      B1-lite: metadata only, storage_mode marks content as unavailable —
+               the GUI's existing storageMode/isDownloaded handling
+               (qmailApiServices.js ~1459-1462) can grey out download.
+      B1-full: also keep the encrypted blob or the plaintext bytes
+               (storage_mode 0 internal / 1 external) so the sender can
+               re-download their own attachment from the Sent box exactly
+               like a received one (/attachments/get already exists).
+    GUI work needed: NONE for the reading pane (see 1.3). Once B1 lands,
+    retire the A2 manifest path (keep the source-path affordance — the
+    backend won't know the original path... unless B1 also stores
+    attachment_file_path, which it receives in the send request. Recommend
+    storing it; then A1/A2 can be fully deleted).
+
+B2. Add attachment_count to messages/list rows.
+    One integer per row (0 = none). GUI change is 2 lines in the getMailList
+    transform (hasAttachments: (email.attachment_count||0) > 0, plus
+    attachmentCount) and the EmailListItem paperclip from A3 then works for
+    EVERY folder. This is the highest-value/lowest-cost backend change.
+
+B3. Search/filter by attachment.
+    Backend: accept has_attachments=1 on /qmail/db/messages/list and
+    /qmail/db/messages/search (SQL: JOIN/EXISTS on the attachments table —
+    cheap once B1/B2 exist).
+    GUI: add a filter chip/toggle in EmailListPane next to the sort pills
+    ("Attachments" pill in SORT_OPTIONS style, or a paperclip toggle button
+    in the search bar). Optionally support typing "has:attachment" in the
+    search box (strip the token client-side, set the query param).
+
+------------------------------------------------------------------------------
+PHASE C — polish (after A/B)
+------------------------------------------------------------------------------
+C1. Tooltip on the paperclip: "2 attachments (1.3 MB)" once counts/sizes
+    are on rows (needs B2 to carry total size, or lazy tooltip fetch).
+C2. Drafts: same manifest idea fixes the "attachments lost with drafts"
+    complaint (CORE-N) — on draft reopen, offer one-click re-attach from
+    stored sourcePaths, re-stat first.
+C3. Empty-state copy in Sent reading pane for pre-manifest history:
+    "Attachment details are not available for messages sent before <date>."
+
+------------------------------------------------------------------------------
+RECOMMENDED ORDER
+------------------------------------------------------------------------------
+1. B2 (attachment_count on list rows)   — tiny backend + 2-line GUI map
+2. A3/GUI paperclip on EmailListItem    — visible win, works with B2
+3. B1-lite (sent attachment metadata)   — Sent reading pane fills itself
+4. A2 note + source path (or fold into B1 if it stores attachment_file_path)
+5. B3 filter, then B1-full re-download, then C items
+If backend resources are not available soon, do A1→A2→A3 first; they are
+independent and ship this week.
+
+
+================================================================================
+  SECTION 4: OPEN QUESTIONS (verify before building)
+================================================================================
+Q1. Confirm against a live backend that /qmail/db/attachments/list returns
+    an empty set for a Sent email (test clients: 37.34@bit port 41844,
+    25.165@giga port 23320 — send between them with an attachment, then
+    inspect the sender's Sent box and hit the endpoint directly).
+Q2. Does messages/list already return any attachment field the GUI ignores?
+    (Check raw console.log "Data received from /qmail/db/messages/list".)
+Q3. Does the backend keep the uploaded stripes addressable by the SENDER
+    (needed for B1-full re-download), or are they only fetchable by the
+    recipient's keys? If sender-side re-download is impossible, B1-lite +
+    stored source path is the ceiling — the "not shown" note stays.
+Q4. Privacy check for A1/B1 storing source paths: paths can reveal user
+    directory structure; keep them local-only (never in the tell/payload).
+================================================================================
+
+
+================================================================================
+  CODEX REVIEW / IMPLEMENTATION FEEDBACK — 2026-07-02
+================================================================================
+
+Verdict
+------------------------------------------------------------------------------
+The user-facing goals are correct, and the paperclip/count/filter direction is
+sound. Do NOT implement Phase A's second Electron JSON manifest as written,
+though. The backend already creates a durable receipt for every modern send,
+keyed by the same file_guid used as the Sent message email_id. That receipt is
+already the authoritative send manifest and includes each uploaded attachment's
+role, original source path, size, transfer status, and object manifest.
+
+The proper plan is therefore:
+  1. project safe attachment metadata from the existing send receipt into the
+     mail DB/API;
+  2. add attachment_count to list/search rows;
+  3. render explicit availability states in the reading pane;
+  4. add a real attachment filter (separate from sort);
+  5. optionally retain an app-owned local copy for reliable sender download.
+
+The configured live clients on ports 41844 and 23320 did not respond during
+this review, so runtime Q1 was not performed. The findings below are confirmed
+from the current GUI and rest_core source, rather than inferred from old docs.
+
+
+Confirmed facts and corrections to the plan
+------------------------------------------------------------------------------
+
+1. The sender's original file is not deleted by the send path.
+
+   qmail_upload_files() validates and opens/reads attachment_file_path. Its
+   cleanup frees buffers but does not unlink/remove the source file. The remote
+   encrypted objects have the selected retention duration, but that is separate
+   from the user's original file.
+
+2. Sent attachment rows really are missing today.
+
+   qmail_send_tells() calls qmail_db_sent_insert(), which creates the Sent row
+   in qmail_sent_emails and qmail_emails. It does not insert qmail_attachments
+   rows. Received-mail processing does insert those rows. Therefore the GUI's
+   existing getEmailAttachments(email.id) call returns no rows for Sent mail.
+
+3. A durable send manifest already exists; Phase A1 duplicates it.
+
+   qmail_upload_files() writes:
+
+       <Mail wallet>/Receipts/<file_guid>.json
+
+   receipt.upload.files[] contains role="attachment", file_type, source (the
+   original absolute path), size_bytes, status, and per-stripe transfer data.
+   GET /api/qmail/receipts?guid=<file_guid> returns that receipt. Modern Sent
+   rows use file_guid as qmail_emails.email_id, so the lookup key already joins.
+
+   Do not make the renderer consume this raw receipt as its permanent API. The
+   receipt also contains wallet paths, locker codes, operation IDs, and other
+   transfer internals that the attachment UI does not need. Add a sanitized DB
+   projection or a narrow sent-attachment metadata endpoint instead.
+
+4. The GUI currently loses fileGuid after the initial send response.
+
+   sendEmail() correctly maps data.file_guid to result.data.fileGuid. However,
+   ComposeModal's success path eventually calls finishSend(emailData), not
+   finishSend({...emailData, fileGuid}). If an Electron-only fallback manifest
+   is ever used, capture result.data.fileGuid before task polling and persist
+   only after the task reports successful completion. Do not key by timestamp,
+   subject, or a guessed Sent row.
+
+5. B1-lite cannot reuse storage_mode=2 for "content unavailable."
+
+   The current contract is:
+     0 = internal DB blob
+     1 = app-managed external file
+     2 = pending remote download
+
+   qmailApiServices maps mode 2 to isDownloaded=false, and ReadingPane renders
+   it as "Click to download." The download endpoint then attempts recipient-side
+   on-demand retrieval. A metadata-only Sent attachment would therefore show a
+   misleading active download control and attempt the wrong code path.
+
+   Add an explicit source/availability contract, for example:
+     availability: "stored" | "remote" | "source-only" | "missing"
+     can_download: boolean
+     can_reveal_source: boolean
+
+   The renderer should use those fields, not infer behavior from storage_mode.
+
+6. CRITICAL: never store the user's original path as storage_mode=EXTERNAL.
+
+   qmail_db_email_delete() calls qmail_db_remove_external_attachment_files(),
+   which remove()s every mode-1 file_path before deleting attachment rows.
+   Reusing mode 1 for a sender-owned source path would make "permanently delete
+   this Sent message" delete the user's original document from their filesystem.
+
+   Keep ownership explicit. Recommended schema semantics:
+     - file_path: app-owned managed attachment copy; safe for QMail to delete.
+     - source_path: optional user-owned original; QMail must NEVER delete it.
+     - availability/content state: explicit, independent of path ownership.
+
+   A new source-reference storage mode can work, but only if every cleanup and
+   download branch handles it explicitly. A separate source_path column is less
+   ambiguous and preserves the meaning of existing file_path rows.
+
+7. The backend already returns file_path for mode-1 attachments, but the GUI
+   transform drops it.
+
+   api_handle_qmail_attachments emits file_path for external rows.
+   getEmailAttachments() maps name, extension, size, storageMode, and warnings,
+   but not file_path. If a source path is intentionally exposed for Sent mail,
+   return it as a distinct source_path field and map it as sourcePath. Do not
+   overload the managed download path.
+
+8. B2 is worthwhile but is more than a two-line backend change.
+
+   qmail_email_t has no attachment count. Both regular and sorted list SQL
+   select a fixed email column set, and search has a third fixed select. The API
+   handlers then serialize those structs. Implementing count consistently
+   requires updating the DB query/model/JSON contract and tests, plus the GUI
+   transform. Prefer attachment_count over only a boolean; derive
+   hasAttachments from count > 0 in the GUI.
+
+   Add this index before using correlated EXISTS/count queries or filtering:
+
+       CREATE INDEX IF NOT EXISTS idx_qmail_attachments_email_id
+       ON qmail_attachments(email_id);
+
+9. "Attachments" is a filter, not a sort mode.
+
+   Do not add it to SORT_OPTIONS. A user must be able to select both
+   sort=newest and has_attachments=1. Add a separate paperclip toggle/filter
+   chip and pass it independently to list/search.
+
+   Current search is global, requires a non-empty FTS query, has no folder or
+   offset parameter, and the UI's empty-state copy implies results belong to the
+   current folder. Resolve that contract while adding the attachment filter:
+     - list: folder, sort, limit, offset, has_attachments
+     - search: query, optional folder, limit, offset, has_attachments
+     - permit an empty query when has_attachments=1, or route that case to list
+     - return correct filtered total_count for pagination
+
+   Start with an explicit UI toggle. `has:attachment` syntax can be added later,
+   but it is not necessary for the first usable version.
+
+10. Existing receipts make partial history recovery possible.
+
+   "Old sends simply show nothing" is too pessimistic. Sent messages produced
+   since durable receipts were introduced can be backfilled/lazily projected by
+   matching Sent email_id to receipt file_guid. Only messages predating receipts
+   (or whose receipts were removed) need the historical-unavailable note.
+
+
+Recommended data and API contract
+------------------------------------------------------------------------------
+
+For each qmail_attachments row/API item, expose enough state to render without
+guessing:
+
+    attachment_id
+    email_id
+    file_type
+    name
+    extension
+    size_bytes
+    availability       stored | remote | source-only | missing
+    can_download       true/false
+    can_reveal_source  true/false
+    source_path        optional; Sent/local only
+
+For each message list/search row:
+
+    attachment_count
+    attachment_total_bytes   optional polish, cheap to aggregate
+
+Security/privacy rules:
+  - Never put source_path in the transmitted qmail/Tell/CBDF payload.
+  - Never return source paths for received mail.
+  - Never log full source paths at normal log levels.
+  - Never let hard-delete remove source_path.
+  - Browser builds show metadata/note but no filesystem reveal action.
+  - Do not expose raw receipt JSON merely to render attachment chips.
+
+
+Revised implementation phases
+------------------------------------------------------------------------------
+
+PHASE 1 — safe metadata foundation (backend)
+
+1. Add source ownership/availability semantics and the email_id index.
+2. After a successful upload/send creates the Sent row, project receipt files
+   with role="attachment" into qmail_attachments, keyed by file_guid and
+   file_type. Use the receipt's source, size, and the CBDF attachment name.
+3. Store the original as source_path only; do not mark it app-owned external.
+4. Add a best-effort/lazy receipt backfill for existing Sent messages.
+5. Return sanitized availability fields from attachments/list.
+
+Using the receipt projection is preferable to threading attachment paths into
+qmail_send_tells_options_t because the split /upload then /tell flow can run in
+different requests; the receipt is the durable handoff already designed for
+that case.
+
+PHASE 2 — list indicator and filtering (backend + GUI)
+
+1. Add attachment_count to normal list, sorted list, and search results.
+2. Add has_attachments to list/search SQL using EXISTS against the indexed
+   attachment table. Counts and pagination must apply the same predicate.
+3. Map attachmentCount/hasAttachments in qmailApiServices.
+4. Render a Lucide Paperclip in EmailListItem, preferably beside the subject or
+   timestamp. Give it `title="N attachments"` and an accessible label; show the
+   count when greater than one if layout permits.
+5. Add a separate "Attachments" filter toggle in EmailListPane. Preserve the
+   active sort. Decide explicitly whether the toggle persists across folders.
+
+PHASE 3 — Sent reading-pane states (GUI)
+
+Render attachment metadata whenever the Sent projection exists:
+
+  stored:
+    normal Save/download action.
+
+  source-only and path still exists:
+    "This attachment was sent with the message. QMail is using the original
+     file at the location below; moving or deleting it will make it unavailable."
+    Offer "Show in folder," not a misleading remote-download label.
+
+  missing:
+    "This message was sent with <name>, but the original file is no longer at
+     its recorded location."
+    Keep the name/size and paperclip visible.
+
+  historical metadata unavailable:
+    "Attachment details are unavailable for this older sent message."
+    Only show this when there is positive evidence the message had attachments;
+    do not show it for every old Sent message.
+
+ReadingPane needs a non-clickable metadata card variant. Its current attachment
+article always has role=button/tabIndex=0 and always renders a download button,
+so merely passing metadata-only rows is insufficient.
+
+PHASE 4 — reliable Sent copy (recommended product behavior)
+
+Typical mail clients retain the exact bytes attached to a Sent message. A
+source path alone is fragile. At the current GUI limit (two files, 250 KB each),
+keeping an app-owned copy is inexpensive and provides the least surprising UX.
+
+Recommended behavior:
+  - snapshot/copy the attachment into QMail-managed storage as part of the send;
+  - upload that same snapshot so the retained bytes exactly match what was sent;
+  - retain it only if the send reaches the existing Sent-record success point;
+  - on failed/cancelled sends, remove the staging copy;
+  - store the managed path as mode-1 file_path and the original separately as
+    source_path;
+  - hard-delete may remove the managed copy, never the source.
+
+Do not block the metadata/paperclip/filter work on proving sender-side download
+from remote stripes. Treat remote sender re-download as a separate capability
+test. A local managed copy is deterministic and does not depend on retention,
+keys, or recipient download logic.
+
+PHASE 5 — Electron reveal action
+
+The current main process keeps an in-memory selectedAttachmentPaths allowlist.
+That works for stat checks during the compose session but is lost on restart.
+Do not add a generic `showItemInFolder(path)` IPC that trusts an arbitrary path
+from the renderer.
+
+Prefer an IPC call taking {emailId, attachmentId}; the trusted side resolves the
+stored source reference and then calls shell.showItemInFolder. If that is not
+practical, validate requested paths against the persisted sanitized attachment
+record before revealing them. Return a typed "missing" result so the renderer
+can update its message.
+
+
+Fallback if rest_core cannot be changed immediately
+------------------------------------------------------------------------------
+
+A temporary Electron manifest is acceptable only as a short-lived compatibility
+layer, not a second permanent source of truth. If used:
+  - key by the captured result.data.fileGuid;
+  - write only after async task success;
+  - store metadata/source path, never file bytes in localStorage;
+  - use an atomic userData file with schema version and bounded retention;
+  - merge only into Sent rows whose id exactly matches fileGuid;
+  - add explicit source-only/missing UI states;
+  - preserve the original-path deletion guard;
+  - plan a migration into the backend projection and then remove the manifest.
+
+Do not derive inbox attachment icons from this Sent-only manifest. That creates
+two competing attachment-data paths and inconsistent filter results.
+
+
+Required tests / acceptance criteria
+------------------------------------------------------------------------------
+
+Backend/data:
+  [ ] Send with one/two attachments; Sent rows expose correct names/sizes/count.
+  [ ] The original source files still exist after send.
+  [ ] Permanently deleting the Sent message does NOT delete original files.
+  [ ] If managed copies are enabled, hard-delete removes only those copies.
+  [ ] Failed/cancelled sends leave no Sent attachment rows or staging copies.
+  [ ] Moving/deleting the original changes availability to missing but preserves
+      metadata and attachment_count.
+  [ ] Received PENDING attachments still perform on-demand download unchanged.
+  [ ] list/search attachment counts work for Inbox, Sent, Trash, and Archive.
+  [ ] has_attachments composes with folder, sort, FTS query, and pagination.
+  [ ] Existing receipt-era Sent messages are backfilled without duplicates.
+
+GUI:
+  [ ] Paperclip appears in every folder/search result with attachments.
+  [ ] Paperclip has tooltip/accessibility text and count semantics.
+  [ ] Attachment filter is independent of sort and has an obvious active state.
+  [ ] Sent stored/source-only/missing/history states show accurate copy/actions.
+  [ ] Metadata-only cards are not clickable and have no fake download button.
+  [ ] "Show in folder" works after application restart and handles missing files.
+  [ ] Browser build shows safe metadata without filesystem actions.
+
+
+Revised priority order
+------------------------------------------------------------------------------
+1. Define safe ownership + availability fields; add attachment email_id index.
+2. Project existing receipt attachment metadata into qmail_attachments.
+3. Add attachment_count to list/search and render the paperclip.
+4. Add the independent has_attachments filter.
+5. Add Sent reading-pane availability messages and safe reveal action.
+6. Add app-owned Sent copies for reliable download.
+7. Backfill receipt-era history and add draft attachment persistence separately.
+
+This sequence delivers visible value early without creating a duplicate manifest
+or risking deletion of user-owned files.
+================================================================================
+
+
+================================================================================
+  IMPLEMENTED — QUICK GUI-ONLY VERSION (Fable, 2026-07-02)
+================================================================================
+
+Direction taken, per Codex's review and the "get something out quick"
+constraint: NO Electron manifest was built (Codex point 3 — the backend
+receipt is already the durable send manifest). Instead the GUI reads the
+EXISTING receipt endpoint (GET /api/qmail/receipts?guid=<file_guid>) for Sent
+mail. All changes are GUI-side; no rest_core changes. Backend Phases 1/2
+(attachment rows for sent mail, attachment_count on list rows, has_attachments
+filter) remain open and this code is written to step aside when they land.
+
+Plan changes accepted from Codex feedback:
+- Dropped A1 (Electron JSON manifest) entirely; receipt endpoint used instead.
+  This also gets HISTORY for free (Codex point 10): any receipt-era send shows
+  its attachments, not just sends made after this change.
+- Dropped the storage_mode=2 reuse idea (Codex point 5): receipt-derived rows
+  carry an explicit metadataOnly flag instead, and ReadingPane renders a
+  non-interactive card variant (no role=button, no download button — Codex's
+  Phase 3 note about the always-clickable article was addressed).
+- Dropped "Attachments" from SORT_OPTIONS thinking (Codex point 9): no filter
+  was shipped in this pass at all; it needs backend has_attachments.
+- Dropped the shell.showItemInFolder reveal action for now (Codex Phase 5
+  wants a trusted {emailId, attachmentId} IPC; too much for the quick pass).
+  The source path is DISPLAYED as text only — no filesystem action, so none
+  of the path-trust concerns apply yet.
+- Source paths never leave the local API (Codex point 4/privacy rules): the
+  GUI only renders them; nothing is written back anywhere.
+
+What was changed (for code review):
+
+1. src/api/qmailApiServices.js — new export getSentAttachmentMetadata(emailId)
+   (placed directly after getEmailAttachments).
+   - GET /qmail/receipts?guid=<emailId>; tolerant of {receipt:{...}} or bare
+     receipt JSON; files read from receipt.upload.files or receipt.files.
+   - Keeps only role="attachment" entries, drops status failed/error/cancelled
+     (a failed upload was not sent, so it must not be shown as sent).
+   - Maps to sanitized { attachmentId: "receipt-<n>", name, fileExtension,
+     size, sourcePath, metadataOnly: true }. name falls back to the source
+     path basename. Wallet paths/locker codes/operation IDs are NOT mapped.
+   - Missing receipt (old sends) → caught, returns success:false; callers
+     treat it as "no attachments". console.warn only.
+
+2. src/qmail/screens/QMailDashboard.jsx
+   - Module-level sentAttachmentCountCache (Map, session-lifetime) so
+     pagination/folder revisits don't refetch receipts. Comment explicitly
+     forbids deriving inbox flags from it (Codex fallback warning).
+   - handleSelectEmail: when the stored-attachment fetch returns ZERO rows and
+     the message is in Sent, fall back to getSentAttachmentMetadata and show
+     the receipt metadata. Stored rows always win if present, so when backend
+     Phase 1 starts returning real sent rows this fallback goes dormant
+     automatically.
+   - applySentAttachmentFlags(rows, requestId) + hook in loadEmails (sent
+     folder only): fetches receipts for uncached row ids in parallel, then
+     flags rows via setEmails(prev.map(...)) with hasAttachments /
+     attachmentCount. Stale responses are dropped with the existing BUG-21
+     loadEmailsRequestRef counter. Known quick-version limitation: one tiny
+     local GET per uncached sent row per session (50/page worst case), and a
+     transient failure caches as 0 until app restart.
+
+3. src/qmail/screens/ReadingPane.jsx
+   - handleDownloadAttachment: early-return for metadataOnly rows.
+   - Attachment card: metadataOnly rows render WITHOUT onClick/role/tabIndex
+     and WITHOUT the download button (non-clickable metadata card variant),
+     with a "Not stored in Sent box" status chip and a truncated
+     "Sent from: <path>" line (full path in title tooltip).
+   - Section-level note when every row is metadata-only: "Attachment files
+     are not stored in your Sent box — they were delivered to the recipient
+     when this qmail was sent. The original file locations are shown for
+     reference."
+   - Received-mail behavior (stored/PENDING download flows) untouched.
+
+4. src/qmail/screens/EmailListItem.jsx — Lucide Paperclip before the
+   timestamp when email.hasAttachments, with title/aria-label "Has
+   attachment" or "N attachments" (Codex Phase 2.4 accessibility note).
+   Renders in ANY folder — data currently only exists for Sent; inbox rows
+   light up automatically once backend attachment_count is mapped.
+
+5. CSS: ReadingPane.css adds __attachments-note, __attachment--metadata
+   (default cursor), __attachment-status--metadata, __attachment-source;
+   EmailListPane.css adds __attachment-icon.
+
+Verification: eslint clean on all four changed files; vitest 118/118; vite
+production build succeeds. NOT yet verified against a live backend (the test
+clients on ports 41844/23320 were down during both reviews) — the receipt
+response shape (receipt.upload.files[].role/source/size_bytes/status) is
+taken from Codex's rest_core reading and handled defensively; if the real
+shape differs, getSentAttachmentMetadata is the only place to adjust.
+
+Still open (unchanged from revised priority order): backend attachment rows
+for sent mail, attachment_count on list/search rows, has_attachments filter +
+UI toggle, trusted reveal-in-folder IPC, app-owned sent copies, draft
+attachment persistence.
+
+
+--------------------------------------------------------------------------------
+REVIEW FIXES (Fable, 2026-07-02, second pass) — response to the 7 findings
+--------------------------------------------------------------------------------
+
+1. HIGH stale receipt race — FIXED. The receipt fallback in handleSelectEmail
+   now checks selectedEmailRef (the existing ref-mirror of selectedEmail)
+   after the await and only calls setEmailAttachments when the fetched email
+   is still the selected one. The count cache still updates either way.
+
+2. HIGH raw receipt enters renderer — FIXED for the desktop build. New
+   ipcMain handler 'qmail:sent-attachment-metadata' (electron.cjs) fetches
+   the receipt and sanitizes it IN THE MAIN PROCESS (validates 32-hex guid +
+   port range first); preload.cjs exposes electronAPI.getSentAttachmentMetadata;
+   getSentAttachmentMetadata() prefers the bridge when present. The
+   renderer-side fetch+sanitize remains ONLY as the browser/Vite fallback,
+   where there is no main process and the renderer is the whole app anyway.
+   The mapping lives in exported sanitizeReceiptAttachmentFiles() with a
+   keep-in-sync comment on both copies.
+
+3. MED sort/search lose paperclips — FIXED. applySentAttachmentFlags now
+   accepts any row set and internally selects rows with folder==="sent",
+   no existing flag, and no cache entry; both the sort reload path and the
+   search results path call it after their setEmails.
+
+4. MED attachment_count not future-proofed — FIXED. getMailList now maps
+   attachmentCount/hasAttachments from backend attachment_count (0 until the
+   backend ships it); the dashboard list + sort transforms carry the fields
+   through, and the search transform maps raw attachment_count. Receipt
+   flagging skips rows that already have a backend-provided flag.
+
+5. MED unbounded receipt fan-out + permanent zero-caching — FIXED. Lookups
+   run 6 at a time (RECEIPT_FETCH_CONCURRENCY). Cache policy: only
+   definitive answers are cached — HTTP 404 (no receipt; pre-receipt send)
+   now returns success:true/empty and is cached, while transport/server
+   errors return success:false and are NOT cached, so they retry on the
+   next folder load.
+
+6. MED "delivered to the recipient" overstates Tell — FIXED. Note now reads
+   "…they were included when this qmail was sent."
+
+7. LOW hover affordance on metadata cards — FIXED.
+   .reading-pane__attachment--metadata:hover pins the base background.
+
+Test coverage (was: none): new src/api/qmailApiServices.sentAttachments.test.js
+covers sanitizeReceiptAttachmentFiles (role/status filtering, field mapping,
+non-array input), wrapped-receipt parsing via the fetch fallback, 404 →
+definitive empty, transport error → retryable failure, and Electron-bridge
+preference (bridge called, fetch not). Suite: 124/124 passing; production
+build passes. The two pre-existing App.jsx hook lint warnings and the
+missing live-backend verification (test clients still down) remain open.
+Race handling and paperclip rendering remain manually-verified-only — they
+live in QMailDashboard, which has no test harness today.
+================================================================================
