@@ -2621,7 +2621,10 @@ export const getDefaultWalletReceipt = async (filename, walletPath = null) => {
 const getTaskIdFromResponse = (data) =>
   data?.task_id || data?.taskId || data?.payload?.task_id || data?.payload?.id || null;
 
-const CLOUDCOIN_DEPOSIT_EXTENSIONS = [".bin", ".stack", ".zip", ".png"];
+// rest_core currently implements the raw binary and JSON stack readers only.
+// Keep this list aligned with cmd_deposit.c so the GUI never advertises an
+// archive/image format that the backend cannot unpack.
+const CLOUDCOIN_DEPOSIT_EXTENSIONS = [".bin", ".stack"];
 const CLOUDCOIN_DEPOSIT_EXTENSION_LABEL = CLOUDCOIN_DEPOSIT_EXTENSIONS.join(", ");
 
 const isSupportedCloudCoinDepositFile = (filePath) => {
@@ -2690,13 +2693,13 @@ export const depositCloudCoinFolder = async (folderPath, memo = "QMail folder de
 
 export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null) => {
   try {
-    const normalizedKey = normalizeLockerCode(lockerCode);
-    if (!validateLockerCode(normalizedKey)) {
-      throw new Error("Enter a locker code in the format XXX-XXXX.");
+    const lockerKey = String(lockerCode || "").trim();
+    if (!lockerKey) {
+      throw new Error("Enter a locker key.");
     }
 
     const url = new URL(`${API_BASE_URL}/locker/download`);
-    url.searchParams.set("locker_key", normalizedKey);
+    url.searchParams.set("locker_key", lockerKey);
     const resolvedWalletPath = await addWalletPathParam(url, walletPath);
 
     const response = await fetch(url.toString());
@@ -2705,9 +2708,51 @@ export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = nul
       throw new Error(extractApiErrorMessage(data, "Locker download failed."));
     }
 
-    return { success: true, data: { ...data, locker_key: normalizedKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
+    return { success: true, data: { ...data, locker_key: lockerKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
   } catch (error) {
     console.error("Download locker to Default wallet failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Assign the highest-value eligible coin in Default as the QMail identity.
+ * Selection, exact-serial movement, Mail-wallet protection, and rollback are
+ * deliberately backend-owned so every future client gets identical behavior.
+ */
+export const provisionQMailIdentityFromDefault = async () => {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/local/identity/provision-from-default`,
+      { method: "POST" },
+    );
+    const data = await handleResponse(response);
+    if (data?.status !== "success" && data?.success !== true) {
+      throw new Error(extractApiErrorMessage(data, "Identity setup failed."));
+    }
+    return { success: true, data };
+  } catch (error) {
+    console.error("Provision QMail identity from Default failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const getQMailIdentityProvisionStatus = async () => {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/local/identity/provision-status`,
+    );
+    const data = await handleResponse(response);
+    return {
+      success: true,
+      data: {
+        ...data,
+        canFinish: data?.can_finish === true,
+        identityExists: data?.identity_exists === true,
+      },
+    };
+  } catch (error) {
+    console.error("Check QMail identity provisioning status failed:", error);
     return { success: false, error: error.message };
   }
 };
@@ -2773,6 +2818,8 @@ export const waitForTaskCompletion = async (
   };
 };
 /**
+ * @deprecated First-run setup now downloads into Default and calls
+ * provisionQMailIdentityFromDefault(). Retained for external/legacy callers.
  * Imports credentials using a locker code.
  * Scenario 1 & 2: Success (Healthy or Healed)
  * Scenario 3: Invalid Format (400)

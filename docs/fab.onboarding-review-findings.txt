@@ -1,0 +1,174 @@
+REVIEW FINDINGS: FIRST-RUN CLOUDCOIN ONBOARDING IMPLEMENTATION
+===============================================================
+
+Date: 2026-07-04
+Reviewer prefix: fab (Claude Fable 5)
+Reviewed: uncommitted working-tree changes implementing
+docs/gpt.new-bootup-options.txt (ServiceSelectionScreen.jsx,
+WalletActionModal.jsx, qmailApiServices.js, electron.cjs, plus the rest_core
+provision-from-default endpoint).
+
+Verified before review: full suite passes (17 files / 139 tests), ESLint clean
+on all touched files, the rest_core endpoint exists and returns
+mail_wallet_path, and cmd_deposit.c genuinely has no zip/png readers (so the
+.bin/.stack narrowing is correct, not a regression).
+
+PRODUCT DECISIONS ALREADY MADE (do not re-litigate)
+---------------------------------------------------
+- Minimum identity coin is 1 CC or greater. The backend's denomination 0..4
+  window is CORRECT as implemented. No change needed; any user-facing copy
+  should say 1 CC+, not "more than 10".
+- No warning about source files being moved is required. Do not add one.
+- Purchase button: KEEP, see finding 1.
+
+
+FINDING 1 (REQUIRED): Restore the purchase button
+--------------------------------------------------
+src/screens/ServiceSelectionScreen.jsx
+
+The rewrite deleted the "Buy Locker Code" button (and its info popover / hint)
+that previously opened https://www.distributedmailsystem.com/register. The
+launch screen now offers only Locker / Files / Folder, so a brand-new user
+with no coins has no purchase path at all.
+
+Restore a purchase button alongside the three bootstrap sources, opening the
+same URL as before (the link target may change later, so keep the URL in one
+easily-edited place). Behavior "as is" from the old screen is fine.
+
+
+FINDING 2 (HIGH): Dead end when identity provisioning fails after a
+successful deposit
+--------------------------------------------------------------------
+src/qmail/screens/WalletActionModal.jsx, src/screens/ServiceSelectionScreen.jsx
+
+Sequence:
+  1. Onboarding deposit succeeds. The deposit MOVES the user's coin files into
+     the Default wallet - the originals are consumed (fs_move_file in
+     cmd_deposit.c). A locker key is likewise emptied.
+  2. provisionQMailIdentityFromDefault() fails (network blip, backend restart).
+  3. The Cancel/Close button is enabled (isWorking is false). User closes.
+  4. Reopening the modal resets all state (the isOpen useEffect), so
+     depositCompleted is false and "Retry Identity Setup" is unreachable.
+     The ONLY path back to provisioning is another successful deposit - and
+     the user may have nothing left to deposit.
+  5. App restart does not help: hasId() checks only Mail/Bank + Mail/Fracked,
+     so the user lands back on the launch screen with coins stranded in
+     Default and no identity.
+
+Suggested fix: make provisioning re-entrant from the launch screen. E.g. when
+the onboarding modal opens (or when ServiceSelectionScreen mounts with no
+identity), probe provision-from-default or check Default for an eligible
+coin, and if one exists surface a "Finish identity setup" action that calls
+the provision endpoint directly without requiring a new deposit. The
+endpoint's 422 ("no eligible coin") makes a silent probe safe and cheap.
+
+
+FINDING 3 (MEDIUM): Dashboard Add Funds regression from depositCompleted
+-------------------------------------------------------------------------
+src/qmail/screens/WalletActionModal.jsx
+
+setDepositCompleted(true) runs in BOTH modes, but the gating it drives should
+be onboarding-only:
+
+  - Method tabs: disabled={isWorking || depositCompleted}
+  - Choose Files / Choose Folder buttons: same
+  - handleAddMethodChange: blocked when depositCompleted
+  - addSubmitDisabled: `depositCompleted ? isWorking : ...` leaves the submit
+    button ENABLED with nothing selected
+
+Net effect in the normal dashboard flow: after one successful deposit, the
+tabs and pickers lock up while the submit button stays clickable; clicking it
+re-runs handleAddFunds, which wipes the success/receipt state and shows a
+"choose at least one file" validation error (which incidentally unlocks the
+UI again). Before this change the user could immediately start a second
+deposit.
+
+Fix: scope every depositCompleted-based disable/branch to onboardingMode
+(e.g. `onboardingMode && depositCompleted`), leaving dashboard behavior
+exactly as it was.
+
+
+FINDING 4 (MEDIUM): 409 trap for signed-out users who still have an identity
+------------------------------------------------------------------------------
+src/screens/ServiceSelectionScreen.jsx
+
+ServiceSelectionScreen is reachable after Sign Out while a Mail identity
+still exists on disk (the skipAutoRestore case - the screen then shows "Use
+existing local identity" PLUS the three bootstrap sources). If such a user
+runs an onboarding deposit:
+
+  - Coins move into Default (recoverable as funds, but the user meant to set
+    up an identity).
+  - provision-from-default returns 409 "Mail already contains an identity
+    coin" - correct backend behavior - but the modal's "Retry Identity Setup"
+    button can then never succeed; every retry 409s.
+
+Fix: when localIdentityAvailable is true, either hide the bootstrap sources,
+or intercept before deposit with "This device already has a QMail identity -
+use it instead?" so the user never lands in an unwinnable retry loop.
+
+
+FINDING 5 (MEDIUM): Closing instead of clicking Continue wedges the session
+-----------------------------------------------------------------------------
+src/qmail/screens/WalletActionModal.jsx, src/screens/ServiceSelectionScreen.jsx
+
+After provisioning SUCCEEDS the footer shows both "Close" and "Continue".
+Choosing Close returns to a stale launch screen: the local-identity check ran
+once on mount, so no "Use existing local identity" button appears, and any
+new deposit now hits the Finding-4 409. The session is wedged until an app
+restart (restart works because hasId() then finds the Mail coin).
+
+Fix: in onboarding mode, when the modal closes while identityAssignment is
+set, proceed as if Continue was pressed (call onIdentityReady), or have
+ServiceSelectionScreen re-run its local-identity check on modal close.
+
+
+FINDING 6 (LOW): Dead code - importCredentials
+------------------------------------------------
+src/api/qmailApiServices.js (~line 2806)
+
+The locker onboarding path no longer uses importCredentials(); it now has
+zero callers in the GUI. Remove the export (and consider whether the
+rest_core /api/qmail/import-credentials endpoint is still needed by anything
+else) or mark it deprecated with a pointer to the new flow.
+
+
+FINDING 7 (LOW): Onboarding locker input placeholder contradicts relaxed keys
+-------------------------------------------------------------------------------
+src/qmail/screens/WalletActionModal.jsx
+
+In onboarding mode the input accepts arbitrary-length keys (maxLength
+removed, any non-empty string valid) but still shows placeholder "XXX-XXXX".
+Use a neutral placeholder ("Locker key") or hint text in onboarding mode.
+
+
+FINDING 8 (LOW): Possibly false security claim
+------------------------------------------------
+src/screens/ServiceSelectionScreen.jsx
+
+New copy: "Your credentials are encrypted and stored locally". Coin .bin
+files in the wallet folders are not encrypted at rest. Either drop
+"encrypted" ("Your coins are stored locally on this device") or verify the
+claim before shipping it.
+
+
+FINDING 9 (LOW): Contradictory banners after provisioning failure
+-------------------------------------------------------------------
+src/qmail/screens/WalletActionModal.jsx
+
+When the deposit succeeds but provisionIdentity() fails, the success banner
+"Funds added to the Default wallet." and the error "Funds were added, but the
+QMail identity could not be assigned." render at the same time. Keep one -
+the error already conveys that funds landed.
+
+
+NOT ISSUES (checked, no action)
+--------------------------------
+- .bin/.stack narrowing: verified against cmd_deposit.c; zip/png readers do
+  not exist. The gpt doc's original claim they were supported was wrong.
+- Backend provision handler: 409 guard, deterministic selection (highest
+  value, Bank over Fracked, lowest serial), verify + rollback, transaction
+  log entries, mail_wallet_path in the response - all sound.
+- downloadLockerToDefaultWallet relaxation to any non-empty key: fine; the
+  dashboard modal still enforces XXX-XXXX in its own UI.
+- Test/lint claims in the doc: reproduced (139/139 pass, ESLint clean).

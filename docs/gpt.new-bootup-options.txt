@@ -7,8 +7,50 @@ Revision basis:
   - User decisions supplied after the first review
   - Cross-review of docs/fab.new-bootup-options.txt
   - Current Qmail-GUI and D:/Code/src/C/rest_core source
-Scope: investigation and implementation note only; no application behavior
-was changed.
+Scope: implemented in Qmail-GUI and D:/Code/src/C/rest_core.
+
+
+IMPLEMENTATION STATUS - 2026-07-04
+==================================
+
+Implemented the recommended Default-first design for all three first-run
+sources: locker key, .bin/.stack files, and folder. ServiceSelectionScreen now
+opens the existing WalletActionModal in onboarding mode, retaining deposit
+progress and receipt handling. A new CloudCoin purchase flow remains deferred.
+The existing Buy Locker Code action remains available while its destination
+and longer-term CloudCoin purchase flow are evaluated separately.
+
+rest_core now owns deterministic identity assignment through:
+
+  POST /api/qmail/local/identity/provision-from-default
+  GET  /api/qmail/local/identity/provision-status
+
+The endpoint refuses to replace an existing Mail identity, selects the
+highest eligible Default coin (denomination code 0..4), prefers Bank over
+Fracked on an equal value, then prefers the lowest serial number. It moves the
+exact serial with fs_move_file(), preserves Bank/Fracked, refreshes and verifies
+the QMail identity, and returns the coin to Default if verification fails.
+The status endpoint is non-mutating and lets the launch screen resume setup
+after an interrupted provision or application restart without another deposit.
+
+The generic transfer endpoint now also accepts serial_number (or serial), so
+exact-coin movement is reusable outside onboarding. Its legacy amount behavior
+is retained.
+
+Locker keys are passed through after trimming and may be any non-empty string.
+ZIP and PNG are rejected by both the desktop picker and GUI API helper, and
+rest_core deposit discovery now accepts only .bin and .stack. CCv1/CCv2 input
+continues through the existing inline legacy conversion in the deposit task.
+
+Verification completed:
+
+  - Qmail-GUI production build passes.
+  - Qmail-GUI: 17 test files, 141 tests pass.
+  - rest_core production build passes.
+  - rest_core: all 23 CTest targets pass.
+  - Focused tests cover arbitrary locker keys, ZIP/PNG rejection, provisioning
+    request shape, recovery-status mapping, and existing-Mail conflict
+    propagation.
 
 
 REVISED CONCLUSION
@@ -481,33 +523,13 @@ Packaged integration:
   [ ] Restart detects the promoted Mail identity and bypasses onboarding.
 
 
-REMAINING QUESTION
+RESOLVED QUESTIONS
 ==================
 
-Does "the coins should all go into Default" also apply to the existing locker
-code path?
-
-Current first-run locker behavior uses importCredentials(), which downloads
-directly into Mail and applies QMail-specific replacement/refresh behavior. If
-the new Default-first rule applies to locker imports too, the cleaner final
-design is to use the Add Funds modal's general locker download into Default,
-then run the same largest-coin promotion used by Files and Folder. That would
-make all three sources consistent, but it is a deliberate change to the current
-locker workflow and should be confirmed.
-
-
-IMPLEMENTATION ORDER
-====================
-
-1. Confirm whether locker import also becomes Default-first.
-2. Add and test the atomic promote-from-default backend operation (or approve
-   the show-coins + transfer MVP).
-3. Restrict advertised formats to .bin/.stack, or implement zip/png unpacking.
-4. Add onboarding props/callbacks to WalletActionModal without changing its
-   dashboard defaults.
-5. Add Files/Folder launch choices and verified provisioning routing.
-6. Add GUI and backend tests, then run packaged Electron tests with CCv3, CCv1,
-   CCv2, multiple denominations, Fracked, and failure inputs.
+Locker imports use the same Default-first flow as files and folders. Equal
+values prefer Bank and then the lowest serial number. Existing Mail identities
+are never replaced. Arbitrary non-empty locker keys are preserved. ZIP and PNG
+remain disabled until their rest_core unpackers are implemented.
 
 
 FINAL ASSESSMENT

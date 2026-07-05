@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ArrowRight,
   CheckCircle,
   Clipboard,
   Download,
@@ -19,6 +20,7 @@ import {
   downloadLockerToDefaultWallet,
   getDefaultWalletReceipt,
   normalizeLockerCode,
+  provisionQMailIdentityFromDefault,
   validateLockerCode,
   waitForTaskCompletion,
   withdrawToLockerCode,
@@ -33,7 +35,7 @@ const ADD_METHODS = [
   { id: "files", label: "Files", icon: File },
 ];
 
-const SUPPORTED_DEPOSIT_FILE_LABEL = ".bin, .stack, .zip, .png";
+const SUPPORTED_DEPOSIT_FILE_LABEL = ".bin, .stack";
 
 const formatBalance = (value) => {
   const number = Number(value);
@@ -310,9 +312,14 @@ const ReceiptDetails = ({ receipt }) => {
 const WalletActionModal = ({
   isOpen,
   initialMode = "add",
+  initialAddMethod = "locker",
+  onboardingMode = false,
+  resumeProvisioning = false,
   walletBalance,
   onClose,
   onWalletUpdated,
+  onIdentityReady,
+  onProvisionDeferred,
 }) => {
   const [mode, setMode] = useState(initialMode === "withdraw" ? "withdraw" : "add");
   const [addMethod, setAddMethod] = useState("locker");
@@ -333,6 +340,8 @@ const WalletActionModal = ({
   const [isReceiptLoading, setIsReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
   const [showRawReceipt, setShowRawReceipt] = useState(false);
+  const [depositCompleted, setDepositCompleted] = useState(false);
+  const [identityAssignment, setIdentityAssignment] = useState(null);
 
   const walletPickerSupported =
     typeof window !== "undefined" &&
@@ -343,7 +352,7 @@ const WalletActionModal = ({
   useEffect(() => {
     if (!isOpen) return;
     setMode(initialMode === "withdraw" ? "withdraw" : "add");
-    setAddMethod("locker");
+    setAddMethod(ADD_METHODS.some(({ id }) => id === initialAddMethod) ? initialAddMethod : "locker");
     setSelectedFiles([]);
     setSelectedFolder(null);
     setLockerCode("");
@@ -351,7 +360,11 @@ const WalletActionModal = ({
     setIsWorking(false);
     setStatusMessage("");
     setError("");
-    setSuccessMessage("");
+    setSuccessMessage(
+      onboardingMode && resumeProvisioning
+        ? "CloudCoins are ready in the Default wallet."
+        : "",
+    );
     setWithdrawLockerCode("");
     setCopied(false);
     setReceiptFilename("");
@@ -361,9 +374,13 @@ const WalletActionModal = ({
     setIsReceiptLoading(false);
     setReceiptError("");
     setShowRawReceipt(false);
-  }, [initialMode, isOpen]);
+    setDepositCompleted(onboardingMode && resumeProvisioning);
+    setIdentityAssignment(null);
+  }, [initialAddMethod, initialMode, isOpen, onboardingMode, resumeProvisioning]);
 
-  const modalTitle = mode === "withdraw" ? "Withdraw" : "Add Funds";
+  const modalTitle = onboardingMode
+    ? "Set Up QMail"
+    : mode === "withdraw" ? "Withdraw" : "Add Funds";
   const walletTotal = walletBalance?.totalValue ?? walletBalance?.totalCoins ?? 0;
 
   const fileSummary = useMemo(() => {
@@ -391,16 +408,46 @@ const WalletActionModal = ({
     setWithdrawLockerCode("");
     setCopied(false);
     resetReceiptState();
+    setDepositCompleted(false);
+    setIdentityAssignment(null);
+  };
+
+  const deliverIdentity = async () => {
+    if (!identityAssignment) return;
+    setIsWorking(true);
+    setError("");
+    setStatusMessage("Loading the new identity...");
+    try {
+      if (typeof onIdentityReady === "function") {
+        await onIdentityReady(identityAssignment);
+      }
+    } catch (err) {
+      setStatusMessage("");
+      setError(err?.message || "The new QMail identity could not be loaded.");
+    } finally {
+      setIsWorking(false);
+    }
   };
 
   const handleClose = () => {
     if (isWorking) return;
+    // Closing after a successful provision means Continue — but only on the
+    // first try. If delivery already failed (error set), let the user out;
+    // the launch screen re-probes provision/identity state on close.
+    if (onboardingMode && identityAssignment && !error) {
+      deliverIdentity();
+      return;
+    }
     onClose();
   };
 
 
   const handleAddMethodChange = (nextMethod) => {
-    if (isWorking || addMethod === nextMethod) return;
+    if (
+      isWorking ||
+      (onboardingMode && depositCompleted) ||
+      addMethod === nextMethod
+    ) return;
     resetOperationState();
     setAddMethod(nextMethod);
   };
@@ -447,6 +494,32 @@ const WalletActionModal = ({
     });
   };
 
+  const provisionIdentity = async () => {
+    setStatusMessage("Selecting the QMail identity coin...");
+    const provisionResult = await provisionQMailIdentityFromDefault();
+    if (!provisionResult?.success) {
+      setStatusMessage("");
+      setSuccessMessage("");
+      if (onboardingMode && typeof onProvisionDeferred === "function") {
+        onProvisionDeferred();
+      }
+      setError(
+        provisionResult?.error ||
+          "Funds were added, but the QMail identity could not be assigned.",
+      );
+      return null;
+    }
+
+    const assignment = provisionResult.data;
+    setIdentityAssignment(assignment);
+    setStatusMessage("");
+    setError("");
+    setSuccessMessage(
+      `QMail identity ${assignment.address || assignment.serial_number} is ready.`,
+    );
+    return assignment;
+  };
+
   const handleAddFunds = async () => {
     resetOperationState();
     setIsWorking(true);
@@ -473,8 +546,15 @@ const WalletActionModal = ({
         receiptTaskId = result?.data?.task_id || result?.data?.taskId;
         result = await finishDepositTask(result);
       } else {
-        if (!validateLockerCode(lockerCode)) {
-          setError("Enter a locker code in the format XXX-XXXX.");
+        const validLocker = onboardingMode
+          ? lockerCode.trim().length > 0
+          : validateLockerCode(lockerCode);
+        if (!validLocker) {
+          setError(
+            onboardingMode
+              ? "Enter a locker key."
+              : "Enter a locker code in the format XXX-XXXX.",
+          );
           return;
         }
         setStatusMessage("Downloading locker...");
@@ -493,11 +573,33 @@ const WalletActionModal = ({
       setReceiptFilename(nextReceiptFilename);
       setReceiptWalletPath(getReceiptWalletPathFromResult(result));
       setSuccessMessage("Funds added to the Default wallet.");
+      setDepositCompleted(true);
       setSelectedFiles([]);
       setSelectedFolder(null);
       setLockerCode("");
+      if (onboardingMode) {
+        await provisionIdentity();
+      }
     } catch (err) {
       setError(err?.message || "Add funds failed.");
+    } finally {
+      setIsWorking(false);
+    }
+  };
+
+  const handleOnboardingContinue = async () => {
+    setIsWorking(true);
+    try {
+      if (!identityAssignment) {
+        setError("");
+        setStatusMessage("");
+        await provisionIdentity();
+        return;
+      }
+      await deliverIdentity();
+    } catch (err) {
+      setStatusMessage("");
+      setError(err?.message || "The new QMail identity could not be loaded.");
     } finally {
       setIsWorking(false);
     }
@@ -534,6 +636,10 @@ const WalletActionModal = ({
       handleWithdraw();
       return;
     }
+    if (onboardingMode && depositCompleted) {
+      handleOnboardingContinue();
+      return;
+    }
     handleAddFunds();
   };
 
@@ -567,11 +673,15 @@ const WalletActionModal = ({
     }
   };
 
-  const addSubmitDisabled =
-    isWorking ||
-    (addMethod === "files" && selectedFiles.length === 0) ||
-    (addMethod === "folder" && !selectedFolder?.path) ||
-    (addMethod === "locker" && !validateLockerCode(lockerCode));
+  const lockerInputValid = onboardingMode
+    ? lockerCode.trim().length > 0
+    : validateLockerCode(lockerCode);
+  const addSubmitDisabled = onboardingMode && depositCompleted
+    ? isWorking
+    : isWorking ||
+      (addMethod === "files" && selectedFiles.length === 0) ||
+      (addMethod === "folder" && !selectedFolder?.path) ||
+      (addMethod === "locker" && !lockerInputValid);
 
   const withdrawSubmitDisabled =
     isWorking || !Number.isInteger(Number(withdrawAmount)) || Number(withdrawAmount) <= 0;
@@ -605,9 +715,16 @@ const WalletActionModal = ({
 
         <form className="compose-modal__body wallet-action-modal__body" onSubmit={handleSubmit}>
           <div className="wallet-action-modal__balance">
-            <span>Default Wallet</span>
-            <strong>{formatBalance(walletTotal)}</strong>
+            <span>{onboardingMode ? "Import destination" : "Default Wallet"}</span>
+            <strong>{onboardingMode ? "Default Wallet" : formatBalance(walletTotal)}</strong>
           </div>
+
+          {onboardingMode && (
+            <p className="wallet-action-modal__receipt-note">
+              Import into Default first. The highest-value coin of at least 1 CC
+              becomes the Mail identity; all remaining coins stay in Default.
+            </p>
+          )}
 
           {mode === "add" ? (
             <section className="wallet-action-modal__section" aria-label="Add funds">
@@ -620,7 +737,7 @@ const WalletActionModal = ({
                       type="button"
                       className={`wallet-action-modal__method-tab ${addMethod === method.id ? "wallet-action-modal__method-tab--active" : ""}`}
                       onClick={() => handleAddMethodChange(method.id)}
-                      disabled={isWorking}
+                      disabled={isWorking || (onboardingMode && depositCompleted)}
                     >
                       <Icon size={15} />
                       <span>{method.label}</span>
@@ -635,12 +752,13 @@ const WalletActionModal = ({
                     className="wallet-action-modal__picker-button"
                     type="button"
                     onClick={handlePickFiles}
-                    disabled={isWorking}
+                    disabled={isWorking || (onboardingMode && depositCompleted)}
                   >
                     <File size={16} />
                     <span>Choose Files</span>
                   </button>
                   <span className="wallet-action-modal__selection">{fileSummary}</span>
+                  <small>Accepted files: {SUPPORTED_DEPOSIT_FILE_LABEL}</small>
                 </div>
               )}
 
@@ -650,7 +768,7 @@ const WalletActionModal = ({
                     className="wallet-action-modal__picker-button"
                     type="button"
                     onClick={handlePickFolder}
-                    disabled={isWorking}
+                    disabled={isWorking || (onboardingMode && depositCompleted)}
                   >
                     <FolderOpen size={16} />
                     <span>Choose Folder</span>
@@ -669,12 +787,16 @@ const WalletActionModal = ({
                     type="text"
                     value={lockerCode}
                     onChange={(event) => {
-                      setLockerCode(normalizeLockerCode(event.target.value));
+                      setLockerCode(
+                        onboardingMode
+                          ? event.target.value
+                          : normalizeLockerCode(event.target.value),
+                      );
                       resetOperationState();
                     }}
-                    placeholder="XXX-XXXX"
-                    maxLength={8}
-                    disabled={isWorking}
+                    placeholder={onboardingMode ? "Locker key" : "XXX-XXXX"}
+                    maxLength={onboardingMode ? undefined : 8}
+                    disabled={isWorking || (onboardingMode && depositCompleted)}
                     autoComplete="off"
                   />
                 </div>
@@ -757,7 +879,7 @@ const WalletActionModal = ({
               onClick={handleClose}
               disabled={isWorking}
             >
-              {successMessage ? "OK" : "Cancel"}
+              {identityAssignment || (!onboardingMode && successMessage) ? "Close" : "Cancel"}
             </button>
             <button
               className="compose-modal__send-button"
@@ -773,6 +895,16 @@ const WalletActionModal = ({
                 <>
                   <Upload size={16} />
                   <span>Withdraw</span>
+                </>
+              ) : onboardingMode && identityAssignment ? (
+                <>
+                  <ArrowRight size={16} />
+                  <span>Continue</span>
+                </>
+              ) : onboardingMode && depositCompleted ? (
+                <>
+                  <Download size={16} />
+                  <span>{error ? "Retry Identity Setup" : "Finish Identity Setup"}</span>
                 </>
               ) : (
                 <>

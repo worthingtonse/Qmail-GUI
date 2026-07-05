@@ -1519,7 +1519,7 @@ ipcMain.handle('wallet:pickCoinFiles', async () => {
     result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose CloudCoin files',
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack', 'zip', 'png'] }],
+      filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack'] }],
     });
   } catch (error) {
     log('wallet:pickCoinFiles dialog error: ' + error.message);
