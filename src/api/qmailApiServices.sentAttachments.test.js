@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getSentAttachmentMetadata,
+  revealSentAttachment,
   sanitizeReceiptAttachmentFiles,
 } from "./qmailApiServices.js";
 
@@ -138,5 +139,25 @@ describe("getSentAttachmentMetadata", () => {
       globalThis.window.electronAPI.getSentAttachmentMetadata,
     ).toHaveBeenCalledWith(expect.any(Number), EMAIL_ID);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("revealSentAttachment", () => {
+  it("uses the trusted Electron bridge with IDs instead of a source path", async () => {
+    const bridged = { success: true, path: "C:\\Docs\\notes.txt" };
+    globalThis.window = {
+      electronAPI: {
+        revealSentAttachment: vi.fn().mockResolvedValue(bridged),
+      },
+    };
+
+    const result = await revealSentAttachment(EMAIL_ID, "receipt-1");
+
+    expect(result).toBe(bridged);
+    expect(window.electronAPI.revealSentAttachment).toHaveBeenCalledWith(
+      expect.any(Number),
+      EMAIL_ID,
+      "receipt-1",
+    );
   });
 });

@@ -10,6 +10,13 @@ const TERMINAL_TRANSFER_STATES = new Set([
 const RETRYABLE_PROTOCOL_STATUSES = new Set([225, 252, 253]);
 
 const PROTOCOL_ERROR_PROFILES = {
+  169: {
+    code: "payment_required",
+    title: "Payment required",
+    message:
+      "The server requires a funded payment for this object transfer.",
+    canRetry: false,
+  },
   218: {
     code: "tcp_required",
     title: "TCP connection required",

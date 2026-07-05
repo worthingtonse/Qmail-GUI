@@ -1,0 +1,526 @@
+QMAIL FIRST-RUN CLOUDCOIN FILE/FOLDER OPTIONS - REVISED
+========================================================
+
+Review date: 2026-07-04
+Reviewer/model prefix: gpt (GPT-5)
+Revision basis:
+  - User decisions supplied after the first review
+  - Cross-review of docs/fab.new-bootup-options.txt
+  - Current Qmail-GUI and D:/Code/src/C/rest_core source
+Scope: investigation and implementation note only; no application behavior
+was changed.
+
+
+REVISED CONCLUSION
+==================
+
+The user's decisions materially change the recommended flow. Uploaded coins
+must first use the normal "+ Add Funds" deposit path into:
+
+  Client_Data/Wallets/Default
+
+After the deposit and any legacy conversion finish, QMail must move exactly one
+eligible coin - the highest-value coin - from Default to the matching folder in
+the Mail wallet:
+
+  Default/Bank    -> Mail/Bank
+  Default/Fracked -> Mail/Fracked
+
+The remaining coins stay in Default as spendable funds. This removes the main
+ambiguity in the original gpt/fab findings: the whole deposit must NOT target
+Mail. It also makes reuse of the existing WalletActionModal preferable because
+that modal already targets Default and already supplies native selection,
+progress, task polling, result handling, and deposit receipts.
+
+One additional promotion step is required after Add Funds completes. No GUI or
+API helper currently performs the full operation "choose the largest eligible
+Default coin, move it to the same-grade Mail folder, and refresh QMail identity"
+as one transaction. The backend has nearly all of the component functions, and
+an existing wallet-transfer endpoint can implement an MVP, but a small dedicated
+identity-promotion endpoint would be safer and easier to test.
+
+
+DECISIONS NOW TREATED AS SETTLED
+================================
+
+1. Deposit destination
+
+   File/folder imports go to the registered Default wallet, using the same
+   behavior as dashboard Add Funds. Do not pass the Mail wallet to
+   depositCloudCoinFiles() or depositCloudCoinFolder().
+
+2. Progress and receipt
+
+   Show progress and a receipt. Reuse/adapt WalletActionModal rather than
+   rebuilding its deposit receipt and progress UI in ServiceSelectionScreen.
+
+3. Identity selection
+
+   After deposit, move one highest-value eligible coin from Default to Mail.
+   Preserve its grade: Bank remains Bank; Fracked remains Fracked.
+
+4. Move semantics
+
+   Files and the selected identity coin must be moved, not copied.
+
+5. Minimum identity value
+
+   The minimum is 1 CC. In the current denomination system this means an
+   identity candidate must have denomination code >= 0. QMail's current address
+   code accepts denomination codes 0 through 4, so the precise eligibility
+   range should be 0..4 (1 through 10,000 CC) unless QMail address support is
+   expanded for larger denominations.
+
+6. Purchase option
+
+   Defer it. When implemented, use https://CloudCoin.com/Pay/ and show a hint
+   telling the user to return and choose Files or Folder after downloading the
+   purchased coins.
+
+
+WHAT docs/fab.new-bootup-options.txt CHANGED
+============================================
+
+Fab's note correctly confirms that the picker, deposit, progress, and receipt
+pieces already exist. Its original Mail-target recommendation matched the first
+gpt note, but is superseded by the user's Default-first decision.
+
+The Default-first rule makes the existing Add Funds screen a much better fit
+than either earlier note concluded:
+
+  - WalletActionModal already deposits into Default when walletPath is omitted.
+  - It already supports Files and Folder selection.
+  - It polls the asynchronous deposit task and reports progress.
+  - It already locates and displays the backend receipt.
+
+The modal should still be adapted for onboarding rather than rendered entirely
+unchanged. The onboarding variant needs a completion callback, an identity
+promotion/verification phase, and a final "Continue" action. Its Withdraw mode
+is irrelevant, and its Locker mode overlaps the existing special first-run
+locker flow unless the locker flow is deliberately unified (see REMAINING
+QUESTION).
+
+
+VERIFIED EXISTING GUI PIECES
+============================
+
+src/qmail/screens/WalletActionModal.jsx
+
+  - Methods: Locker, Folder, Files.
+  - Native file/folder picker integration.
+  - Status text including task percentage/message.
+  - Calls depositCloudCoinFiles() and depositCloudCoinFolder().
+  - Calls waitForTaskCompletion().
+  - Extracts the receipt ID/path and displays structured receipt totals and
+    per-coin details.
+  - Default add-funds behavior resolves the registered Default wallet.
+
+src/api/qmailApiServices.js
+
+  - depositCloudCoinFiles(filePaths, memo, walletPath)
+  - depositCloudCoinFolder(folderPath, memo, walletPath)
+  - waitForTaskCompletion(taskId, options)
+  - lookupDefaultWalletPath()
+  - lookupMailWalletPath()
+  - getIdentity() and normalizeIdentityForUi()
+
+electron.cjs / preload.cjs
+
+  - window.electronAPI.pickWalletCoinFiles()
+  - window.electronAPI.pickWalletCoinFolder()
+  - No new native picker IPC is required.
+
+The picker returns host filesystem paths because rest_core performs a local
+filesystem import. A browser <input type="file"> is not equivalent.
+
+
+VERIFIED MOVE BEHAVIOR
+======================
+
+The required move behavior is already implemented correctly at the filesystem
+layer:
+
+  D:/Code/src/C/rest_core/src/filesystem.c
+  D:/Code/src/C/rest_core/include/filesystem.h
+
+fs_move_file(src, dst):
+
+  1. Attempts rename() for an efficient same-volume move.
+  2. If rename fails (including a cross-volume move), copies the file.
+  3. Verifies the destination size matches the source.
+  4. Deletes the source only after verification.
+  5. If source deletion fails, removes the destination copy to prevent a
+     duplicate.
+
+The deposit pipeline already uses fs_move_file() when taking selected files or
+top-level files from a selected folder into Default/Import. The identity
+promotion must also use fs_move_file(), directly or through the existing wallet
+transfer code. No renderer-side copy/delete implementation should be added.
+
+The UI should still say that selected files will be moved from their original
+location. This is now a confirmed requirement, not an open decision.
+
+
+FORMAT SUPPORT - CURRENT SOURCE FINDINGS
+========================================
+
+The GUI picker and qmailApiServices currently allow all four requested suffixes:
+
+  .bin, .stack, .zip, .png
+
+The current rest_core implementation does not fully support all four, despite
+the extension allow-list:
+
+  .bin
+    - Current CCv3 single/multi-coin files are unpacked and deposited.
+    - Legacy CCv2 .bin files are detected, converted inline, graded, and included
+      in the final deposit task/receipt.
+
+  .stack
+    - Legacy CCv1 stacks are detected, converted inline, graded, and included in
+      the final deposit task/receipt.
+
+  .zip
+    - The extension is accepted and detected, but unpack_zip_file() currently
+      logs "ZIP extraction not implemented" and returns an error. The source is
+      then moved to the wallet's Corrupted folder.
+
+  .png
+    - The extension is accepted and detected, but unpack_png_file() currently
+      logs "PNG extraction not implemented" and returns an error. The source is
+      then moved to the wallet's Corrupted folder.
+
+Therefore the launch screen should currently advertise/accept only .bin and
+.stack, OR zip/png extraction must be implemented in rest_core before the four
+formats are promised. The existing dashboard picker/API allow-list should be
+corrected at the same time so it does not claim nonfunctional zip/png support.
+
+Fab's note says legacy files are parked for a separate later pipeline. That was
+true of an earlier stage, but it is not the complete behavior of the current
+cmd_deposit.c. Current deposit execution parks CCv1/CCv2 during unpack and then
+runs upgrade_phase_convert() in the same asynchronous deposit task. It retries
+without an encryption key only for the specific missing-key case, grades the
+converted CCv3 coins, merges converted/expired/legacy-counterfeit counts, writes
+one final receipt, and only then completes the task. CCv1 and CCv2 should work
+in this proposed flow, subject to integration testing against live RAIDA.
+
+
+HIGHEST-VALUE IDENTITY PROMOTION
+================================
+
+The current backend already exposes useful pieces:
+
+  GET /api/wallets/show-coins?wallet_path=<Default>&folder=Bank
+  GET /api/wallets/show-coins?wallet_path=<Default>&folder=Fracked
+
+These responses include denomination/value, serial number, folder, and POWN.
+
+  GET/POST /api/transactions/transfer
+    from_wallet=<Default path>
+    to_wallet=<Mail path>
+    amount=<highest denomination value>
+    memo=QMail identity assignment
+
+api_handlers_system_transfer.c already:
+
+  - Scans Default/Bank and Default/Fracked.
+  - Sorts denomination descending.
+  - Prefers Bank over Fracked when denominations tie.
+  - Uses fs_move_file().
+  - Sends Bank to Mail/Bank and Fracked to Mail/Fracked.
+  - Returns the amount, count moved, source, destination, and transaction ID.
+
+If the requested amount is exactly the value of the largest coin, the greedy
+selector chooses one largest coin and stops. This makes the existing endpoint a
+viable MVP after the GUI first queries both show-coins folders to learn the
+largest eligible value.
+
+However, the two-query-plus-transfer sequence has weaknesses:
+
+  - Selection and movement are not one atomic semantic operation.
+  - Equal-value coins in the same folder have no explicit serial-number tie
+    order.
+  - The generic transfer endpoint accepts an amount and is capable of selecting
+    multiple coins/making change; onboarding requires exactly one existing coin.
+  - The GUI would need new show-coins and transfer helpers.
+  - It does not itself refresh and return the QMail identity.
+
+Recommended production implementation:
+
+  Add a narrow backend endpoint such as:
+
+    POST /api/qmail/local/identity/promote-from-default
+
+  Behavior:
+
+    1. Resolve registered Default and Mail wallet paths in the backend.
+    2. Refuse replacement if Mail already contains an identity unless an
+       explicit replace operation was requested.
+    3. Scan Default/Bank and Default/Fracked using wallet_scan_folder().
+    4. Ignore candidates below 1 CC and outside QMail's supported denomination
+       range (currently codes 0..4).
+    5. Select exactly one maximum-denomination candidate.
+    6. Recommended deterministic ties: Bank before Fracked, then lowest serial
+       number.
+    7. Move it with fs_move_file() into the matching Mail folder.
+    8. Call qmail_identity_refresh().
+    9. Return serial number, denomination/value, source/destination folder,
+       address, and success/error details.
+   10. If identity refresh fails after the move, move the coin back to its exact
+       Default folder before returning failure.
+
+This endpoint composes existing scan, denomination, move, and identity-refresh
+functions; it does not need a new coin-file implementation.
+
+
+RECOMMENDED ONBOARDING UX AND COMPONENT REUSE
+==============================================
+
+ServiceSelectionScreen should present:
+
+  1. I Have a Locker Code
+  2. Use CloudCoin Files
+  3. Use a CloudCoin Folder
+  4. Purchase CloudCoins (deferred/hidden until implemented)
+
+For Files or Folder, open an onboarding-configured WalletActionModal. Suggested
+new props:
+
+  - allowedAddMethods={["files", "folder"]}
+  - initialAddMethod="files" or "folder"
+  - onboardingMode=true
+  - onDepositCompleted(result, receiptMetadata)
+  - onContinue(identity)
+
+In onboardingMode:
+
+  - Hide Withdraw.
+  - Hide the modal's general Locker method because the launch screen already has
+    a dedicated locker choice, unless locker setup is intentionally unified.
+  - Retain file/folder selection, move warning, progress, errors, and receipt.
+  - Change the generic success text "Funds added to the Default wallet" to a
+    two-stage result such as:
+
+      "Deposit complete. The largest eligible coin was assigned as your QMail
+       identity; the remaining coins are in Default."
+
+  - Keep "See Receipt" available. The deposit receipt belongs to Default and
+    remains valid after one coin is promoted to Mail.
+  - Add an identity-assignment summary beside the receipt: address, serial,
+    value, and Bank/Fracked status.
+  - Do not auto-route immediately. Let the user inspect the receipt and click
+    "Continue" to reach WalletSetupScreen.
+
+
+REVISED END-TO-END ALGORITHM
+============================
+
+1. User selects Files or Folder on ServiceSelectionScreen.
+
+2. Open WalletActionModal in onboarding mode.
+
+3. Use the existing native picker. Cancellation is a no-op.
+
+4. Show supported formats and warn that supported source files will be moved.
+   Folder import is currently top-level/non-recursive; say so.
+
+5. Start the existing deposit without a Mail wallet override:
+
+     depositCloudCoinFiles(paths, "QMail first-run deposit")
+
+   or:
+
+     depositCloudCoinFolder(path, "QMail first-run deposit")
+
+   The omitted walletPath deliberately resolves registered Default.
+
+6. Poll with waitForTaskCompletion(), using a five-minute ceiling. Continue to
+   display MOVE, UNPACK, POWN, GRADE, UPGRADE, and COMPLETE messages supplied by
+   the task. Legacy conversion is part of this same task.
+
+7. Display the structured Default-wallet deposit receipt. If no authentic or
+   fracked coin worth at least 1 CC is available after deposit, remain in the
+   modal and explain why an identity could not be assigned. Do not move
+   counterfeit, limbo, expired, duplicate-only, or fractional coins into Mail.
+
+8. Invoke the backend identity-promotion operation. Show a separate
+   "Assigning QMail identity..." phase.
+
+9. Verify identity by calling getIdentity() with bounded retries. Require
+   configured=true, a nonzero serial, and a nonempty address. Normalize with
+   normalizeIdentityForUi().
+
+10. Show the promotion summary and enable "Continue". On Continue, clear the
+    skip-auto-restore flag and call:
+
+      onSelectService("provisioning", normalizedIdentity)
+
+11. WalletSetupScreen shows the address and offers Heal when the chosen highest
+    coin came from Default/Fracked.
+
+12. On restart, App's existing Mail/Bank or Mail/Fracked check should route
+    directly to QMail.
+
+
+RECEIPT DETAILS
+===============
+
+The existing deposit task already writes one JSON receipt in Default/Receipts
+and embeds the same receipt in task data. It includes:
+
+  - Bank, Fracked, Limbo, Counterfeit, Duplicate, and Error totals
+  - Converted, expired, and legacy-counterfeit totals
+  - Values by grade and total deposited
+  - Per-coin detail when not truncated
+
+That receipt records the Add Funds operation before identity promotion. The UI
+should add a clearly separate identity-assignment result rather than rewriting
+the signed/completed deposit receipt. A future backend enhancement may write a
+second Mail/identity transaction receipt, but it is not necessary to show the
+user what happened in the first implementation.
+
+The final screen should make the accounting explicit:
+
+  - Total authenticated into Default
+  - Identity coin moved to Mail (value, serial, Bank/Fracked)
+  - Remaining spendable value in Default
+
+
+FILES EXPECTED TO CHANGE
+========================
+
+GUI:
+
+  src/screens/ServiceSelectionScreen.jsx
+    - Add Files and Folder choices.
+    - Host the onboarding modal and route verified completion.
+
+  src/screens/ServiceSelectionScreen.css
+    - Style the new choices and any launch-level status/fallback text.
+
+  src/qmail/screens/WalletActionModal.jsx
+    - Add a constrained onboarding mode, async completion callback, identity
+      summary, receipt-first Continue action, and configurable method list.
+    - Keep current dashboard behavior as the default prop behavior.
+
+  src/qmail/screens/WalletActionModal.css
+    - Add onboarding identity/result styles if needed.
+
+  src/api/qmailApiServices.js
+    - Add promoteDefaultCoinToMail() for the recommended backend endpoint.
+    - If the MVP uses existing endpoints instead, add showWalletCoins() and
+      transferBetweenWallets() helpers and keep largest-coin selection explicit.
+
+  electron.cjs / preload.cjs
+    - No changes expected.
+
+Backend (recommended):
+
+  D:/Code/src/C/rest_core/api_src/api_handlers_qmail_identity.c
+  D:/Code/src/C/rest_core/api_src/api_handlers.c
+    - Add/register promote-from-default.
+
+  Reuse without duplicating:
+    wallet_scan_folder(), coin_denomination_to_microunits(), fs_move_file(),
+    qmail_identity_refresh(), and registered-wallet resolution.
+
+Backend format work if four extensions must ship now:
+
+  D:/Code/src/C/rest_core/src/commands/cmd_unpack.c
+    - Implement unpack_zip_file() and unpack_png_file(), including bounds,
+      archive traversal protection, malformed input tests, and cleanup.
+
+
+TEST / ACCEPTANCE MATRIX
+========================
+
+GUI/component:
+
+  [ ] Files and Folder launch choices open the constrained Add Funds modal.
+  [ ] Native picker cancellation changes nothing and sends no request.
+  [ ] Browser/Vite mode explains that native import requires the desktop app.
+  [ ] Deposit targets Default, never Mail.
+  [ ] MOVE/UNPACK/POWN/GRADE/UPGRADE progress is visible and aria-live.
+  [ ] Deposit failures/timeouts remain recoverable.
+  [ ] Existing Default receipt is viewable before Continue.
+  [ ] Promotion summary reports address, serial, value, and grade.
+  [ ] Continue is disabled until deposit, promotion, and identity verification
+      all succeed.
+  [ ] Existing dashboard Add Funds/Withdraw behavior is unchanged.
+  [ ] Existing first-run locker behavior is unchanged unless deliberately
+      unified.
+
+Backend/unit:
+
+  [ ] Selects the maximum eligible denomination from Default.
+  [ ] Rejects a wallet containing only values below 1 CC.
+  [ ] Ignores unsupported QMail denominations outside code range 0..4.
+  [ ] Bank maximum moves to Mail/Bank.
+  [ ] Fracked maximum moves to Mail/Fracked.
+  [ ] Equal Bank/Fracked values choose Bank.
+  [ ] Equal same-folder values use the documented serial-number tie break.
+  [ ] Cross-volume promotion uses copy/size-verify/delete behavior.
+  [ ] Destination or identity-refresh failure rolls back to Default.
+  [ ] Existing Mail identity prevents accidental replacement.
+
+Packaged integration:
+
+  [ ] One current CCv3 .bin deposits, moves to Mail, and becomes identity.
+  [ ] Several values deposit; only the largest eligible coin moves to Mail.
+  [ ] Remaining Default balance equals deposit total minus identity value.
+  [ ] Highest Fracked coin produces a Fracked identity and Heal option.
+  [ ] CCv1 .stack converts inline, appears in the receipt, and can be promoted.
+  [ ] CCv2 legacy .bin converts inline, appears in the receipt, and can be
+      promoted.
+  [ ] Legacy conversion network failure retains files for retry and blocks
+      Continue.
+  [ ] ZIP is rejected by the picker until implemented, then imports correctly.
+  [ ] PNG is rejected by the picker until implemented, then imports correctly.
+  [ ] Folder selection imports only top-level supported files as documented.
+  [ ] Counterfeit/limbo/expired-only input does not create an identity.
+  [ ] Restart detects the promoted Mail identity and bypasses onboarding.
+
+
+REMAINING QUESTION
+==================
+
+Does "the coins should all go into Default" also apply to the existing locker
+code path?
+
+Current first-run locker behavior uses importCredentials(), which downloads
+directly into Mail and applies QMail-specific replacement/refresh behavior. If
+the new Default-first rule applies to locker imports too, the cleaner final
+design is to use the Add Funds modal's general locker download into Default,
+then run the same largest-coin promotion used by Files and Folder. That would
+make all three sources consistent, but it is a deliberate change to the current
+locker workflow and should be confirmed.
+
+
+IMPLEMENTATION ORDER
+====================
+
+1. Confirm whether locker import also becomes Default-first.
+2. Add and test the atomic promote-from-default backend operation (or approve
+   the show-coins + transfer MVP).
+3. Restrict advertised formats to .bin/.stack, or implement zip/png unpacking.
+4. Add onboarding props/callbacks to WalletActionModal without changing its
+   dashboard defaults.
+5. Add Files/Folder launch choices and verified provisioning routing.
+6. Add GUI and backend tests, then run packaged Electron tests with CCv3, CCv1,
+   CCv2, multiple denominations, Fracked, and failure inputs.
+
+
+FINAL ASSESSMENT
+================
+
+The requested workflow fits the existing architecture well after the
+Default-first clarification. Reusing Add Funds is now the recommended approach,
+not merely an option. The deposit, progress, receipt, legacy conversion, and
+cross-volume move machinery already exist. The missing production-quality seam
+is a deterministic, rollback-safe operation that promotes exactly one largest
+eligible Default coin into the matching Mail grade and refreshes identity.
+
+The legacy concern is largely resolved by current code: CCv1 and CCv2 conversion
+already runs inside the deposit task. ZIP and PNG are the actual unsupported
+formats today; their unpack functions are stubs and should not be advertised
+until implemented.

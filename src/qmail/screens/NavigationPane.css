@@ -51,6 +51,16 @@
   filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--accent-primary) 32%, transparent));
 }
 
+/* qmailalpha.webp (512x512) shown while the cartouche is on hold; fills the
+   same square slot the cartouche used. */
+.navigation-pane__identity-logo {
+  display: block;
+  width: 4.75rem;
+  height: 4.75rem;
+  object-fit: contain;
+  user-select: none;
+}
+
 .navigation-pane__identity-address-row {
   display: grid;
   grid-column: 1 / -1;

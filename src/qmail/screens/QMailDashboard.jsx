@@ -19,6 +19,7 @@ import {
   getDrafts,
   getEmailAttachments,
   getSentAttachmentMetadata,
+  revealSentAttachment,
   getQMailWalletBalance,
   getQMailCanSend,
   peekBeacon,
@@ -2769,6 +2770,23 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       showDashboardNotification("Could not complete that message action.", "error");
     }
   };
+
+  const handleRevealSentAttachment = async (
+    emailOrId,
+    attachmentId = "receipt-0",
+  ) => {
+    const emailId =
+      typeof emailOrId === "object" ? getEmailId(emailOrId) : emailOrId;
+    if (!emailId) return;
+
+    const result = await revealSentAttachment(emailId, attachmentId);
+    if (!result.success) {
+      showDashboardNotification(
+        result.error || "Could not open the original attachment location.",
+        "error",
+      );
+    }
+  };
   const fetchFolderMessagesForCommand = async (folder) => {
     if (folder === "drafts") {
       const result = await getDrafts();
@@ -3778,6 +3796,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
             onDeleteEmail={handleDeleteEmail}
             onDeleteVisibleTrash={handleDeleteVisibleTrash}
             onRowAction={handleMessageRowAction}
+            onAttachmentClick={handleRevealSentAttachment}
             onToggleStar={handleToggleStar}
             sortMode={sortMode}
             onSortChange={handleSortChange}
@@ -3811,6 +3830,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               downloadLocation={mailWalletPath}
               onOpenDownloadLocation={handleOpenDownloadLocation}
               onDownloadAttachment={handleDownloadAttachment}
+              onRevealSentAttachment={handleRevealSentAttachment}
             />
           )}
         </>

@@ -37,6 +37,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // the raw send receipt never enters the renderer (docs/attachment.views.txt).
   getSentAttachmentMetadata: (apiPort, emailId) =>
     ipcRenderer.invoke('qmail:sent-attachment-metadata', apiPort, emailId),
+  revealSentAttachment: (apiPort, emailId, attachmentId) =>
+    ipcRenderer.invoke(
+      'qmail:reveal-sent-attachment',
+      apiPort,
+      emailId,
+      attachmentId,
+    ),
   pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
   pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
   onThemeSelect: (callback) => {
@@ -50,6 +57,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, command) => callback(command);
     ipcRenderer.on('qmail:menu-command', handler);
     return () => ipcRenderer.removeListener('qmail:menu-command', handler);
+  },
+  onUpgradeRequested: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('qmail:upgrade-requested', handler);
+    return () => ipcRenderer.removeListener('qmail:upgrade-requested', handler);
   },
   onTitleBarColorPick: (callback) => {
     if (typeof callback !== 'function') return () => {};

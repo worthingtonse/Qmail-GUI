@@ -33,6 +33,15 @@ import "./NavigationPane.css";
 
 const CLOUDCOIN_PURCHASE_URL = "https://CloudCoin.com/Pay/";
 
+// qmailalpha.webp lives in public/; BASE_URL join matches qmailAvatar.js so
+// the packaged Electron build resolves it too. Shown in place of the identity
+// cartouche while the cartouche system is on hold.
+const QMAIL_ALPHA_SRC = (() => {
+  const baseUrl = import.meta.env?.BASE_URL || "/";
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}qmailalpha.webp`;
+})();
+
 const DMP_PAYMENT_INFO = [
   "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
   "The Inbox Fee lets recipients get paid for their attention when receiving qmails. Influencers can set their own inbox fee by registering at https://DistributedMailSystem.com.",
@@ -430,6 +439,8 @@ const NavigationPane = ({
           aria-label="Your QMail identity"
         >
           <div className="navigation-pane__identity-cartouche">
+            {/* Cartouche system ON HOLD — to restore, uncomment this block
+                and remove the qmailalpha <img> below.
             {parsedQmailAddress.ok ? (
               <QmailCartoucheAvatar
                 serialNumber={parsedQmailAddress.serialNumber}
@@ -439,6 +450,13 @@ const NavigationPane = ({
             ) : (
               <Mail size={34} />
             )}
+            */}
+            <img
+              className="navigation-pane__identity-logo"
+              src={QMAIL_ALPHA_SRC}
+              alt="QMail alpha"
+              draggable={false}
+            />
           </div>
         </section>
         <button

@@ -26,64 +26,28 @@ import {
 } from "../transferProgress";
 import "./ReadingPane.css";
 
-const DECRYPT_STRIPES = [
-  ["01001101", "10110010", "00110111", "11001001", "01100100", "10011011"],
-  ["11100010", "00011101", "10101010", "01010101", "00111100", "11000011"],
-  ["10010100", "01101011", "11110000", "00001111", "10110100", "01001011"],
-  ["00101110", "11010001", "01011010", "10100101", "01111000", "10000111"],
-  ["11100111", "00011000", "10000011", "01111100", "10101100", "01010011"],
-  ["01010110", "10101001", "00110010", "11001101", "01101110", "10010001"],
-  ["11011000", "00100111", "11101010", "00010101", "10011100", "01100011"],
-];
+// raida-hero.svg lives in public/ and animates itself (SMIL), so the
+// component only needs to place and dim it. BASE_URL join matches
+// qmailAvatar.js so the packaged Electron build resolves it too.
+const RAIDA_HERO_SRC = (() => {
+  const baseUrl = import.meta.env?.BASE_URL || "/";
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}raida-hero.svg`;
+})();
 
-const DECRYPT_STEPS = [
-  "Receiving stripes",
-  "Reassembling blocks",
-  "AES decrypt",
-  "Rendering message",
-];
-
-const SevenStripeDecryptAnimation = ({ active }) => (
+const RaidaHeroAnimation = ({ active }) => (
   <section
     className={`reading-pane__decrypt-box ${
       active ? "reading-pane__decrypt-box--active" : ""
     }`}
     aria-label="Message decryption progress"
   >
-    <div className="reading-pane__decrypt-stage" aria-hidden="true">
-      <div className="reading-pane__decrypt-stripes">
-        {DECRYPT_STRIPES.map((stripe, stripeIndex) => (
-          <div
-            key={`stripe-${stripeIndex}`}
-            className={`reading-pane__decrypt-stripe ${
-              stripeIndex % 2 === 0
-                ? "reading-pane__decrypt-stripe--top"
-                : "reading-pane__decrypt-stripe--bottom"
-            }`}
-            style={{ "--stripe-delay": `${stripeIndex * 90}ms` }}
-          >
-            <div className="reading-pane__decrypt-stream">
-              {stripe.map((chunk, chunkIndex) => (
-                <span key={`${stripeIndex}-${chunkIndex}`}>{chunk}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="reading-pane__decrypt-scan" />
-    </div>
-
-    <div className="reading-pane__decrypt-steps" aria-hidden="true">
-      {DECRYPT_STEPS.map((step, index) => (
-        <span
-          key={step}
-          className="reading-pane__decrypt-step"
-          style={{ "--step-delay": `${index * 420}ms` }}
-        >
-          {step}
-        </span>
-      ))}
-    </div>
+    <img
+      className="reading-pane__decrypt-hero"
+      src={RAIDA_HERO_SRC}
+      alt=""
+      draggable={false}
+    />
   </section>
 );
 
@@ -103,6 +67,7 @@ const ReadingPane = ({
   onDownloadAttachment,
   onCancelAttachmentDownload,
   onResumeAttachmentDownload,
+  onRevealSentAttachment,
 }) => {
   const emailId = email?.id || email?.guid;
   const activeAttachmentDownload =
@@ -312,7 +277,7 @@ const ReadingPane = ({
                 </code>
               </div>
             )}
-            <SevenStripeDecryptAnimation active={isDecrypting} />
+            <RaidaHeroAnimation active={isDecrypting} />
           </section>
         </div>
       </section>
@@ -485,7 +450,7 @@ const ReadingPane = ({
             )}
             {activeAttachmentDownload && (
               <div className="reading-pane__attachment-decrypt-panel">
-                <SevenStripeDecryptAnimation active={attachmentTransferRunning} />
+                <RaidaHeroAnimation active={attachmentTransferRunning} />
                 <p className="reading-pane__attachment-decrypt-notice">
                   {attachmentTransferRunning
                     ? attachmentDownloadProgress.status === "cancelling"
@@ -572,9 +537,13 @@ const ReadingPane = ({
                 // PENDING (storage_mode 2): bytes haven't been downloaded yet;
                 // they're fetched on demand the first time the user clicks.
                 const isPending = attachment.isDownloaded === false;
-                // Receipt-derived Sent metadata: render an informational
-                // card with no click/download affordances.
+                // Receipt-derived Sent metadata can reveal the original local
+                // source through a receipt-validated main-process IPC call.
                 const isMetadataOnly = attachment.metadataOnly === true;
+                const canRevealSentAttachment =
+                  isMetadataOnly &&
+                  Boolean(attachment.sourcePath) &&
+                  Boolean(onRevealSentAttachment);
                 const isDownloading =
                   attachmentTransferRunning &&
                   String(attachmentDownloadProgress.attachmentId) ===
@@ -591,8 +560,25 @@ const ReadingPane = ({
                       isPending ? " reading-pane__attachment--pending" : ""
                     }${isDownloading ? " reading-pane__attachment--downloading" : ""}${
                       isMetadataOnly ? " reading-pane__attachment--metadata" : ""
+                    }${
+                      canRevealSentAttachment
+                        ? " reading-pane__attachment--revealable"
+                        : ""
                     }`}
-                    {...(isMetadataOnly
+                    {...(canRevealSentAttachment
+                      ? {
+                          onClick: () =>
+                            onRevealSentAttachment(emailId, attachmentId),
+                          onKeyDown: (event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              onRevealSentAttachment(emailId, attachmentId);
+                            }
+                          },
+                          role: "button",
+                          tabIndex: 0,
+                        }
+                      : isMetadataOnly
                       ? {}
                       : {
                           onClick: () =>
@@ -648,7 +634,9 @@ const ReadingPane = ({
                           </span>
                         ) : isMetadataOnly ? (
                           <span className="reading-pane__attachment-status reading-pane__attachment-status--metadata">
-                            Not stored in Sent box
+                            {canRevealSentAttachment
+                              ? "Click to show in folder"
+                              : "Not stored in Sent box"}
                           </span>
                         ) : (
                           isPending && (

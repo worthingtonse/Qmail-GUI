@@ -6,6 +6,19 @@ import {
 } from "./transferErrors";
 
 describe("normalizeTransferError", () => {
+  it("recognizes a payment-required status in a parent task message", () => {
+    expect(
+      normalizeTransferError({
+        state: "failed",
+        message: "Object Transfer upload failed (status 169)",
+      }),
+    ).toMatchObject({
+      code: "payment_required",
+      protocolStatus: 169,
+      canRetry: false,
+    });
+  });
+
   it("reports object and quota capacity failures", () => {
     expect(
       normalizeTransferError({

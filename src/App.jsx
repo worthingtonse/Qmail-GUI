@@ -50,6 +50,8 @@ function App() {
   const [provisioningData, setProvisioningData] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeExecutablePath, setUpgradeExecutablePath] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
@@ -260,6 +262,16 @@ function App() {
       );
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const unsubscribe = window.electronAPI?.onUpgradeRequested?.((data) => {
+      setUpgradeExecutablePath(String(data?.executablePath || ""));
+      setShowUpdateModal(false);
+      setShowUpgradeModal(true);
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, []);
+
   const handleEnableSounds = async () => {
     const enabled = await soundService.enablePlayback();
     if (enabled) {
@@ -364,14 +376,79 @@ function App() {
   // Open the downloads page in the user's default browser. Prefers the
   // Electron shell (proper external open); falls back to window.open in a
   // plain browser/Vite build.
-  const handleDownload = () => {
+  const openDownloadPage = () => {
     if (window.electronAPI?.openExternal) {
       window.electronAPI.openExternal(DOWNLOAD_PAGE_URL);
     } else {
       window.open(DOWNLOAD_PAGE_URL, "_blank", "noopener,noreferrer");
     }
+  };
+
+  const handleDownload = () => {
+    openDownloadPage();
     setShowUpdateModal(false);
   };
+
+  const renderUpgradeModal = () =>
+    showUpgradeModal ? (
+      <div className="update-modal__overlay" role="presentation">
+        <section
+          className="update-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="qmail-upgrade-title"
+        >
+          <header className="update-modal__header">
+            <Download size={48} className="update-modal__icon" />
+            <h2 id="qmail-upgrade-title">Upgrade QMail</h2>
+            <button
+              type="button"
+              className="update-modal__close"
+              onClick={() => setShowUpgradeModal(false)}
+              aria-label="Close upgrade instructions"
+            >
+              <X size={20} />
+            </button>
+          </header>
+
+          <div className="update-modal__content">
+            <p className="update-modal__upgrade-instructions">
+              Download the executable for your operating system{" "}
+              <button
+                type="button"
+                className="update-modal__inline-link"
+                onClick={openDownloadPage}
+              >
+                here
+              </button>
+              , close QMail, and then copy the executable over your current one
+              located here:
+            </p>
+            <code className="update-modal__executable-path">
+              {upgradeExecutablePath || "QMail executable path unavailable"}
+            </code>
+          </div>
+
+          <div className="update-modal__actions">
+            <button
+              type="button"
+              className="update-modal__download-button"
+              onClick={openDownloadPage}
+            >
+              <Download size={20} />
+              Open Download Page
+            </button>
+            <button
+              type="button"
+              className="update-modal__later-button"
+              onClick={() => setShowUpgradeModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null;
 
   // FIX-03: After a successful first-run locker import,
   // ServiceSelectionScreen calls onSelectService('provisioning',
@@ -445,6 +522,7 @@ function App() {
   if (!hasAcceptedDisclaimer) {
     return (
       <div className="app-shell">
+        {renderUpgradeModal()}
         <section
           className="app-shell__disclaimer"
           aria-labelledby="qmail-disclaimer-title"
@@ -474,6 +552,7 @@ function App() {
   if (isLoading) {
     return (
       <div className="app-shell">
+        {renderUpgradeModal()}
         <div className="app-shell__loading">
           <Loader2 className="app-shell__loading-icon spinning" size={64} />
           <div className="app-shell__loading-message">
@@ -487,6 +566,7 @@ function App() {
   return (
     <NotificationProvider>
       <div className="app-shell">
+        {renderUpgradeModal()}
         {/* Update Modal */}
         {showUpdateModal && updateAvailable && (
           <div className="update-modal__overlay">

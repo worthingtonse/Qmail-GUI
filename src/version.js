@@ -3,7 +3,8 @@
 // ===========================================================================
 //
 //  This is the build date of THIS client. It is compared against the remote
-//  version file (https://raida11.cloudcoin.global/service/qmail_client_version)
+//  version files (https://raida<N>.cloudcoin.global/service/qmail_client_version,
+//  majority vote across the mirrors in qmailApiServices.REMOTE_VERSION_URLS)
 //  to decide whether an update is available.
 //
 //  FORMAT: "YYYY-MM-DD"  (zero-padded; e.g. "2026-06-23")

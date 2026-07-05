@@ -560,10 +560,10 @@ Plan changes accepted from Codex feedback:
   Phase 3 note about the always-clickable article was addressed).
 - Dropped "Attachments" from SORT_OPTIONS thinking (Codex point 9): no filter
   was shipped in this pass at all; it needs backend has_attachments.
-- Dropped the shell.showItemInFolder reveal action for now (Codex Phase 5
-  wants a trusted {emailId, attachmentId} IPC; too much for the quick pass).
-  The source path is DISPLAYED as text only — no filesystem action, so none
-  of the path-trust concerns apply yet.
+- Sent attachment reveal now uses a trusted {emailId, attachmentId} IPC. The
+  main process re-reads the authoritative local receipt, resolves the source
+  path there, verifies the file still exists, and calls showItemInFolder.
+  Renderer-provided filesystem paths are never accepted.
 - Source paths never leave the local API (Codex point 4/privacy rules): the
   GUI only renders them; nothing is written back anywhere.
 
@@ -628,9 +628,9 @@ taken from Codex's rest_core reading and handled defensively; if the real
 shape differs, getSentAttachmentMetadata is the only place to adjust.
 
 Still open (unchanged from revised priority order): backend attachment rows
-for sent mail, attachment_count on list/search rows, has_attachments filter +
-UI toggle, trusted reveal-in-folder IPC, app-owned sent copies, draft
-attachment persistence.
+for sent mail, has_attachments filter + UI toggle, app-owned sent copies, and
+draft attachment persistence. List/search attachment_count and trusted
+reveal-in-folder IPC are now implemented.
 
 
 --------------------------------------------------------------------------------

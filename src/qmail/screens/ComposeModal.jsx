@@ -15,6 +15,7 @@ import {
   getDrafts,
   sendEmail,
   getQMailCanSend,
+  getQMailWalletBalance,
   getTaskStatus,
   getObjectTransferStatus,
   cancelObjectTransfer,
@@ -36,6 +37,11 @@ import {
   formatProgressPercentage,
 } from "../transferProgress";
 import { normalizeTransferError } from "../transferErrors";
+import {
+  PAYMENT_REQUIRED_STATUS,
+  classifyPaymentRequiredError,
+  getPaymentRequiredCoinThreshold,
+} from "../paymentRequiredError";
 import {
   forgetActiveTransfer,
   rememberActiveTransfer,
@@ -1231,8 +1237,8 @@ const ComposeModal = ({
       ];
     };
 
-    const markSendFailed = (message, source = null) => {
-      const normalizedFailure =
+    const markSendFailed = async (message, source = null) => {
+      let normalizedFailure =
         source?.transferError ||
         normalizeTransferError(source || {
           state: "failed",
@@ -1241,6 +1247,28 @@ const ComposeModal = ({
           fallbackMessage: message || "Failed to send qmail",
           terminal: true,
         });
+
+      if (normalizedFailure?.protocolStatus === PAYMENT_REQUIRED_STATUS) {
+        const balanceResult = await getQMailWalletBalance();
+        const walletBalance = balanceResult.success
+          ? balanceResult.data.spendableValue
+          : fundingCheck.data.walletBalance;
+        const requiredCoins = getPaymentRequiredCoinThreshold(
+          fundingCheck.data,
+        );
+        normalizedFailure = {
+          ...normalizedFailure,
+          ...classifyPaymentRequiredError({ walletBalance, requiredCoins }),
+        };
+        if (attachmentTotalBytes > 0) {
+          setUploadByteProgress({
+            completedBytes: "0",
+            totalBytes: String(attachmentTotalBytes),
+            percentage: 0,
+            estimated: false,
+          });
+        }
+      }
       const failureMessage =
         normalizedFailure?.message || message || "Failed to send qmail";
       rememberUploadOperations(
@@ -1452,7 +1480,7 @@ const ComposeModal = ({
               ) {
                 markSendCancelled();
               } else {
-                markSendFailed(
+                await markSendFailed(
                   taskError || message || "Failed to send qmail",
                   taskResult.data,
                 );
@@ -1469,7 +1497,7 @@ const ComposeModal = ({
               if (uploadCancellationRequestedRef.current) {
                 markSendCancelled();
               } else {
-                markSendFailed(
+                await markSendFailed(
                   taskResult.error || "Failed to track qmail status",
                   taskResult,
                 );
@@ -1482,7 +1510,7 @@ const ComposeModal = ({
           if (uploadCancellationRequestedRef.current) {
             markSendCancelled();
           } else {
-            markSendFailed(
+            await markSendFailed(
               "Send is taking longer than expected. Check Sent in a few minutes.",
             );
           }
@@ -1517,7 +1545,7 @@ const ComposeModal = ({
       }
     } catch (error) {
       console.error("Send error:", error);
-      markSendFailed(error.message || "Failed to send qmail", error);
+      await markSendFailed(error.message || "Failed to send qmail", error);
     }
   };
 

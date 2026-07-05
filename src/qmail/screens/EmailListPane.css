@@ -660,6 +660,22 @@
   color: var(--text-muted);
 }
 
+.email-list-pane__attachment-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  display: inline-flex;
+  flex-shrink: 0;
+  justify-content: center;
+  padding: 2px;
+}
+
+.email-list-pane__attachment-button:hover,
+.email-list-pane__attachment-button:focus-visible {
+  color: var(--accent-primary);
+}
+
 /* was: .star-icon */
 .email-list-pane__star-icon {
   flex-shrink: 0;

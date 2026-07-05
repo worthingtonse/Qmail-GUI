@@ -1564,6 +1564,27 @@ export const getSentAttachmentMetadata = async (emailId) => {
   }
 };
 
+export const revealSentAttachment = async (
+  emailId,
+  attachmentId = "receipt-0",
+) => {
+  if (!window.electronAPI?.revealSentAttachment) {
+    return {
+      success: false,
+      error: "Opening the attachment location requires the QMail desktop app.",
+    };
+  }
+  try {
+    return await window.electronAPI.revealSentAttachment(
+      Number(API_PORT),
+      String(emailId || ""),
+      String(attachmentId || ""),
+    );
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
 /**
  * Error shown when a contact input cannot be resolved to a real serial number.
  */
@@ -2400,20 +2421,28 @@ export const convertSnToEmail = async (sn, denomination = null) => {
 };
 
 // Version check
-// Remote version file. Returns a bare date string like "2026-03-24" (no
-// JSON, no .php extension). Hosted independently of the local backend so
-// the version check does NOT depend on core.exe being up. The local build
-// date it is compared against lives in src/version.js (BUILD_DATE).
-const REMOTE_VERSION_URL =
-  "https://raida11.cloudcoin.global/service/qmail_client_version";
+// Each RAIDA server hosts a version file returning a bare date string like
+// "2026-07-24" (no JSON). Hosted independently of the local backend so the
+// version check does NOT depend on core.exe being up. The local build date
+// it is compared against lives in src/version.js (BUILD_DATE).
+//
+// Several mirrors are polled and tallied because individual servers go
+// stale — when this list was chosen (2026-07-03), raida0/1/11 were four
+// months behind the other 21 and raida19 was down. The majority answer
+// wins; the newest date breaks ties.
+export const REMOTE_VERSION_URLS = [2, 5, 8, 14, 17, 20, 23].map(
+  (n) => `https://raida${n}.cloudcoin.global/service/qmail_client_version`,
+);
 
+const VERSION_FETCH_TIMEOUT_MS = 8000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Checks whether a newer client build is available by fetching the remote
- * version date and comparing it to the local BUILD_DATE. Does NOT touch the
- * local backend. YYYY-MM-DD strings compare correctly with plain ordering
- * (lexicographic == chronological for zero-padded ISO dates).
+ * version date from several RAIDA mirrors and comparing the majority answer
+ * to the local BUILD_DATE. Does NOT touch the local backend. YYYY-MM-DD
+ * strings compare correctly with plain ordering (lexicographic ==
+ * chronological for zero-padded ISO dates).
  *
  * @returns {Promise<{success: boolean, data?: {update_available: boolean,
  *   current_version: string, latest_version: string, message: string},
@@ -2421,16 +2450,36 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  */
 export const checkVersion = async () => {
   try {
-    const response = await fetch(REMOTE_VERSION_URL, { method: "GET" });
-    if (!response.ok) {
-      throw new Error(`Version endpoint returned ${response.status}`);
+    const results = await Promise.allSettled(
+      REMOTE_VERSION_URLS.map(async (url) => {
+        const response = await fetch(url, {
+          method: "GET",
+          signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS),
+        });
+        if (!response.ok) {
+          throw new Error(`Version endpoint returned ${response.status}`);
+        }
+        const text = (await response.text()).trim();
+        if (!ISO_DATE_PATTERN.test(text)) {
+          // Defensive: don't count a malformed response toward the vote.
+          throw new Error(`Unexpected version format: "${text}"`);
+        }
+        return text;
+      }),
+    );
+
+    const dates = results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    if (dates.length === 0) {
+      throw new Error("No version mirror responded with a valid date");
     }
 
-    const latestVersion = (await response.text()).trim();
-    if (!ISO_DATE_PATTERN.test(latestVersion)) {
-      // Defensive: don't prompt for an update off a malformed response.
-      throw new Error(`Unexpected version format: "${latestVersion}"`);
-    }
+    const tally = new Map();
+    dates.forEach((date) => tally.set(date, (tally.get(date) || 0) + 1));
+    const [latestVersion] = [...tally.entries()].sort(
+      (a, b) => b[1] - a[1] || (b[0] > a[0] ? 1 : -1),
+    )[0];
 
     const updateAvailable = latestVersion > BUILD_DATE;
     return {

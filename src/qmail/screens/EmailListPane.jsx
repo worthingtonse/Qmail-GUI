@@ -25,6 +25,7 @@ const EmailListPane = ({
   onDeleteEmail,
   onDeleteVisibleTrash,
   onRowAction,
+  onAttachmentClick,
   onToggleStar,
   sortMode = "newest",
   onSortChange,
@@ -164,6 +165,7 @@ const EmailListPane = ({
               onMarkAsRead={onMarkAsRead}
               onDeleteEmail={onDeleteEmail}
               onRowAction={onRowAction}
+              onAttachmentClick={onAttachmentClick}
               onToggleStar={onToggleStar}
               isLoadingDraft={loadingDraftId === email.id}
               currentFolder={currentFolder}

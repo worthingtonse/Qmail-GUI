@@ -324,183 +324,22 @@
 
 .reading-pane__decrypt-box {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
+  justify-content: center;
   width: 100%;
 }
 
-.reading-pane__decrypt-stage {
-  position: relative;
-  min-height: 13rem;
-  overflow: hidden;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--tertiary-bg) 92%, transparent),
-      color-mix(in srgb, var(--primary-bg) 86%, transparent)
-    );
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+/* raida-hero.svg is a square, self-animating (SMIL) graphic with its own
+   dark circular background, so it needs no stage box — just a centered,
+   size-capped square slot. */
+.reading-pane__decrypt-hero {
+  width: min(16rem, 100%);
+  height: auto;
+  aspect-ratio: 1 / 1;
+  user-select: none;
 }
 
-.reading-pane__decrypt-stripes {
-  position: absolute;
-  inset: var(--space-md);
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: calc(var(--space-xs) / 1.5);
-}
-
-.reading-pane__decrypt-stripe {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--border-medium));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--card-bg));
-  color: color-mix(in srgb, var(--accent-secondary) 88%, var(--text-primary));
-  opacity: 0;
-  transform: translateY(-115%);
-  animation:
-    qmail-decrypt-stripe-enter-top calc(700ms * var(--motion-scale)) ease-out forwards,
-    qmail-decrypt-stripe-lock calc(900ms * var(--motion-scale)) ease-in-out forwards;
-  animation-delay: var(--stripe-delay), calc(var(--stripe-delay) + 950ms);
-}
-
-.reading-pane__decrypt-stripe--bottom {
-  transform: translateY(115%);
-  animation-name: qmail-decrypt-stripe-enter-bottom, qmail-decrypt-stripe-lock;
-}
-
-.reading-pane__decrypt-stream {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(var(--space-xs) / 2);
-  min-height: 100%;
-  padding: var(--space-sm) 0;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: var(--font-size-xs);
-  line-height: 1.35;
-  animation: qmail-decrypt-bit-scroll calc(950ms * var(--motion-scale)) linear infinite;
-}
-
-.reading-pane__decrypt-scan {
-  position: absolute;
-  inset-inline: var(--space-md);
-  top: 0;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--accent-primary),
-    var(--status-success),
-    transparent
-  );
-  box-shadow: 0 0 18px color-mix(in srgb, var(--accent-primary) 75%, transparent);
-  opacity: 0;
-  animation: qmail-decrypt-scan calc(1100ms * var(--motion-scale)) ease-in-out infinite;
-  animation-delay: calc(950ms * var(--motion-scale));
-}
-
-.reading-pane__decrypt-steps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-xs);
-}
-
-.reading-pane__decrypt-step {
-  min-width: 0;
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-sm);
-  background-color: var(--tertiary-bg);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  text-align: center;
-  opacity: 0.55;
-  animation: qmail-decrypt-step calc(500ms * var(--motion-scale)) ease-out forwards;
-  animation-delay: var(--step-delay);
-}
-
-.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-stripe,
-.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-stream,
-.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-step {
+.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-hero {
   opacity: 0.72;
-  transform: none;
-  animation: none;
-}
-
-.reading-pane__decrypt-box:not(.reading-pane__decrypt-box--active) .reading-pane__decrypt-scan {
-  display: none;
-}
-
-@keyframes qmail-decrypt-stripe-enter-top {
-  from {
-    opacity: 0;
-    transform: translateY(-115%);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes qmail-decrypt-stripe-enter-bottom {
-  from {
-    opacity: 0;
-    transform: translateY(115%);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes qmail-decrypt-stripe-lock {
-  0%, 100% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(1.45);
-  }
-}
-
-@keyframes qmail-decrypt-bit-scroll {
-  from {
-    transform: translateY(-0.55rem);
-  }
-  to {
-    transform: translateY(0.55rem);
-  }
-}
-
-@keyframes qmail-decrypt-scan {
-  0% {
-    opacity: 0;
-    transform: translateY(0);
-  }
-  18%, 72% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(12rem);
-  }
-}
-
-@keyframes qmail-decrypt-step {
-  from {
-    opacity: 0.55;
-    border-color: var(--border-medium);
-  }
-  to {
-    opacity: 1;
-    border-color: color-mix(in srgb, var(--accent-primary) 52%, var(--border-medium));
-    color: var(--text-primary);
-  }
 }
 .reading-pane__download-button {
   display: inline-flex;
@@ -850,13 +689,23 @@
   color: var(--text-muted);
 }
 
-/* Metadata-only cards are informational: no pointer, no hover affordance. */
+/* Metadata-only cards without a surviving source path remain informational. */
 .reading-pane__attachment--metadata {
   cursor: default;
 }
 
 .reading-pane__attachment--metadata:hover {
   background-color: var(--tertiary-bg);
+}
+
+.reading-pane__attachment--revealable {
+  cursor: pointer;
+}
+
+.reading-pane__attachment--revealable:hover,
+.reading-pane__attachment--revealable:focus-visible {
+  background-color: var(--hover-bg);
+  border-color: var(--accent-primary);
 }
 
 .reading-pane__attachment-source {
@@ -925,10 +774,6 @@
     align-items: stretch;
   }
 
-  .reading-pane__decrypt-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .reading-pane__action-button,
   .reading-pane__folder-select-wrap {
     justify-content: center;
@@ -951,18 +796,6 @@
   .reading-pane__attachment,
   .reading-pane__attachment-download-button {
     transition: none;
-  }
-
-  .reading-pane__decrypt-stripe,
-  .reading-pane__decrypt-stream,
-  .reading-pane__decrypt-step {
-    opacity: 1;
-    transform: none;
-    animation: none;
-  }
-
-  .reading-pane__decrypt-scan {
-    display: none;
   }
 
   .reading-pane__transfer-progress-fill {

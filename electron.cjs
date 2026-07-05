@@ -941,6 +941,26 @@ function sendQmailMenuCommand(command) {
   mainWindow.webContents.send('qmail:menu-command', command);
 }
 
+function getQmailExecutablePath() {
+  const packagedExecutable = [
+    process.env.PORTABLE_EXECUTABLE_FILE,
+    process.env.APPIMAGE,
+  ]
+    .map((value) => String(value || '').trim())
+    .find((value) => value && path.isAbsolute(value));
+  if (packagedExecutable) {
+    return path.normalize(packagedExecutable);
+  }
+  return path.normalize(app.getPath('exe'));
+}
+
+function sendUpgradeRequested() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('qmail:upgrade-requested', {
+    executablePath: getQmailExecutablePath(),
+  });
+}
+
 function sendTitleBarColorPickerCommand() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('titlebar:pick-color', {
@@ -1115,6 +1135,15 @@ function buildApplicationMenu() {
             detail: QMAIL_HELP_MESSAGE,
             buttons: ['OK'],
           }),
+        },
+        {
+          label: 'Upgrade',
+          click: () => sendUpgradeRequested(),
+        },
+        { type: 'separator' },
+        {
+          label: 'Report Bugs',
+          click: () => shell.openExternal('http://cloudcoin.org/bugs.php'),
         },
         { type: 'separator' },
         {
@@ -1388,10 +1417,14 @@ ipcMain.handle('compose:statFiles', async (_event, filePaths) => {
 // never reaches the renderer. Keep the mapping in sync with
 // sanitizeReceiptAttachmentFiles in src/api/qmailApiServices.js, which is
 // the browser-build fallback.
-ipcMain.handle('qmail:sent-attachment-metadata', async (_event, apiPort, emailId) => {
+async function getSentAttachmentMetadata(apiPort, emailId) {
   const id = String(emailId || '');
   const port = Number(apiPort);
-  if (!/^[0-9a-fA-F]{32}$/.test(id) || !Number.isInteger(port) || port <= 0 || port > 65535) {
+  if (
+    !/^[0-9a-fA-F]{32}$/.test(id) ||
+    !Number.isInteger(port) ||
+    port !== backendPort
+  ) {
     return { success: false, error: 'Invalid receipt request.' };
   }
 
@@ -1433,6 +1466,50 @@ ipcMain.handle('qmail:sent-attachment-metadata', async (_event, apiPort, emailId
   } catch (error) {
     log('qmail:sent-attachment-metadata failed: ' + error.message);
     return { success: false, error: error.message };
+  }
+}
+
+ipcMain.handle('qmail:sent-attachment-metadata', async (_event, apiPort, emailId) => {
+  return getSentAttachmentMetadata(apiPort, emailId);
+});
+
+// Resolve the path from the authoritative local receipt. The renderer only
+// supplies IDs and therefore cannot use this channel to reveal arbitrary files.
+ipcMain.handle('qmail:reveal-sent-attachment', async (
+  _event,
+  apiPort,
+  emailId,
+  attachmentId,
+) => {
+  const metadata = await getSentAttachmentMetadata(apiPort, emailId);
+  if (!metadata.success) return metadata;
+
+  const requestedId = String(attachmentId || '');
+  const attachment = metadata.data.attachments.find(
+    (entry) => entry.attachmentId === requestedId,
+  );
+  if (!attachment) {
+    return { success: false, error: 'Sent attachment metadata was not found.' };
+  }
+
+  const sourcePath = String(attachment.sourcePath || '').trim();
+  if (!sourcePath || !path.isAbsolute(sourcePath)) {
+    return { success: false, error: 'The original attachment location is unavailable.' };
+  }
+
+  try {
+    const resolvedPath = await fs.promises.realpath(sourcePath);
+    const stat = await fs.promises.stat(resolvedPath);
+    if (!stat.isFile()) {
+      return { success: false, error: 'The original attachment is no longer a file.' };
+    }
+    shell.showItemInFolder(resolvedPath);
+    return { success: true, path: resolvedPath };
+  } catch {
+    return {
+      success: false,
+      error: 'The original attachment has been moved or deleted.',
+    };
   }
 });
 

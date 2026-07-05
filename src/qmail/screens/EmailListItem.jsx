@@ -23,6 +23,7 @@ const EmailListItem = ({
   onToggleStar,
   onDeleteEmail,
   onRowAction,
+  onAttachmentClick,
   isLoadingDraft = false,
   currentFolder = "inbox",
 }) => {
@@ -282,7 +283,28 @@ const EmailListItem = ({
             )}
           </div>
           <div className="email-list-pane__sender-right">
-            {email.hasAttachments && (
+            {email.hasAttachments && onAttachmentClick && currentFolder === "sent" ? (
+              <button
+                type="button"
+                className="email-list-pane__attachment-button"
+                aria-label={
+                  email.attachmentCount > 1
+                    ? `Show first of ${email.attachmentCount} sent attachments in folder`
+                    : "Show sent attachment in folder"
+                }
+                title={
+                  email.attachmentCount > 1
+                    ? `Show first of ${email.attachmentCount} sent attachments in folder`
+                    : "Show sent attachment in folder"
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAttachmentClick(email);
+                }}
+              >
+                <Paperclip size={13} />
+              </button>
+            ) : email.hasAttachments ? (
               <Paperclip
                 size={13}
                 className="email-list-pane__attachment-icon"
@@ -297,7 +319,7 @@ const EmailListItem = ({
                     : "Has attachment"
                 }
               />
-            )}
+            ) : null}
             <span className="email-list-pane__timestamp">{email.timestamp}</span>
             {!email.isPending && (
               <Star
