@@ -73,6 +73,14 @@
   font-weight: 600;
 }
 
+/* Muted secondary line showing the QMail address under the contact name in
+   the open-message header. Only rendered when a distinct contact name exists. */
+.reading-pane__sender-address {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+}
+
 /* was: .email-actions */
 .reading-pane__actions {
   display: flex;

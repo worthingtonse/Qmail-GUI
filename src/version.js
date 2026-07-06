@@ -15,7 +15,7 @@
 //
 // ===========================================================================
 
-export const BUILD_DATE = "2026-06-26";
+export const BUILD_DATE = "2026-07-04";
 
 export const formatBuildDateForDisplay = (value = BUILD_DATE) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));

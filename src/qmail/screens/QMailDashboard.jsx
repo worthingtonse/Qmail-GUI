@@ -52,6 +52,15 @@ import {
 } from "../../api/qmailApiServices";
 import { formatTimestamp } from "./formatTimestamp";
 import {
+  getEmailDisplayIdentityFields,
+  getEmailSenderAddress,
+  getEmailSenderDenomination,
+  getEmailSenderFields,
+  getEmailSenderSn,
+  isSerialNumberText,
+  readNumericSenderField,
+} from "./emailIdentity";
+import {
   clearQmailLocalStorageExceptSkip,
   setSkipAutoRestore,
 } from "../skipAutoRestore";
@@ -286,14 +295,6 @@ const timestampToMs = (value) => {
   return num < 1e12 ? num * 1000 : num;
 };
 
-const QMAIL_DENOMINATION_CODE_TO_VALUE = {
-  0: 1,
-  1: 10,
-  2: 100,
-  3: 1000,
-  4: 10000,
-};
-
 // Sent-folder attachment counts come from send receipts (see
 // getSentAttachmentMetadata / docs/attachment.views.txt). Cached per email id
 // for the session so pagination and folder revisits don't refetch receipts.
@@ -304,15 +305,6 @@ const sentAttachmentCountCache = new Map();
 // Sent email ids are 32-hex file_guids; anything else (e.g. the synthetic
 // Date.now()+Math.random() ids some search rows get) has no receipt.
 const RECEIPT_GUID_RE = /^[0-9a-f]{32}$/i;
-
-const readNumericSenderField = (...values) => {
-  for (const value of values) {
-    if (value === null || value === undefined || value === "") continue;
-    const numberValue = Number(value);
-    if (Number.isFinite(numberValue)) return numberValue;
-  }
-  return null;
-};
 
 const readEmailReadFlag = (email = {}, fallback = false) => {
   const values = [email.is_read, email.isRead, email.read];
@@ -367,142 +359,6 @@ const buildPaymentRejectionBody = (lockerCode) =>
     "",
     `Refund locker key: ${lockerCode}`,
   ].join("\n");
-
-const isSerialNumberText = (value) =>
-  typeof value === "string" && /^\d+$/.test(value.trim());
-
-const getEmailSenderSn = (email = {}) => {
-  const sn = readNumericSenderField(email.sender_sn, email.senderSn);
-  return sn && sn > 0 ? sn : null;
-};
-
-const getEmailSenderDenominationCode = (email = {}) => {
-  const code = readNumericSenderField(
-    email.sender_denomination_code,
-    email.senderDenominationCode,
-  );
-  if (code !== null && code >= 0 && code <= 4) return code;
-
-  const denomination = readNumericSenderField(
-    email.sender_denomination,
-    email.senderDenomination,
-  );
-  const codeFromValue = Object.entries(QMAIL_DENOMINATION_CODE_TO_VALUE).find(
-    ([, value]) => value === denomination,
-  );
-  return codeFromValue ? Number(codeFromValue[0]) : null;
-};
-
-const getEmailSenderDenomination = (email = {}) => {
-  const denomination = readNumericSenderField(
-    email.sender_denomination,
-    email.senderDenomination,
-  );
-  if (denomination && denomination > 0) return denomination;
-
-  const code = getEmailSenderDenominationCode(email);
-  return code !== null ? QMAIL_DENOMINATION_CODE_TO_VALUE[code] : null;
-};
-
-const getEmailSenderAddress = (email = {}, fallback = "Unknown Sender") => {
-  const address = [
-    email.sender_address,
-    email.senderAddress,
-    email.senderEmail,
-    email.from,
-    email.sender,
-  ].find(
-    (value) =>
-      typeof value === "string" &&
-      value.trim().length > 0 &&
-      !isSerialNumberText(value) &&
-      !/^SN#/i.test(value.trim()) &&
-      !/^Unknown( Sender)?$/i.test(value.trim()),
-  );
-  if (address) return address.trim();
-
-  const senderSn = getEmailSenderSn(email);
-  if (senderSn) return String(senderSn);
-
-  const serialText = [email.senderEmail, email.from, email.sender].find(
-    (value) => typeof value === "string" && isSerialNumberText(value),
-  );
-  return serialText ? serialText.trim() : fallback;
-};
-
-const getEmailSenderFields = (email = {}, fallback = "Unknown Sender") => {
-  const senderSn = getEmailSenderSn(email);
-  const senderDenomination = getEmailSenderDenomination(email);
-  const senderDenominationCode = getEmailSenderDenominationCode(email);
-  const sender = getEmailSenderAddress(email, senderSn ? String(senderSn) : fallback);
-  const senderEmail = sender && (sender !== fallback || senderSn) ? sender : "";
-
-  return {
-    sender,
-    senderEmail,
-    from: senderEmail,
-    sender_address: senderEmail,
-    senderSn,
-    sender_sn: senderSn,
-    senderDenomination,
-    sender_denomination: senderDenomination,
-    senderDenominationCode,
-    sender_denomination_code: senderDenominationCode,
-  };
-};
-
-// Folders whose messages the user SENT — for these we display the recipient
-// ("To"), not the sender (which would be the user themselves).
-const OUTGOING_FOLDERS = new Set(["sent", "drafts"]);
-
-// Build the "sender_*" display fields that EmailListItem / ReadingPane /
-// SenderAvatar all read. For incoming mail these are the real sender; for
-// outgoing mail (Sent/Drafts) we map the primary RECIPIENT into the same
-// sender-shaped fields so the existing display components show the
-// recipient without any per-component folder branching.
-const getEmailDisplayIdentityFields = (email = {}, folder) => {
-  if (!OUTGOING_FOLDERS.has(folder)) {
-    return getEmailSenderFields(email);
-  }
-
-  const recipientSn =
-    readNumericSenderField(email.recipientSn, email.recipient_sn) || null;
-  const recipientCode = (() => {
-    const code = readNumericSenderField(
-      email.recipientDenominationCode,
-      email.recipient_denomination_code,
-    );
-    return code !== null && code >= 0 && code <= 4 ? code : null;
-  })();
-  const recipientAddress =
-    typeof email.recipientAddress === "string" && email.recipientAddress.trim()
-      ? email.recipientAddress.trim()
-      : typeof email.recipient_address === "string" && email.recipient_address.trim()
-      ? email.recipient_address.trim()
-      : recipientSn
-      ? String(recipientSn)
-      : "";
-  const extraCount =
-    (readNumericSenderField(email.recipientCount, email.recipient_count) || 0) - 1;
-  // When a message has multiple recipients, hint at it after the first.
-  const displayName =
-    recipientAddress && extraCount > 0
-      ? `${recipientAddress} +${extraCount}`
-      : recipientAddress || "Unknown Recipient";
-
-  return {
-    sender: displayName,
-    senderEmail: recipientAddress,
-    from: recipientAddress,
-    sender_address: recipientAddress,
-    senderSn: recipientSn,
-    sender_sn: recipientSn,
-    senderDenomination: null,
-    sender_denomination: null,
-    senderDenominationCode: recipientCode,
-    sender_denomination_code: recipientCode,
-  };
-};
 
 const getPendingSender = (notif) =>
   getEmailSenderAddress(
@@ -1240,12 +1096,41 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
       await loadWalletBalance();
 
       await Promise.all([loadFolders(), loadMailCounts(), loadDrafts()]);
-      await loadEmails(currentFolder);
+      // BUG (startup empty inbox): on the fast path the dashboard mounts and
+      // this once-only bootstrap fires BEFORE core.exe has finished binding
+      // its port / opening qmail.db, so the first /messages/list fails and
+      // latches the empty state ("Failed to load emails / Your inbox is
+      // empty") with no retry. prewarmInbox() waits for the backend but this
+      // load did not. Retry the initial email load with backoff until the
+      // backend answers, suppressing the error toast on the transient tries.
+      await loadInitialEmailsWithRetry(currentFolder);
     } catch (error) {
       console.error("Error loading initial data:", error);
       showDashboardNotification("Error loading dashboard data", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Retry the mount-time inbox load until the backend is serving. A returning
+  // user on the fast path can reach here while core.exe is still starting; a
+  // single attempt would leave a permanently empty inbox until a manual tab
+  // click. Attempts: immediate, then +400ms, +800ms, +1500ms, +3000ms.
+  const loadInitialEmailsWithRetry = async (folder) => {
+    const delays = [0, 400, 800, 1500, 3000];
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt] > 0) await wait(delays[attempt]);
+      // Suppress the error toast on all but the final attempt so transient
+      // backend-not-ready failures don't flash a scary message at the user.
+      const isLastAttempt = attempt === delays.length - 1;
+      const result = await loadEmails(folder, null, {
+        notifyOnError: isLastAttempt,
+      });
+      // A newer request (e.g. the user clicked a folder) supersedes us.
+      if (result?.stale) return;
+      // Success — getMailList returned success:true (empty inbox counts as
+      // success and stops the retry loop; only a failed fetch retries).
+      if (result?.success) return;
     }
   };
 

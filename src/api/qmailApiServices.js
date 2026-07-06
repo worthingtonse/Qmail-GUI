@@ -226,12 +226,18 @@ const withSenderFields = (source = {}, fallback = "Unknown Sender") => {
   const senderAddress = getSenderAddress(source, senderSn ? String(senderSn) : fallback);
   const senderEmail =
     senderAddress && (senderAddress !== fallback || senderSn) ? senderAddress : "";
+  // Display name resolved from the user's contacts by the backend. Empty
+  // string when the sender is not a saved contact.
+  const senderName =
+    typeof source.sender_name === "string" ? source.sender_name.trim() : "";
 
   return {
     sender: senderAddress || fallback,
     senderEmail,
     from: senderEmail,
     sender_address: senderEmail,
+    senderName,
+    sender_name: senderName,
     senderSn,
     sender_sn: senderSn,
     senderDenomination,
@@ -297,10 +303,16 @@ const withRecipientFields = (source = {}) => {
         String(recipientSn)
       : "";
   const recipientCount = readNumericApiField(source.recipient_count) ?? 0;
+  // Display name of the primary recipient resolved from contacts by the
+  // backend. Empty string when the recipient is not a saved contact.
+  const recipientName =
+    typeof source.recipient_name === "string" ? source.recipient_name.trim() : "";
 
   return {
     recipientAddress,
     recipient_address: recipientAddress,
+    recipientName,
+    recipient_name: recipientName,
     recipientSn,
     recipient_sn: recipientSn,
     recipientDenomination,

@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  Check,
+  Copy,
   Loader2,
   Mail,
   MailOpen,
@@ -28,8 +30,34 @@ const EmailListItem = ({
   currentFolder = "inbox",
 }) => {
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
+  const [addressCopied, setAddressCopied] = useState(false);
   const actionMenuRef = useRef(null);
+  const copyResetRef = useRef(null);
   const isTrashItem = email.isTrashed || email.folder === "trash";
+
+  // Prefer the resolved contact name as the primary label; fall back to the
+  // address when the party is not a saved contact. The address is always what
+  // the copy button and hover tooltip surface.
+  const senderAddress =
+    email.senderDisplayAddress || email.senderEmail || email.sender || "";
+  const senderLabel = email.senderDisplayName || senderAddress;
+  const hasDistinctAddress =
+    Boolean(senderAddress) && senderAddress !== senderLabel;
+
+  const handleCopyAddress = (event) => {
+    event.stopPropagation();
+    if (!senderAddress) return;
+
+    const markCopied = () => {
+      setAddressCopied(true);
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+      copyResetRef.current = setTimeout(() => setAddressCopied(false), 1500);
+    };
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(senderAddress).then(markCopied, () => {});
+    }
+  };
   const deleteTitle = email.isPending
     ? "Delete pending encrypted message"
     : isTrashItem
@@ -49,6 +77,13 @@ const EmailListItem = ({
     if (isLoadingDraft) return;
     onSelect(email);
   };
+
+  useEffect(
+    () => () => {
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!isActionMenuOpen) return undefined;
@@ -273,7 +308,29 @@ const EmailListItem = ({
       <div className="email-list-pane__details">
         <div className="email-list-pane__sender-row">
           <div className="email-list-pane__sender-left">
-            <span className="email-list-pane__sender">{email.sender}</span>
+            <span
+              className="email-list-pane__sender"
+              title={hasDistinctAddress ? senderAddress : undefined}
+            >
+              {senderLabel}
+            </span>
+            {senderAddress && (
+              <button
+                type="button"
+                className={`email-list-pane__address-copy ${
+                  addressCopied ? "email-list-pane__address-copy--copied" : ""
+                }`}
+                onClick={handleCopyAddress}
+                title={addressCopied ? "Address copied" : `Copy ${senderAddress}`}
+                aria-label={
+                  addressCopied
+                    ? "Address copied"
+                    : `Copy address ${senderAddress}`
+                }
+              >
+                {addressCopied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            )}
             {email.annoyanceReported && (
               <ShieldAlert
                 size={14}

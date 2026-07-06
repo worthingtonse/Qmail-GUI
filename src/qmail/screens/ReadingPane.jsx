@@ -343,9 +343,27 @@ const ReadingPane = ({
                 />
               )}
               <div className="reading-pane__sender-details">
-                <span className="reading-pane__sender-name">
-                  {email.from || email.senderEmail || email.sender}
-                </span>
+                {(() => {
+                  const address =
+                    email.senderDisplayAddress ||
+                    email.from ||
+                    email.senderEmail ||
+                    email.sender ||
+                    "";
+                  const name = email.senderDisplayName || "";
+                  return (
+                    <>
+                      <span className="reading-pane__sender-name">
+                        {name || address}
+                      </span>
+                      {name && address && address !== name && (
+                        <span className="reading-pane__sender-address">
+                          {address}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
             <div className="reading-pane__actions">

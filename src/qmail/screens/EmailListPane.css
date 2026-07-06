@@ -646,6 +646,42 @@
   color: var(--accent-warning);
 }
 
+/* Copy-address affordance: hidden until the row is hovered/focused so the
+   list stays clean, matching mainstream mail clients. Copies the QMail
+   address (never the contact name). */
+.email-list-pane__address-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.email-list-pane__item:hover .email-list-pane__address-copy,
+.email-list-pane__item:focus-within .email-list-pane__address-copy,
+.email-list-pane__address-copy:focus-visible {
+  opacity: 1;
+}
+
+.email-list-pane__address-copy:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+/* Once copied, stay visible briefly (even off-hover) and turn success-colored
+   so the check mark is legible. */
+.email-list-pane__address-copy--copied {
+  opacity: 1;
+  color: var(--accent-success, #34d399);
+}
+
 /* was: .email-timestamp */
 .email-list-pane__timestamp {
   flex-shrink: 0;
