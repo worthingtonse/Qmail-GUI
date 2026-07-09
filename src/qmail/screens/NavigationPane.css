@@ -299,6 +299,24 @@
   width: 100%;
 }
 
+/* The identity ("mailbox key") coin is staked, not spendable — surface it
+   under Purchase Coins so users don't read the missing value as lost funds. */
+.navigation-pane__staked-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  cursor: help;
+}
+
+.navigation-pane__staked-value {
+  margin-left: auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .navigation-pane__wallet-info-button,
 .navigation-pane__wallet-info-close {
   display: inline-flex;
@@ -554,6 +572,16 @@
 
   .navigation-pane__wallet-action--purchase {
     min-width: 7.5rem;
+  }
+
+  .navigation-pane__staked-row {
+    flex: none;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .navigation-pane__staked-value {
+    margin-left: var(--space-xs);
   }
 
   .navigation-pane__wallet-info-button {

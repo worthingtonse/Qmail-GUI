@@ -41,7 +41,10 @@ const FALLBACK_ALERT_SOUND_FILES = [
 ];
 const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
-const QMAIL_BUILD_DATE = '2026-06-26';
+// Single source of truth for the version: version.json at the app root,
+// stamped by scripts/stamp-version.cjs on every build. src/version.js
+// imports the same file for the renderer.
+const { buildDate: QMAIL_BUILD_DATE, buildNumber: QMAIL_BUILD_NUMBER } = require('./version.json');
 const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
 const QMAIL_HELP_MESSAGE =
 `Mailbox authenticity numbers can be changed at any time.
@@ -91,6 +94,19 @@ function formatBuildDateForDisplay(value = QMAIL_BUILD_DATE) {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(date);
+}
+
+function formatVersionForDisplay() {
+  return `${formatBuildDateForDisplay()} (build ${QMAIL_BUILD_NUMBER})`;
+}
+
+// Absolute folder the program runs from. For the portable .exe,
+// electron-builder unpacks to a temp dir and sets PORTABLE_EXECUTABLE_DIR
+// to where the .exe actually sits — that is the folder users care about.
+function getProgramDir() {
+  if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
+  if (app.isPackaged) return path.dirname(app.getPath('exe'));
+  return __dirname;
 }
 
 function isPathInside(rootPath, candidatePath) {
@@ -635,7 +651,7 @@ function parseQMailArgs(argv) {
       return null;
     }
     if (a === '--version' || a === '-V') {
-      process.stdout.write(`QMail ${formatBuildDateForDisplay()}\n`);
+      process.stdout.write(`QMail ${formatVersionForDisplay()}\n`);
       app.exit(0);
       return null;
     }
@@ -1151,7 +1167,7 @@ function buildApplicationMenu() {
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
             title: `About ${app.name}`,
-            message: `${app.name} ${formatBuildDateForDisplay()}`,
+            message: `${app.name} ${formatVersionForDisplay()}`,
             buttons: ['OK'],
           }),
         },
@@ -1273,7 +1289,9 @@ ipcMain.handle('show-error-dialog', async (event, title, message) => {
   });
 });
 
-ipcMain.handle('get-app-version', () => formatBuildDateForDisplay());
+ipcMain.handle('get-app-version', () => formatVersionForDisplay());
+
+ipcMain.handle('get-app-dir', () => getProgramDir());
 
 ipcMain.handle('titlebar:get-color', () => ({
   success: true,

@@ -28,7 +28,9 @@ import {
   buildRaidaStatusTitle,
 } from "./serverStatusUi";
 import { parseQmailAddress } from "../address/qmailAddress";
-import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
+// Cartouche system ON HOLD — restore this import together with the
+// commented-out <QmailCartoucheAvatar> block in the identity header below.
+// import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 import "./NavigationPane.css";
 
 const CLOUDCOIN_PURCHASE_URL = "https://CloudCoin.com/Pay/";
@@ -592,6 +594,20 @@ const NavigationPane = ({
             <Info size={14} />
           </button>
         </div>
+        {parsedQmailAddress.ok && (
+          <div
+            className="navigation-pane__staked-row"
+            title={`Your .${parsedQmailAddress.denominationName} mailbox key coin is staked to keep your QMail address active. It is still yours, but it is in use and not counted in the wallet total above.`}
+          >
+            <Key size={14} />
+            <span className="navigation-pane__staked-label">
+              Staked .{parsedQmailAddress.denominationName}:
+            </span>
+            <span className="navigation-pane__staked-value">
+              {formatBalance(10 ** parsedQmailAddress.denominationCode)} CC
+            </span>
+          </div>
+        )}
         {showWalletPaymentInfo && (
           <div
             className="navigation-pane__wallet-info-popover"

@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkUSBDrive: () => ipcRenderer.invoke('check-usb-drive'),
   showErrorDialog: (title, message) => ipcRenderer.invoke('show-error-dialog', title, message),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Absolute folder the program runs from — shown in the window title.
+  getAppDir: () => ipcRenderer.invoke('get-app-dir'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   // Add CLI command support
   runCommand: (command) => ipcRenderer.invoke('run-command', command),

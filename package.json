@@ -1,13 +1,14 @@
 {
   "name": "q-mail",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.4",
   "type": "module",
   "main": "electron.cjs",
   "description": "QMail-Decentralized.Quantum-Safe.Unsurveillable.",
   "scripts": {
     "dev": "vite",
     "dev2": "cross-env VITE_PORT=5174 VITE_API_PORT=8081 vite",
+    "prebuild": "node scripts/stamp-version.cjs",
     "build": "vite build",
     "generate:qmail-avatars": "node scripts/generate-qmail-avatar-assets.mjs",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
@@ -20,7 +21,7 @@
     "electron-pack": "npm run build && electron-builder --config electron-builder.config.cjs",
     "build-portable": "npm run build && electron-builder --config electron-builder.config.cjs --win portable",
     "build-portable-intl": "npm run build && cross-env QMAIL_BUILD=intl electron-builder --config electron-builder.config.cjs --win portable",
-    "build-portable-all": "npm run build-portable && npm run build-portable-intl",
+    "build-portable-all": "npm run build && electron-builder --config electron-builder.config.cjs --win portable && cross-env QMAIL_BUILD=intl electron-builder --config electron-builder.config.cjs --win portable",
     "build-all": "npm run build && electron-builder --config electron-builder.config.cjs --win --mac --linux",
     "dist": "npm run build && electron-builder --config electron-builder.config.cjs --publish=never"
   },

@@ -1,4 +1,4 @@
-import { BUILD_DATE, formatBuildDateForDisplay } from "../../version.js";
+import { BUILD_DATE, BUILD_NUMBER, formatVersionForDisplay } from "../../version.js";
 
 export const TITLE_ADDRESS_SEPARATOR_COUNT = 10;
 export const TITLE_ADDRESS_SEPARATOR = Array(TITLE_ADDRESS_SEPARATOR_COUNT)
@@ -20,8 +20,17 @@ export const formatTitleQmailAddress = (address) => {
   return `${localPart}@${lowercaseWord(denomination)}`;
 };
 
-export const buildWindowTitle = ({ qmailAddress, buildDate = BUILD_DATE } = {}) => {
-  const prefix = `QMail Alpha      Limited Functionality. Attachment Max Size and Count: 250KB and 2     ${formatBuildDateForDisplay(buildDate)}`;
+export const buildWindowTitle = ({
+  qmailAddress,
+  buildDate = BUILD_DATE,
+  buildNumber = BUILD_NUMBER,
+  appDir = "",
+} = {}) => {
+  let prefix = `QMail Alpha . . . . . . . Version: ${formatVersionForDisplay(buildDate, buildNumber)}`;
+
+  const folder = String(appDir || "").trim();
+  if (folder) prefix += ` . . . . . . . Folder: ${folder}`;
+
   const formattedAddress = formatTitleQmailAddress(qmailAddress);
 
   return formattedAddress

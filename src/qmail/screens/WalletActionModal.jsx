@@ -26,6 +26,7 @@ import {
   withdrawToLockerCode,
 } from "../../api/qmailApiServices";
 import { RAIDA_COUNT } from "./serverStatusUi";
+import { parseQmailAddress } from "../address/qmailAddress";
 import "./ComposeModal.css";
 import "./WalletActionModal.css";
 
@@ -117,6 +118,60 @@ const getReceiptWalletPathFromResult = (result) => {
   const nested = data.result || {};
   const receipt = data.receipt || nested.receipt || {};
   return data.wallet_path || data.walletPath || nested.wallet_path || nested.walletPath || receipt.wallet_path || "";
+};
+
+// The deposit receipt's `totals` may sit on result.data directly, under
+// result.data.result (the finished task payload), or under a nested receipt
+// object. Pull whichever is present so we can surface deposit warnings.
+const getTotalsFromResult = (result) => {
+  const data = result?.data || {};
+  const nested = data.result || {};
+  const receipt = data.receipt || nested.receipt || {};
+  return data.totals || nested.totals || receipt.totals || {};
+};
+
+const countFromTotals = (totals, keys) =>
+  keys.reduce((acc, key) => {
+    const n = Number(totals?.[key]);
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
+// A deposit "added nothing" when no authentic coins landed in the wallet.
+// We trust total_deposited when present, otherwise fall back to the authentic
+// (bank + fracked) counts so a receipt without that field still reads right.
+const depositAddedNothing = (totals) => {
+  if (totals && Object.prototype.hasOwnProperty.call(totals, "total_deposited")) {
+    const deposited = Number(totals.total_deposited);
+    if (Number.isFinite(deposited)) return deposited <= 0;
+  }
+  return countFromTotals(totals, ["bank_count", "fracked_count"]) <= 0;
+};
+
+// Build human-readable warnings for a completed deposit. Each condition is
+// independent, so more than one may apply and they stack.
+const getDepositWarnings = (totals) => {
+  const warnings = [];
+
+  const counterfeit = countFromTotals(totals, ["counterfeit_count", "legacy_counterfeit_count"]);
+  if (counterfeit > 0) {
+    warnings.push(
+      `${counterfeit.toLocaleString()} ${counterfeit === 1 ? "note was" : "notes were"} counterfeit`,
+    );
+  }
+
+  if (countFromTotals(totals, ["limbo_count"]) > 0) {
+    warnings.push("The deposit was interrupted. The program will try to recover later");
+  }
+
+  if (countFromTotals(totals, ["duplicate_count"]) > 0) {
+    warnings.push("Some of the coins that were imported were already in the bank");
+  }
+
+  if (countFromTotals(totals, ["error_count"]) > 0) {
+    warnings.push("Some RAIDA servers returned errors");
+  }
+
+  return warnings;
 };
 
 const formatReceiptContent = (content) => {
@@ -336,6 +391,7 @@ const WalletActionModal = ({
   const [receiptFilename, setReceiptFilename] = useState("");
   const [receiptWalletPath, setReceiptWalletPath] = useState("");
   const [receiptContent, setReceiptContent] = useState(null);
+  const [depositWarnings, setDepositWarnings] = useState([]);
   const [isReceiptVisible, setIsReceiptVisible] = useState(false);
   const [isReceiptLoading, setIsReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
@@ -370,6 +426,7 @@ const WalletActionModal = ({
     setReceiptFilename("");
     setReceiptWalletPath("");
     setReceiptContent(null);
+    setDepositWarnings([]);
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
@@ -389,12 +446,24 @@ const WalletActionModal = ({
     return `${selectedFiles.length} file${selectedFiles.length === 1 ? "" : "s"} selected (${formatFileSize(totalSize)})`;
   }, [selectedFiles]);
 
+  // CC value of the staked identity coin (.bit=1 ... .giga=10000). The
+  // provision response carries the human value in `denomination`; fall back
+  // to deriving it from the address TLD so no extra API call is needed.
+  const stakedIdentityValue = useMemo(() => {
+    if (!identityAssignment) return null;
+    const direct = Number(identityAssignment.denomination);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const parsed = parseQmailAddress(identityAssignment.address || "");
+    return parsed.ok ? 10 ** parsed.denominationCode : null;
+  }, [identityAssignment]);
+
   if (!isOpen) return null;
 
   const resetReceiptState = () => {
     setReceiptFilename("");
     setReceiptWalletPath("");
     setReceiptContent(null);
+    setDepositWarnings([]);
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
@@ -568,11 +637,18 @@ const WalletActionModal = ({
       }
 
       const nextReceiptFilename = getReceiptFilenameFromResult(result, receiptTaskId);
+      const totals = getTotalsFromResult(result);
+      const warnings = getDepositWarnings(totals);
       await refreshWallet();
       setStatusMessage("");
       setReceiptFilename(nextReceiptFilename);
       setReceiptWalletPath(getReceiptWalletPathFromResult(result));
-      setSuccessMessage("Funds added to the Default wallet.");
+      setDepositWarnings(warnings);
+      setSuccessMessage(
+        depositAddedNothing(totals)
+          ? "No funds were added to the Default wallet."
+          : "Funds added to the Default wallet.",
+      );
       setDepositCompleted(true);
       setSelectedFiles([]);
       setSelectedFolder(null);
@@ -583,6 +659,9 @@ const WalletActionModal = ({
     } catch (err) {
       setError(err?.message || "Add funds failed.");
     } finally {
+      // Same as handleWithdraw: never leave a stale progress spinner
+      // ("Starting deposit...", "Downloading locker...") next to an error.
+      setStatusMessage("");
       setIsWorking(false);
     }
   };
@@ -625,6 +704,9 @@ const WalletActionModal = ({
     } catch (err) {
       setError(err?.message || "Withdraw failed.");
     } finally {
+      // Clear on every exit path — a failed withdraw must not leave the
+      // "Creating locker..." spinner running next to the error.
+      setStatusMessage("");
       setIsWorking(false);
     }
   };
@@ -672,6 +754,10 @@ const WalletActionModal = ({
       setIsReceiptLoading(false);
     }
   };
+
+  // A completed deposit that surfaced warnings (counterfeit, limbo, duplicate,
+  // or RAIDA errors) should read as a problem, not a plain success.
+  const depositHadIssues = mode === "add" && depositWarnings.length > 0;
 
   const lockerInputValid = onboardingMode
     ? lockerCode.trim().length > 0
@@ -842,8 +928,17 @@ const WalletActionModal = ({
           )}
 
           {successMessage && (
-            <div className="compose-modal__send-progress wallet-action-modal__success" role="status">
-              <CheckCircle size={16} className="compose-modal__status-icon compose-modal__status-icon--success" />
+            <div
+              className={`compose-modal__send-progress wallet-action-modal__success ${
+                depositHadIssues ? "wallet-action-modal__success--issues" : ""
+              }`}
+              role={depositHadIssues ? "alert" : "status"}
+            >
+              {depositHadIssues ? (
+                <AlertCircle size={16} className="compose-modal__status-icon" />
+              ) : (
+                <CheckCircle size={16} className="compose-modal__status-icon compose-modal__status-icon--success" />
+              )}
               <span className="wallet-action-modal__success-text">{successMessage}</span>
               {mode === "add" && receiptFilename && (
                 <button
@@ -855,6 +950,36 @@ const WalletActionModal = ({
                   {isReceiptLoading ? "Loading receipt..." : "See Receipt"}
                 </button>
               )}
+            </div>
+          )}
+
+          {identityAssignment && stakedIdentityValue != null && (
+            <div
+              className="compose-modal__send-progress wallet-action-modal__staked-note"
+              role="note"
+            >
+              <AlertCircle size={16} className="compose-modal__status-icon" />
+              <span>
+                Attention: You have staked{" "}
+                {stakedIdentityValue.toLocaleString()}{" "}
+                {stakedIdentityValue === 1 ? "coin" : "coins"} which will not
+                show up in your wallet total. This coin is your mailbox key —
+                it is in use, not lost.
+              </span>
+            </div>
+          )}
+
+          {mode === "add" && depositWarnings.length > 0 && (
+            <div
+              className="compose-modal__error wallet-action-modal__deposit-warnings"
+              role="alert"
+            >
+              <AlertCircle size={16} />
+              <ul className="wallet-action-modal__deposit-warning-list">
+                {depositWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
             </div>
           )}
 

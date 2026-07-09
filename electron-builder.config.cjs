@@ -23,6 +23,7 @@ const config = {
     "dist/**/*",
     "electron.cjs",
     "preload.cjs",
+    "version.json",
   ],
 
   // Maximum compression — slower packaging, smaller binary. No

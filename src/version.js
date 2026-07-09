@@ -1,21 +1,28 @@
 // ===========================================================================
-//  QMAIL CLIENT BUILD DATE  —  EDIT THIS ONE LINE ON EVERY RELEASE
+//  QMAIL CLIENT VERSION  —  DO NOT EDIT VALUES HERE
 // ===========================================================================
 //
-//  This is the build date of THIS client. It is compared against the remote
-//  version files (https://raida<N>.cloudcoin.global/service/qmail_client_version,
+//  The version lives in /version.json (repo root) and is stamped
+//  automatically by scripts/stamp-version.cjs on every build (the npm
+//  "prebuild" hook): buildDate is set to the day of the build and
+//  buildNumber is incremented. electron.cjs requires the same file, so
+//  the renderer and main process can never drift.
+//
+//  BUILD_DATE is compared against the remote version files
+//  (https://raida<N>.cloudcoin.global/service/qmail_client_version,
 //  majority vote across the mirrors in qmailApiServices.REMOTE_VERSION_URLS)
 //  to decide whether an update is available.
 //
-//  FORMAT: "YYYY-MM-DD"  (zero-padded; e.g. "2026-06-23")
-//  Both this value and the remote file use this exact format, which compares
-//  correctly with plain string ordering — no date parsing needed.
-//
-//  >>> BUMP THIS DATE, SAVE, THEN REBUILD. Nothing else to change. <<<
+//  FORMAT: "YYYY-MM-DD" (zero-padded). Both this value and the remote file
+//  use this exact format, which compares correctly with plain string
+//  ordering — no date parsing needed. BUILD_NUMBER is display-only.
 //
 // ===========================================================================
 
-export const BUILD_DATE = "2026-07-04";
+import versionInfo from "../version.json";
+
+export const BUILD_DATE = versionInfo.buildDate;
+export const BUILD_NUMBER = versionInfo.buildNumber;
 
 export const formatBuildDateForDisplay = (value = BUILD_DATE) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
@@ -30,3 +37,8 @@ export const formatBuildDateForDisplay = (value = BUILD_DATE) => {
     timeZone: "UTC",
   }).format(date);
 };
+
+export const formatVersionForDisplay = (
+  buildDate = BUILD_DATE,
+  buildNumber = BUILD_NUMBER,
+) => `${formatBuildDateForDisplay(buildDate)} (build ${buildNumber})`;

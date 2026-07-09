@@ -55,6 +55,7 @@ import {
   getEmailDisplayIdentityFields,
   getEmailSenderAddress,
   getEmailSenderDenomination,
+  getEmailSenderDenominationCode,
   getEmailSenderFields,
   getEmailSenderSn,
   isSerialNumberText,
@@ -1083,10 +1084,28 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     };
   }, [selectedEmail]);
 
+  // Absolute folder the program runs from, shown in the window title.
+  // Only available under Electron; stays empty in the browser build.
+  const [appDir, setAppDir] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    if (window.electronAPI?.getAppDir) {
+      window.electronAPI
+        .getAppDir()
+        .then((dir) => {
+          if (!cancelled && dir) setAppDir(dir);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Keep the native window title stable across folder and unread-count changes.
   useEffect(() => {
-    document.title = buildWindowTitle({ qmailAddress });
-  }, [qmailAddress]);
+    document.title = buildWindowTitle({ qmailAddress, appDir });
+  }, [qmailAddress, appDir]);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -2507,7 +2526,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       return { success: false, error: "Sender serial number is not available." };
     }
 
+    // convertSnToEmail takes the human denomination value (10, 100, ...);
+    // contacts/create takes the denomination CODE (0=bit ... 4=giga) and
+    // rejects anything outside -7..6, so the two calls need different forms.
     const denomination = getEmailSenderDenomination(email);
+    const denominationCode = getEmailSenderDenominationCode(email);
     const lookup = await convertSnToEmail(senderSn, denomination);
     const senderAddress = lookup.success
       ? lookup.email
@@ -2529,7 +2552,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       success: true,
       data: {
         serial_number: String(senderSn),
-        denomination: denomination ? String(denomination) : undefined,
+        // Code 0 (= bit) is valid and falsy — check for null, not truthiness.
+        denomination:
+          denominationCode !== null ? String(denominationCode) : undefined,
         first_name: firstName,
         last_name: lastName,
         description: senderAddress
