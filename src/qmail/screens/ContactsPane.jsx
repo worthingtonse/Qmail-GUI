@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import { useState, useEffect, useRef } from "react";
 import {
   UserPlus,
@@ -24,10 +25,68 @@ import {
 } from "../../api/qmailApiServices";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { parseQmailAddress } from "../address/qmailAddress";
+import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
 const SERIAL_NUMBER_PATTERN = /^\d+$/;
 const CONTACT_AVATAR_TONE_COUNT = 12;
+
+const getContactInitial = (contact) => {
+  const value = String(contact?.name || contact?.email || contact?.id || "?").trim();
+  // Addresses begin with "@" — skip leading punctuation and use the first
+  // real letter/digit so the avatar shows "T" for "@torch.bay.kilo", not "@".
+  const match = value.match(/[A-Za-z0-9]/);
+  return match ? match[0].toUpperCase() : "?";
+};
+
+const getContactAvatarToneClass = (contact) => {
+  const value = String(contact?.email || contact?.name || contact?.id || "").trim().toLowerCase();
+  if (!value) {
+    return "contacts-pane__avatar--tone-0";
+  }
+
+  let hash = 5381;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
+  }
+
+  return `contacts-pane__avatar--tone-${hash % CONTACT_AVATAR_TONE_COUNT}`;
+};
+
+/**
+ * Cartouche from chosen DRD symbols when known, else the address-derived
+ * defaults (serial high byte top, low byte bottom); letter-circle only
+ * when the contact has no parsable QMail address.
+ */
+const ContactIdentityAvatar = ({ contact, parsedAddress }) => {
+  const symbols = useDrdSymbols(
+    parsedAddress?.ok ? parsedAddress.denominationCode : null,
+    parsedAddress?.ok ? parsedAddress.serialNumber : null,
+  );
+  const shownSymbols = parsedAddress?.ok
+    ? symbols ?? addressDerivedSymbols(parsedAddress.serialNumber)
+    : null;
+
+  if (shownSymbols) {
+    return (
+      <QmailCartoucheAvatar
+        firstSymbol={shownSymbols.firstSymbol}
+        secondSymbol={shownSymbols.secondSymbol}
+        denominationCode={parsedAddress.denominationCode}
+        serialNumber={parsedAddress.serialNumber}
+        className="contacts-pane__avatar-cartouche"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`contacts-pane__avatar contacts-pane__avatar--${contact.status} ${getContactAvatarToneClass(contact)}`}
+    >
+      <span>{getContactInitial(contact)}</span>
+    </div>
+  );
+};
 
 const normalizeContactValue = (value) =>
   String(value || "").trim().toLowerCase();
@@ -204,28 +263,6 @@ useEffect(() => {
 
   const getContactKey = (contact) =>
     String(contact.id || contact.email || contact.name || "");
-
-  const getContactInitial = (contact) => {
-    const value = String(contact?.name || contact?.email || contact?.id || "?").trim();
-    // Addresses begin with "@" — skip leading punctuation and use the first
-    // real letter/digit so the avatar shows "T" for "@torch.bay.kilo", not "@".
-    const match = value.match(/[A-Za-z0-9]/);
-    return match ? match[0].toUpperCase() : "?";
-  };
-
-  const getContactAvatarToneClass = (contact) => {
-    const value = String(contact?.email || contact?.name || contact?.id || "").trim().toLowerCase();
-    if (!value) {
-      return "contacts-pane__avatar--tone-0";
-    }
-
-    let hash = 5381;
-    for (let index = 0; index < value.length; index += 1) {
-      hash = ((hash << 5) + hash + value.charCodeAt(index)) >>> 0;
-    }
-
-    return `contacts-pane__avatar--tone-${hash % CONTACT_AVATAR_TONE_COUNT}`;
-  };
 
   const isContactSavedLocally = (contact) => {
     const targetValues = new Set(getContactIdentityValues(contact));
@@ -876,19 +913,10 @@ useEffect(() => {
                       className={`contacts-pane__item contacts-pane__item--${contact.source === "drd" ? "drd" : "user"}`}
                     >
                       <div className={`contacts-pane__identity-mark contacts-pane__identity-mark--${contact.status}`}>
-                        {parsedContactAddress.ok ? (
-                          <QmailCartoucheAvatar
-                            serialNumber={parsedContactAddress.serialNumber}
-                            denominationCode={parsedContactAddress.denominationCode}
-                            className="contacts-pane__avatar-cartouche"
-                          />
-                        ) : (
-                          <div
-                            className={`contacts-pane__avatar contacts-pane__avatar--${contact.status} ${getContactAvatarToneClass(contact)}`}
-                          >
-                            <span>{getContactInitial(contact)}</span>
-                          </div>
-                        )}
+                        <ContactIdentityAvatar
+                          contact={contact}
+                          parsedAddress={parsedContactAddress}
+                        />
                       </div>
                       <div className="contacts-pane__details">
                         <div className="contacts-pane__name-row">

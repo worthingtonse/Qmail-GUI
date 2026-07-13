@@ -46,6 +46,7 @@ describe("getQmailAvatarTierName", () => {
     expect(getQmailAvatarTierName(2)).toBe("kilo");
     expect(getQmailAvatarTierName(3)).toBe("mega");
     expect(getQmailAvatarTierName(4)).toBe("giga");
+    expect(getQmailAvatarTierName(5)).toBe("epic");
   });
 
   it("accepts numeric strings", () => {
@@ -54,7 +55,7 @@ describe("getQmailAvatarTierName", () => {
 
   it("rejects out-of-range denomination codes", () => {
     expect(getQmailAvatarTierName(-1)).toBeNull();
-    expect(getQmailAvatarTierName(5)).toBeNull();
+    expect(getQmailAvatarTierName(6)).toBeNull();
     expect(getQmailAvatarTierName(0xff)).toBeNull(); // fractional denominations
     expect(getQmailAvatarTierName("banana")).toBeNull();
     expect(getQmailAvatarTierName(null)).toBeNull();

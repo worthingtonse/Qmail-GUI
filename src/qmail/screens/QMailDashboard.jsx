@@ -9,6 +9,7 @@ import NavigationPane from "./NavigationPane";
 import EmailListPane from "./EmailListPane";
 import ReadingPane from "./ReadingPane";
 import ActiveTransfersPanel from "./ActiveTransfersPanel";
+import ProfileModal from "./profile/ProfileModal";
 import soundService from "../../api/soundService";
 import {
   getMailList,
@@ -48,6 +49,7 @@ import {
   getIdentity,
   normalizeIdentityForUi,
   lookupMailWalletPath,
+  setDrdListEntries,
   SSE_URL,
 } from "../../api/qmailApiServices";
 import { formatTimestamp } from "./formatTimestamp";
@@ -399,6 +401,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const [folders, setFolders] = useState([]);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [walletActionMode, setWalletActionMode] = useState(null);
+  const [profileEditor, setProfileEditor] = useState(null);
   const [composeContext, setComposeContext] = useState(null);
   const [raidaEchoSnapshot, setRaidaEchoSnapshot] = useState(null);
   const { addNotification, clearAllNotifications } = useNotification();
@@ -1112,7 +1115,11 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     try {
       // syncData() was removed from the background load: /api/admin/sync
       // was removed in QMail v2 and the stub always returns failure.
-      await loadWalletBalance();
+      // BUG (blank wallet total): like the inbox below, the one-shot balance
+      // load can fire before core.exe binds its port, fail, and leave the coin
+      // total blank with no retry. Retry with the same backoff so the total
+      // appears once the backend is serving.
+      await loadInitialWalletBalanceWithRetry();
 
       await Promise.all([loadFolders(), loadMailCounts(), loadDrafts()]);
       // BUG (startup empty inbox): on the fast path the dashboard mounts and
@@ -1164,16 +1171,38 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleWalletUpdated = async () => {
     await loadWalletBalance();
   };
-  const loadWalletBalance = async () => {
+  // Returns { success } so the mount-time retry loop can tell a transient
+  // backend-not-ready failure from a real empty result. clearOnFailure=false
+  // during retries keeps any already-shown total on screen instead of blanking
+  // it on a transient miss; the once-only callers clear as before.
+  const loadWalletBalance = async ({ clearOnFailure = true } = {}) => {
     try {
       const result = await getQMailWalletBalance();
       if (result.success) {
         setWalletBalance(result.data);
-      } else {
-        setWalletBalance(null);
+        return { success: true };
       }
+      if (clearOnFailure) setWalletBalance(null);
+      return { success: false };
     } catch (error) {
-      setWalletBalance(null);
+      if (clearOnFailure) setWalletBalance(null);
+      return { success: false };
+    }
+  };
+
+  // Retry the mount-time balance load until the backend is serving, mirroring
+  // loadInitialEmailsWithRetry. A returning user can reach here while core.exe
+  // is still starting; without this the coin total stays blank until a manual
+  // wallet refresh. Attempts: immediate, then +400ms, +800ms, +1500ms, +3000ms.
+  const loadInitialWalletBalanceWithRetry = async () => {
+    const delays = [0, 400, 800, 1500, 3000];
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt] > 0) await wait(delays[attempt]);
+      const isLastAttempt = attempt === delays.length - 1;
+      // Keep the (blank) placeholder during transient tries; only the final
+      // attempt clears to null so a genuinely unreachable backend shows blank.
+      const result = await loadWalletBalance({ clearOnFailure: isLastAttempt });
+      if (result?.success) return;
     }
   };
 
@@ -1851,6 +1880,30 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
+  // Prev/Next in the reading pane walk the same ordered list the list pane shows.
+  const selectedEmailIndex = useMemo(() => {
+    if (!selectedEmail) return -1;
+    const selectedId = String(getEmailId(selectedEmail)).toLowerCase();
+    if (!selectedId) return -1;
+    return displayEmails.findIndex(
+      (email) => String(getEmailId(email)).toLowerCase() === selectedId,
+    );
+  }, [displayEmails, selectedEmail]);
+
+  const hasPreviousEmail = selectedEmailIndex > 0;
+  const hasNextEmail =
+    selectedEmailIndex >= 0 && selectedEmailIndex < displayEmails.length - 1;
+
+  const handlePreviousEmail = () => {
+    if (!hasPreviousEmail) return;
+    handleSelectEmail(displayEmails[selectedEmailIndex - 1]);
+  };
+
+  const handleNextEmail = () => {
+    if (!hasNextEmail) return;
+    handleSelectEmail(displayEmails[selectedEmailIndex + 1]);
+  };
+
   const handleOpenCompose = async () => {
     const fundingCheck = await getQMailCanSend();
     if (!fundingCheck.success) {
@@ -2095,9 +2148,12 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
           setSelectedEmail(null);
         }
         await loadMailCounts();
+        return true;
       }
+      return false;
     } catch (error) {
       console.error("Move email error:", error);
+      return false;
     }
   };
 
@@ -2641,6 +2697,149 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         return;
       }
 
+      if (action === "mark-all-read-from-sender") {
+        const senderKey = getSenderActionKey(email);
+        const addressLabel =
+          getEmailSenderAddress(email, "") ||
+          email.senderDisplayAddress ||
+          email.senderEmail ||
+          email.sender ||
+          "this user";
+
+        if (!senderKey) {
+          showDashboardNotification(
+            `No unread messages from ${addressLabel}.`,
+            "warning",
+          );
+          return;
+        }
+
+        // Only currently loaded messages in the open folder — not a full fetch.
+        const unreadFromSender = emails.filter(
+          (item) =>
+            !item.isPending &&
+            !item.isRead &&
+            getSenderActionKey(item) === senderKey,
+        );
+
+        if (unreadFromSender.length === 0) {
+          showDashboardNotification(
+            `No unread messages from ${addressLabel}.`,
+            "warning",
+          );
+          return;
+        }
+
+        const results = await Promise.all(
+          unreadFromSender.map(async (item) => {
+            const id = getEmailId(item);
+            return {
+              id,
+              result: id ? await markEmailRead(id, true) : { success: false },
+            };
+          }),
+        );
+        const updatedIds = results
+          .filter(({ result }) => result.success)
+          .map(({ id }) => String(id).toLowerCase());
+        const updatedIdSet = new Set(updatedIds);
+
+        if (updatedIdSet.size > 0) {
+          setEmails((prevEmails) =>
+            prevEmails.map((item) =>
+              updatedIdSet.has(String(getEmailId(item)).toLowerCase())
+                ? { ...item, isRead: true }
+                : item,
+            ),
+          );
+          setSelectedEmail((prev) =>
+            prev && updatedIdSet.has(String(getEmailId(prev)).toLowerCase())
+              ? { ...prev, isRead: true }
+              : prev,
+          );
+          await loadMailCounts();
+        }
+
+        const count = updatedIdSet.size;
+        showDashboardNotification(
+          count > 0
+            ? `${count} message${count === 1 ? "" : "s"} from ${addressLabel} marked as read.`
+            : `No unread messages from ${addressLabel}.`,
+          count > 0 ? "success" : "warning",
+        );
+        return;
+      }
+
+      if (action === "archive-message") {
+        const emailId = getEmailId(email);
+        if (!emailId) {
+          showDashboardNotification("Could not archive this Qmail.", "error");
+          return;
+        }
+        const moved = await handleMoveEmail(emailId, "archive");
+        showDashboardNotification(
+          moved ? "Qmail archived." : "Could not archive this Qmail.",
+          moved ? "success" : "error",
+        );
+        return;
+      }
+
+      if (action === "blacklist-sender" || action === "whitelist-sender") {
+        const listType = action === "blacklist-sender" ? "black" : "white";
+        const denomination =
+          getEmailSenderDenominationCode(email) ??
+          email.senderDenominationCode ??
+          email.sender_denomination_code;
+        const serialNumber =
+          getEmailSenderSn(email) ?? email.senderSn ?? email.sender_sn;
+
+        if (
+          denomination === null ||
+          denomination === undefined ||
+          serialNumber === null ||
+          serialNumber === undefined ||
+          serialNumber === ""
+        ) {
+          showDashboardNotification(
+            "This sender has no QMail address.",
+            "warning",
+          );
+          return;
+        }
+
+        const address =
+          getEmailSenderAddress(email, "") ||
+          email.senderDisplayAddress ||
+          email.senderEmail ||
+          email.sender ||
+          "Sender";
+        const result = await setDrdListEntries([
+          {
+            denomination: Number(denomination),
+            serialNumber: Number(serialNumber),
+            listType,
+          },
+        ]);
+
+        if (result?.success) {
+          showDashboardNotification(
+            listType === "black"
+              ? `${address} added to your black list.`
+              : `${address} added to your white list.`,
+            "success",
+          );
+        } else {
+          showDashboardNotification(
+            result?.error ||
+              (listType === "black"
+                ? "Could not add sender to black list."
+                : "Could not add sender to white list."),
+            "error",
+          );
+        }
+        return;
+      }
+
       if (action === "refund") {
         await handleRefundEmails([email], { deleteAfter: false });
         return;
@@ -2807,6 +3006,36 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           break;
         case "mark-all-read":
           await handleMarkAllAsReadCommand();
+          break;
+        case "add-funds":
+          handleOpenWalletAction("add");
+          break;
+        case "withdraw-funds":
+          handleOpenWalletAction("withdraw");
+          break;
+        case "profile-whitelist":
+          setProfileEditor("whitelist");
+          break;
+        case "profile-blacklist":
+          setProfileEditor("blacklist");
+          break;
+        case "profile-symbols":
+          setProfileEditor("symbols");
+          break;
+        case "profile-name":
+          setProfileEditor("name");
+          break;
+        case "profile-description":
+          setProfileEditor("description");
+          break;
+        case "mailbox-class":
+          setProfileEditor("class");
+          break;
+        case "mailbox-inbox-fee":
+          setProfileEditor("inbox-fee");
+          break;
+        case "profile-find-users":
+          setProfileEditor("find-users");
           break;
         default:
           break;
@@ -3578,6 +3807,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
 
   return (
     <main className="qmail-dashboard">
+      <div className="qmail-dashboard__panes">
       <ActiveTransfersPanel
         transfers={restoredTransfers}
         pendingOperationId={restoredTransferControlPending}
@@ -3671,6 +3901,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         onClose={handleCloseWalletAction}
         onWalletUpdated={handleWalletUpdated}
       />
+      <ProfileModal
+        editor={profileEditor}
+        onClose={() => setProfileEditor(null)}
+        qmailAddress={qmailAddress}
+      />
       <NavigationPane
         activeView={activeView}
         setActiveView={handleFolderChange}
@@ -3679,8 +3914,6 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         walletBalance={walletBalance}
-        onAddFundsClick={() => handleOpenWalletAction("add")}
-        onWithdrawClick={() => handleOpenWalletAction("withdraw")}
         folders={folders}
         raidaEchoSnapshot={raidaEchoSnapshot}
         qmailAddress={qmailAddress}
@@ -3727,7 +3960,6 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               onForward={handleForward}
               onMarkAsRead={handleMarkAsRead}
               onDeleteEmail={handleDeleteEmail}
-              onMoveEmail={handleMoveEmail}
               onRejectPayment={handleRejectPayment}
               isRejectingPayment={
                 !!selectedEmail &&
@@ -3741,6 +3973,10 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               onOpenDownloadLocation={handleOpenDownloadLocation}
               onDownloadAttachment={handleDownloadAttachment}
               onRevealSentAttachment={handleRevealSentAttachment}
+              onPreviousEmail={handlePreviousEmail}
+              onNextEmail={handleNextEmail}
+              hasPreviousEmail={hasPreviousEmail}
+              hasNextEmail={hasNextEmail}
             />
           )}
         </>
@@ -3753,6 +3989,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           onSignOut={handleSignOut}
         />
       )}
+      </div>
     </main>
   );
 };

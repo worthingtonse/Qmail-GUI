@@ -29,7 +29,8 @@ describe("formatQmailAddress", () => {
   it("returns null for unusable input instead of throwing", () => {
     expect(formatQmailAddress(0, 0)).toBeNull(); // serial 0 reserved
     expect(formatQmailAddress(0x1000000, 0)).toBeNull(); // > 3 bytes
-    expect(formatQmailAddress(0x0033fe, 5)).toBeNull(); // denomination out of range
+    expect(formatQmailAddress(0x0033fe, 5)).toBe("51.254@epic"); // epic is valid
+    expect(formatQmailAddress(0x0033fe, 6)).toBeNull(); // denomination out of range
     expect(formatQmailAddress(0x0033fe, -1)).toBeNull(); // fractional denominations rejected
     expect(formatQmailAddress(1.5, 0)).toBeNull(); // non-integer serial
     expect(formatQmailAddress(NaN, 0)).toBeNull();
@@ -113,13 +114,18 @@ describe("parseQmailAddress", () => {
     rejects("0.0.0@bit", "Serial number 0 is reserved");
   });
 
-  it("rejects denomination codes outside 0-4 (fractional included)", () => {
-    rejects("51.254.255", "Denomination code must be 0-4");
-    rejects("51.254.5", "Denomination code must be 0-4");
+  it("accepts denomination code 5 (epic)", () => {
+    expect(ok("51.254.5").denominationName).toBe("epic");
+    expect(ok("51.254@epic").denominationCode).toBe(5);
+  });
+
+  it("rejects denomination codes outside 0-5 (fractional included)", () => {
+    rejects("51.254.255", "Denomination code must be 0-5");
+    rejects("51.254.6", "Denomination code must be 0-5");
   });
 
   it("rejects unknown denomination words", () => {
-    rejects("51.254@deci", "Denomination after '@' must be bit, byte, kilo, mega or giga");
+    rejects("51.254@deci", "Denomination after '@' must be bit, byte, kilo, mega, giga or epic");
     rejects("51.254@", "Missing denomination after '@'");
   });
 
@@ -172,15 +178,15 @@ describe("round trip", () => {
 
 describe("denomination helpers", () => {
   it("maps codes to names and back", () => {
-    expect(QMAIL_DENOMINATION_NAMES).toEqual(["bit", "byte", "kilo", "mega", "giga"]);
-    for (let code = 0; code <= 4; code++) {
+    expect(QMAIL_DENOMINATION_NAMES).toEqual(["bit", "byte", "kilo", "mega", "giga", "epic"]);
+    for (let code = 0; code <= 5; code++) {
       const name = denominationCodeToName(code);
       expect(denominationNameToCode(name)).toBe(code);
     }
   });
 
   it("returns null for unknown values", () => {
-    expect(denominationCodeToName(5)).toBeNull();
+    expect(denominationCodeToName(6)).toBeNull();
     expect(denominationCodeToName(-1)).toBeNull();
     expect(denominationCodeToName(0xff)).toBeNull();
     expect(denominationNameToCode("deci")).toBeNull();

@@ -16,10 +16,12 @@ import {
   RotateCcw,
   Loader2,
   X,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
-import { getQmailAvatarModel } from "../avatar/qmailAvatar";
+import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
 import {
   formatByteProgress,
   formatProgressPercentage,
@@ -57,7 +59,6 @@ const ReadingPane = ({
   onReply,
   onReplyAll,
   onForward,
-  onMoveEmail,
   onRejectPayment,
   isRejectingPayment = false,
   attachments = [],
@@ -68,8 +69,27 @@ const ReadingPane = ({
   onCancelAttachmentDownload,
   onResumeAttachmentDownload,
   onRevealSentAttachment,
+  onPreviousEmail,
+  onNextEmail,
+  hasPreviousEmail = false,
+  hasNextEmail = false,
 }) => {
   const emailId = email?.id || email?.guid;
+  const headerSenderSn = email?.senderSn ?? email?.sender_sn ?? null;
+  const headerSenderDenominationCode =
+    email?.senderDenominationCode ?? email?.sender_denomination_code ?? null;
+  // Hooks must run before any early return. Drafts / no-email skip the lookup.
+  const headerDrdSymbols = useDrdSymbols(
+    email && !email.isDraft ? headerSenderDenominationCode : null,
+    email && !email.isDraft ? headerSenderSn : null,
+  );
+  // Chosen DRD symbols win; otherwise the address-derived defaults (serial
+  // high byte top, low byte bottom) so every sender with a valid address
+  // gets a cartouche.
+  const headerSymbols =
+    email && !email.isDraft
+      ? headerDrdSymbols ?? addressDerivedSymbols(headerSenderSn)
+      : null;
   const activeAttachmentDownload =
     attachmentDownloadProgress != null &&
     String(attachmentDownloadProgress.emailId) === String(emailId);
@@ -200,11 +220,8 @@ const ReadingPane = ({
     currentFolder !== "trash" &&
     hasRefundablePaymentSignal &&
     !paymentAlreadyFinal;
-  const showArchiveButton =
-    onMoveEmail &&
-    currentFolder !== "archive" &&
-    currentFolder !== "trash" &&
-    !email.isTrashed;
+  const showMessageNav =
+    Boolean(onPreviousEmail || onNextEmail) && !email.isDraft;
 
   const handleAttachmentKeyDown = (event, attachmentId, attachment) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -283,41 +300,38 @@ const ReadingPane = ({
       </section>
     );
   }
-  const headerSenderSn = email.senderSn ?? email.sender_sn;
-  const headerSenderDenominationCode =
-    email.senderDenominationCode ?? email.sender_denomination_code;
-  // A real cartouche only renders for a valid serial + denomination; drafts
-  // and unresolved senders fall back to the small SenderAvatar.
-  const hasHeaderCartouche =
-    !email.isDraft &&
-    Boolean(
-      getQmailAvatarModel({
-        serialNumber: headerSenderSn,
-        denominationCode: headerSenderDenominationCode,
-      }),
-    );
+  // Cartouche when the sender's chosen DRD symbols are known; otherwise the
+  // SenderAvatar letter-circle fallback fills the same full-height header box.
+  const hasHeaderCartouche = Boolean(headerSymbols);
 
   return (
     <section className="reading-pane">
       <header className="reading-pane__header">
-        {hasHeaderCartouche && (
-          <QmailCartoucheAvatar
-            serialNumber={headerSenderSn}
-            denominationCode={headerSenderDenominationCode}
-            className="reading-pane__header-cartouche"
-          />
-        )}
+        <div className="reading-pane__header-avatar">
+          {hasHeaderCartouche ? (
+            <QmailCartoucheAvatar
+              firstSymbol={headerSymbols.firstSymbol}
+              secondSymbol={headerSymbols.secondSymbol}
+              denominationCode={headerSenderDenominationCode}
+              serialNumber={headerSenderSn}
+              className="reading-pane__header-cartouche"
+            />
+          ) : (
+            <SenderAvatar
+              sender={email.sender}
+              email={email.senderEmail || email.from}
+              status={email.senderStatus}
+              senderSn={email.senderSn ?? email.sender_sn}
+              senderDenominationCode={
+                email.senderDenominationCode ?? email.sender_denomination_code
+              }
+            />
+          )}
+        </div>
         <div className="reading-pane__header-text">
         {email.isDraft ? (
           <div className="reading-pane__top-row">
             <div className="reading-pane__sender">
-              <SenderAvatar
-                sender={email.sender}
-                email={email.senderEmail || email.from}
-                status={email.senderStatus}
-                senderSn={email.senderSn ?? email.sender_sn}
-                senderDenominationCode={email.senderDenominationCode ?? email.sender_denomination_code}
-              />
               <div className="reading-pane__sender-details">
                 <span className="reading-pane__sender-name">Draft</span>
               </div>
@@ -333,15 +347,6 @@ const ReadingPane = ({
         ) : (
           <div className="reading-pane__top-row">
             <div className="reading-pane__sender">
-              {!hasHeaderCartouche && (
-                <SenderAvatar
-                  sender={email.sender}
-                  email={email.senderEmail || email.from}
-                  status={email.senderStatus}
-                  senderSn={email.senderSn ?? email.sender_sn}
-                  senderDenominationCode={email.senderDenominationCode ?? email.sender_denomination_code}
-                />
-              )}
               <div className="reading-pane__sender-details">
                 {(() => {
                   const address =
@@ -388,11 +393,13 @@ const ReadingPane = ({
                   }
                 >
                   <button
-                    className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__action-button--icon"
+                    className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__action-button--icon reading-pane__action-button--icon-pair"
                     onClick={() => onReplyAll(email)}
                     disabled={!hasReplyAllRecipientData}
                     type="button"
+                    aria-label="Reply All"
                   >
+                    <Reply size={16} />
                     <Users size={16} />
                     <span className="reading-pane__sr-only">Reply All</span>
                   </button>
@@ -427,23 +434,36 @@ const ReadingPane = ({
                   Reject
                 </button>
               )}
-
-              {showArchiveButton && (
-                <button
-                  className="reading-pane__action-button reading-pane__action-button--secondary"
-                  onClick={() => onMoveEmail(email.id, "archive")}
-                  title="Archive qmail"
-                  type="button"
-                >
-                  <Archive size={16} /> Archive
-                </button>
-              )}
             </div>
           </div>
         )}
 
         <h2 className="reading-pane__subject">{email.subject}</h2>
         </div>
+        {showMessageNav && (
+          <div className="reading-pane__nav">
+            <button
+              type="button"
+              className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
+              onClick={onPreviousEmail}
+              disabled={!hasPreviousEmail}
+              title="Previous message"
+            >
+              <ChevronUp size={14} aria-hidden="true" />
+              <span>Previous</span>
+            </button>
+            <button
+              type="button"
+              className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
+              onClick={onNextEmail}
+              disabled={!hasNextEmail}
+              title="Next message"
+            >
+              <span>Next</span>
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="reading-pane__body">

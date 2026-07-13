@@ -51,8 +51,8 @@
   filter: drop-shadow(0 0 var(--space-sm) color-mix(in srgb, var(--accent-primary) 32%, transparent));
 }
 
-/* qmailalpha.webp (512x512) shown while the cartouche is on hold; fills the
-   same square slot the cartouche used. */
+/* qmailalpha.webp (512x512) fallback when own DRD symbols are null; fills
+   the same square slot as .navigation-pane__cartouche. */
 .navigation-pane__identity-logo {
   display: block;
   width: 4.75rem;
@@ -248,59 +248,16 @@
   color: var(--text-primary);
 }
 
-.navigation-pane__wallet-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-xs);
-  margin: 0 0 var(--space-sm);
-}
-
-.navigation-pane__wallet-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(var(--space-xs) / 1.5);
-  min-height: 2rem;
-  padding: calc(var(--space-xs) / 1.25) var(--space-xs);
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-sm);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background-color calc(250ms * var(--motion-scale)) ease,
-    border-color calc(250ms * var(--motion-scale)) ease,
-    color calc(250ms * var(--motion-scale)) ease;
-}
-
-.navigation-pane__wallet-action:hover {
-  border-color: var(--border-strong);
-  background: var(--card-hover);
-  color: var(--text-primary);
-}
-
-.navigation-pane__wallet-action svg {
-  width: var(--font-size-sm);
-  height: var(--font-size-sm);
-  flex: none;
-}
-
 .navigation-pane__wallet-purchase-row {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 2rem;
+  display: flex;
+  align-items: center;
   gap: var(--space-xs);
   margin: 0 0 var(--space-sm);
-}
-
-.navigation-pane__wallet-action--purchase {
-  width: 100%;
 }
 
 /* The identity ("mailbox key") coin is staked, not spendable — surface it
-   under Purchase Coins so users don't read the missing value as lost funds. */
+   under the wallet balance so users don't read the missing value as lost funds. */
 .navigation-pane__staked-row {
   display: flex;
   align-items: center;
@@ -365,6 +322,17 @@
 
 .navigation-pane__wallet-info-popover p {
   margin: 0;
+  /* Long unbroken tokens (URLs, addresses) must wrap, not overflow the pane. */
+  overflow-wrap: break-word;
+}
+
+.navigation-pane__wallet-info-link {
+  color: var(--accent-secondary);
+  text-decoration: underline;
+}
+
+.navigation-pane__wallet-info-link:hover {
+  color: var(--accent-primary);
 }
 
 .navigation-pane__wallet-info-close {
@@ -551,27 +519,11 @@
     white-space: nowrap;
   }
 
-  .navigation-pane__wallet-actions {
-    display: flex;
-    flex: none;
-    gap: var(--space-xs);
-    margin: 0;
-  }
-
-  .navigation-pane__wallet-action {
-    min-width: 6.25rem;
-    white-space: nowrap;
-  }
-
   .navigation-pane__wallet-purchase-row {
     display: flex;
     flex: none;
     gap: var(--space-xs);
     margin: 0;
-  }
-
-  .navigation-pane__wallet-action--purchase {
-    min-width: 7.5rem;
   }
 
   .navigation-pane__staked-row {
@@ -649,18 +601,12 @@
     min-width: 5rem;
   }
 
-  .navigation-pane__wallet-action {
-    min-width: 2.5rem;
-    width: 2.5rem;
-  }
-
   .navigation-pane__wallet-info-button {
     min-width: 2.5rem;
     width: 2.5rem;
   }
   .navigation-pane__link-label,
-  .navigation-pane__refresh-button span,
-  .navigation-pane__wallet-action span {
+  .navigation-pane__refresh-button span {
     display: none;
   }
 

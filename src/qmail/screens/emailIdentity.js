@@ -17,6 +17,7 @@ export const QMAIL_DENOMINATION_CODE_TO_VALUE = {
   2: 100,
   3: 1000,
   4: 10000,
+  5: 100000, // epic
 };
 
 // Folders whose messages the user SENT — for these we display the recipient
@@ -45,7 +46,7 @@ export const getEmailSenderDenominationCode = (email = {}) => {
     email.sender_denomination_code,
     email.senderDenominationCode,
   );
-  if (code !== null && code >= 0 && code <= 4) return code;
+  if (code !== null && code >= 0 && code <= 5) return code;
 
   const denomination = readNumericSenderField(
     email.sender_denomination,
@@ -144,7 +145,7 @@ export const getEmailDisplayIdentityFields = (email = {}, folder) => {
       email.recipientDenominationCode,
       email.recipient_denomination_code,
     );
-    return code !== null && code >= 0 && code <= 4 ? code : null;
+    return code !== null && code >= 0 && code <= 5 ? code : null;
   })();
   const recipientAddress =
     typeof email.recipientAddress === "string" && email.recipientAddress.trim()

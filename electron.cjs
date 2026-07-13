@@ -47,21 +47,9 @@ const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
 const { buildDate: QMAIL_BUILD_DATE, buildNumber: QMAIL_BUILD_NUMBER } = require('./version.json');
 const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
 const QMAIL_HELP_MESSAGE =
-`Mailbox authenticity numbers can be changed at any time.
-
-To request this change, open the following file in your Client_Data folder:
-
-${CHANGE_PASSWORDS_NEXT_BOOT_FILE}
-
-Set the pown_on_restart key to true:
-
-pown_on_restart=true
-
-Save the file, then restart QMail. The authenticity-number change will run the next time QMail starts.
-
-Contact
+`Contact
 Telegram group: t.me/distributedmailsystem
-QMail: 126.40@kilo
+QMail: 20.123@giga
 Email: CloudCoin@Protonmail.com`;
 const CHANGE_PASSWORDS_NEXT_BOOT_TEXT =
 `# QMail mailbox authenticity-number rotation
@@ -1036,6 +1024,19 @@ function buildApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'Add Funds',
+          click: () => sendQmailMenuCommand('add-funds'),
+        },
+        {
+          label: 'Withdraw Funds',
+          click: () => sendQmailMenuCommand('withdraw-funds'),
+        },
+        {
+          label: 'Purchase Coins',
+          click: () => shell.openExternal('https://cloudcoin.com/pay/'),
+        },
+        { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],
     },
@@ -1051,7 +1052,11 @@ function buildApplicationMenu() {
         { role: 'delete' },
         { type: 'separator' },
         { role: 'selectAll' },
-        { type: 'separator' },
+      ],
+    },
+    {
+      label: 'Mailbox',
+      submenu: [
         {
           label: 'Empty Trash',
           click: () => sendQmailMenuCommand('empty-trash'),
@@ -1064,10 +1069,37 @@ function buildApplicationMenu() {
           label: 'Empty Inbox',
           click: () => sendQmailMenuCommand('empty-inbox'),
         },
+        { type: 'separator' },
         {
           label: 'Mark all as read',
           click: () => sendQmailMenuCommand('mark-all-read'),
         },
+        { type: 'separator' },
+        // Mail-control settings (stored on the public DRD record, but they
+        // govern what this MAILBOX accepts — hence they live here).
+        {
+          label: 'Set Inbox Fee…',
+          click: () => sendQmailMenuCommand('mailbox-inbox-fee'),
+        },
+        {
+          label: 'Set Lowest Accepted Class…',
+          click: () => sendQmailMenuCommand('mailbox-class'),
+        },
+      ],
+    },
+    {
+      label: 'Edit Public Profile',
+      submenu: [
+        { label: 'Edit White List', click: () => sendQmailMenuCommand('profile-whitelist') },
+        { label: 'Edit Black List', click: () => sendQmailMenuCommand('profile-blacklist') },
+        { type: 'separator' },
+        { label: 'Edit Your Symbols', click: () => sendQmailMenuCommand('profile-symbols') },
+        { label: 'Edit Your Name', click: () => sendQmailMenuCommand('profile-name') },
+        { label: 'Edit Your Description', click: () => sendQmailMenuCommand('profile-description') },
+        { type: 'separator' },
+        { label: 'Find Users…', click: () => sendQmailMenuCommand('profile-find-users') },
+        { type: 'separator' },
+        { label: 'Link Devices (Coming Soon)', enabled: false },
       ],
     },
     {
@@ -1143,11 +1175,11 @@ function buildApplicationMenu() {
       label: 'Help',
       submenu: [
         {
-          label: 'QMail Help',
+          label: 'Contact',
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
-            title: 'QMail Help',
-            message: 'QMail Help',
+            title: 'Contact',
+            message: 'Contact',
             detail: QMAIL_HELP_MESSAGE,
             buttons: ['OK'],
           }),
@@ -1163,13 +1195,9 @@ function buildApplicationMenu() {
         },
         { type: 'separator' },
         {
-          label: `About ${app.name}`,
-          click: () => dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: `About ${app.name}`,
-            message: `${app.name} ${formatVersionForDisplay()}`,
-            buttons: ['OK'],
-          }),
+          // app.name is "q-mail" (package.json) — display the product name.
+          label: 'About QMail',
+          click: () => shell.openExternal('https://www.distributedmailsystem.com/faq'),
         },
       ],
     },

@@ -19,7 +19,7 @@
  * carry no name part; names live in user-created contacts.
  */
 
-export const QMAIL_DENOMINATION_NAMES = ["bit", "byte", "kilo", "mega", "giga"];
+export const QMAIL_DENOMINATION_NAMES = ["bit", "byte", "kilo", "mega", "giga", "epic"];
 
 /** Example shown to users in every format error message (mirrors C). */
 export const QMAIL_ADDRESS_FORMS_HINT =
@@ -136,7 +136,7 @@ export function parseQmailAddress(input) {
     }
     const code = denominationNameToCode(denomWord);
     if (code === null) {
-      return failure("Denomination after '@' must be bit, byte, kilo, mega or giga");
+      return failure("Denomination after '@' must be bit, byte, kilo, mega, giga or epic");
     }
     serialGroups = groups;
     denominationCode = code;
@@ -148,10 +148,10 @@ export function parseQmailAddress(input) {
     serialGroups = groups.slice(0, -1);
     const denomValue = groups[groups.length - 1];
 
-    /* Phase 1: whole-cc notes only (codes 0..4). Fractional codes
+    /* Whole-cc notes only (codes 0..5). Fractional codes
      * (0xFF=.1cc, 0xFE=.01cc, ...) are rejected here on purpose. */
-    if (denomValue > 4) {
-      return failure("Denomination code must be 0-4 (bit, byte, kilo, mega, giga)");
+    if (denomValue > 5) {
+      return failure("Denomination code must be 0-5 (bit, byte, kilo, mega, giga, epic)");
     }
     denominationCode = denomValue;
   }

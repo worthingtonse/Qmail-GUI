@@ -14,10 +14,7 @@ import {
   Wallet,
   Key,
   Archive,
-  Plus,
-  Upload,
   AlertTriangle,
-  ExternalLink,
   Info,
   X,
 } from "lucide-react";
@@ -28,27 +25,85 @@ import {
   buildRaidaStatusTitle,
 } from "./serverStatusUi";
 import { parseQmailAddress } from "../address/qmailAddress";
-// Cartouche system ON HOLD — restore this import together with the
-// commented-out <QmailCartoucheAvatar> block in the identity header below.
-// import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
+import { useDrdSymbols } from "../avatar/drdSymbols";
+import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 import "./NavigationPane.css";
 
-const CLOUDCOIN_PURCHASE_URL = "https://CloudCoin.com/Pay/";
+const CLOUDCOIN_PURCHASE_URL = "https://cloudcoin.com/pay/";
 
 // qmailalpha.webp lives in public/; BASE_URL join matches qmailAvatar.js so
-// the packaged Electron build resolves it too. Shown in place of the identity
-// cartouche while the cartouche system is on hold.
+// the packaged Electron build resolves it too. Shown when the signed-in
+// user's DRD symbols are unknown / not chosen (null cartouche).
 const QMAIL_ALPHA_SRC = (() => {
   const baseUrl = import.meta.env?.BASE_URL || "/";
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return `${normalizedBase}qmailalpha.webp`;
 })();
 
+const DMS_REGISTER_URL = "https://DistributedMailSystem.com";
+
+// Open a URL in the system browser (Electron) or a new tab (plain Vite build).
+const openExternalUrl = (url) => {
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(url);
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+};
+
+// Raw URLs don't wrap and overflow the narrow pane, so external references
+// are rendered as named hyperlinks with wrappable words.
 const DMP_PAYMENT_INFO = [
-  "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
-  "The Inbox Fee lets recipients get paid for their attention when receiving qmails. Influencers can set their own inbox fee by registering at https://DistributedMailSystem.com.",
-  "The DMP open standard can support up to 65 thousand different payment currencies. In Phase 1, QMail uses CloudCoin: a quantum-safe, energy-efficient, instant digital cash technology that does not require usernames, logins, or private keys. Like physical cash, it provides strong privacy.",
-  "Places you can purchase CloudCoin include CloudCoin.com.",
+  {
+    id: "dmp",
+    content:
+      "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
+  },
+  {
+    id: "inbox-fee",
+    content: (
+      <>
+        The Inbox Fee lets recipients get paid for their attention when
+        receiving qmails. Influencers can set their own inbox fee by
+        registering at{" "}
+        <a
+          href={DMS_REGISTER_URL}
+          className="navigation-pane__wallet-info-link"
+          onClick={(event) => {
+            event.preventDefault();
+            openExternalUrl(DMS_REGISTER_URL);
+          }}
+        >
+          Distributed Mail System
+        </a>
+        .
+      </>
+    ),
+  },
+  {
+    id: "currencies",
+    content:
+      "The DMP open standard can support up to 65 thousand different payment currencies. In Phase 1, QMail uses CloudCoin: a quantum-safe, energy-efficient, instant digital cash technology that does not require usernames, logins, or private keys. Like physical cash, it provides strong privacy.",
+  },
+  {
+    id: "purchase",
+    content: (
+      <>
+        Places you can purchase CloudCoin include{" "}
+        <a
+          href={CLOUDCOIN_PURCHASE_URL}
+          className="navigation-pane__wallet-info-link"
+          onClick={(event) => {
+            event.preventDefault();
+            openExternalUrl(CLOUDCOIN_PURCHASE_URL);
+          }}
+        >
+          CloudCoin.com
+        </a>
+        .
+      </>
+    ),
+  },
 ];
 
 const formatBalance = (value) => {
@@ -154,8 +209,6 @@ const NavigationPane = ({
   onRefresh,
   isRefreshing,
   walletBalance,
-  onAddFundsClick,
-  onWithdrawClick,
   folders,
   raidaEchoSnapshot,
   qmailAddress = "",
@@ -387,10 +440,10 @@ const NavigationPane = ({
     () => parseQmailAddress(trimmedQmailAddress),
     [trimmedQmailAddress],
   );
-
-  const handlePurchaseCoins = () => {
-    window.open(CLOUDCOIN_PURCHASE_URL, "_blank", "noopener,noreferrer");
-  };
+  const ownDrdSymbols = useDrdSymbols(
+    parsedQmailAddress.ok ? parsedQmailAddress.denominationCode : null,
+    parsedQmailAddress.ok ? parsedQmailAddress.serialNumber : null,
+  );
 
   const handleCopyAddress = async () => {
     if (!trimmedQmailAddress) return;
@@ -441,24 +494,22 @@ const NavigationPane = ({
           aria-label="Your QMail identity"
         >
           <div className="navigation-pane__identity-cartouche">
-            {/* Cartouche system ON HOLD — to restore, uncomment this block
-                and remove the qmailalpha <img> below.
-            {parsedQmailAddress.ok ? (
+            {ownDrdSymbols ? (
               <QmailCartoucheAvatar
-                serialNumber={parsedQmailAddress.serialNumber}
+                firstSymbol={ownDrdSymbols.firstSymbol}
+                secondSymbol={ownDrdSymbols.secondSymbol}
                 denominationCode={parsedQmailAddress.denominationCode}
+                serialNumber={parsedQmailAddress.serialNumber}
                 className="navigation-pane__cartouche"
               />
             ) : (
-              <Mail size={34} />
+              <img
+                className="navigation-pane__identity-logo"
+                src={QMAIL_ALPHA_SRC}
+                alt="QMail alpha"
+                draggable={false}
+              />
             )}
-            */}
-            <img
-              className="navigation-pane__identity-logo"
-              src={QMAIL_ALPHA_SRC}
-              alt="QMail alpha"
-              draggable={false}
-            />
           </div>
         </section>
         <button
@@ -550,39 +601,7 @@ const NavigationPane = ({
             </span>
           )}
         </div>
-        <div className="navigation-pane__wallet-actions" aria-label="Wallet actions">
-          <button
-            type="button"
-            className="navigation-pane__wallet-action"
-            onClick={onAddFundsClick}
-            title="Add Funds"
-            aria-label="Add Funds"
-          >
-            <Plus size={14} />
-            <span>Add Funds</span>
-          </button>
-          <button
-            type="button"
-            className="navigation-pane__wallet-action"
-            onClick={onWithdrawClick}
-            title="Withdraw"
-            aria-label="Withdraw"
-          >
-            <Upload size={14} />
-            <span>Withdraw</span>
-          </button>
-        </div>
         <div className="navigation-pane__wallet-purchase-row">
-          <button
-            type="button"
-            className="navigation-pane__wallet-action navigation-pane__wallet-action--purchase"
-            onClick={handlePurchaseCoins}
-            title="Purchase Coins"
-            aria-label="Purchase Coins"
-          >
-            <ExternalLink size={14} />
-            <span>Purchase Coins</span>
-          </button>
           <button
             type="button"
             className="navigation-pane__wallet-info-button"
@@ -600,11 +619,10 @@ const NavigationPane = ({
             title={`Your .${parsedQmailAddress.denominationName} mailbox key coin is staked to keep your QMail address active. It is still yours, but it is in use and not counted in the wallet total above.`}
           >
             <Key size={14} />
-            <span className="navigation-pane__staked-label">
-              Staked .{parsedQmailAddress.denominationName}:
-            </span>
+            <span className="navigation-pane__staked-label">Staked:</span>
             <span className="navigation-pane__staked-value">
-              {formatBalance(10 ** parsedQmailAddress.denominationCode)} CC
+              {parsedQmailAddress.denominationName}(
+              {formatBalance(10 ** parsedQmailAddress.denominationCode)})
             </span>
           </div>
         )}
@@ -622,8 +640,8 @@ const NavigationPane = ({
             >
               <X size={14} />
             </button>
-            {DMP_PAYMENT_INFO.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
+            {DMP_PAYMENT_INFO.map(({ id, content }) => (
+              <p key={id}>{content}</p>
             ))}
           </div>
         )}

@@ -46,7 +46,28 @@ import {
   forgetActiveTransfer,
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
+import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
+
+/**
+ * Cartouche for a contact suggestion: chosen DRD symbols when resolved,
+ * else the address-derived defaults (serial high byte top, low byte
+ * bottom). Renders nothing only when the address itself is unusable.
+ */
+const ComposeContactCartouche = ({ denominationCode, serialNumber }) => {
+  const symbols = useDrdSymbols(denominationCode, serialNumber);
+  const shownSymbols = symbols ?? addressDerivedSymbols(serialNumber);
+  if (!shownSymbols) return null;
+  return (
+    <QmailCartoucheAvatar
+      firstSymbol={shownSymbols.firstSymbol}
+      secondSymbol={shownSymbols.secondSymbol}
+      denominationCode={denominationCode}
+      serialNumber={serialNumber}
+      className="compose-modal__contact-cartouche"
+    />
+  );
+};
 
 const MIN_RAIDA_FOR_SEND = 6;
 const SEND_POLL_TIMEOUT_MS = 60000;
@@ -1878,10 +1899,9 @@ const ComposeModal = ({
                 )}
               </span>
               {parsedAddress.ok && (
-                <QmailCartoucheAvatar
-                  serialNumber={parsedAddress.serialNumber}
+                <ComposeContactCartouche
                   denominationCode={parsedAddress.denominationCode}
-                  className="compose-modal__contact-cartouche"
+                  serialNumber={parsedAddress.serialNumber}
                 />
               )}
             </button>

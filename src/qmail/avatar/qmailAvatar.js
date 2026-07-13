@@ -6,10 +6,10 @@
  * zero-dropping: one symbol per significant serial byte (1-3 symbols),
  * drawn from the 256 numbered SVGs in public/qmail-avatars/NewAvatars/
  * (each baked with its own color — scripts/bake-newavatar-colors.mjs).
- * The frame color encodes the denomination (bit/byte/kilo/mega/giga).
+ * The frame encodes the denomination (bit/byte/kilo/mega/giga/epic).
  */
 
-const QMAIL_AVATAR_TIERS = ["bit", "byte", "kilo", "mega", "giga"];
+const QMAIL_AVATAR_TIERS = ["bit", "byte", "kilo", "mega", "giga", "epic"];
 
 const normalizeSerialNumber = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -65,6 +65,11 @@ export const getQmailAvatarTierName = (denominationCode) => {
  * Asset href for a cartouche layer.
  *   getQmailAvatarAssetHref("frame", "kilo") -> .../qmail-avatars/frames/kilo.svg
  *   getQmailAvatarAssetHref("symbol", 51)    -> .../qmail-avatars/NewAvatars/051.svg
+ *
+ * Frames are the hand-authored SVG placards (one per denomination tier,
+ * including epic). Symbols are SVG too; their render-time color comes from
+ * the user's serial number (avatar/serialColor.js) via alpha masking, with
+ * the baked golden-angle color as the no-serial fallback.
  */
 export const getQmailAvatarAssetHref = (kind, identifier) => {
   if (kind === "frame") {

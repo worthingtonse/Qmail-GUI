@@ -122,7 +122,8 @@
       "Bash(php -l \"D:\\\\Code\\\\src\\\\PHP\\\\cloudcoin.org-main\\\\bugs.php\")",
       "Bash(php -l \"D:\\\\Code\\\\src\\\\PHP\\\\cloudcoin.org-main\\\\bugs-submit.php\")",
       "Bash(cp \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Code-src-JavaScript-Qmail-GUI\\\\72fbc25c-916f-4845-b9a9-6a893bf95d40\\\\scratchpad\\\\icon.png\" \"D:\\\\Code\\\\src\\\\JavaScript\\\\Qmail-GUI\\\\public\\\\icon.png\")",
-      "Bash(cp \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Code-src-JavaScript-Qmail-GUI\\\\72fbc25c-916f-4845-b9a9-6a893bf95d40\\\\scratchpad\\\\icon.ico\" \"D:\\\\Code\\\\src\\\\JavaScript\\\\Qmail-GUI\\\\public\\\\icon.ico\")"
+      "Bash(cp \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Code-src-JavaScript-Qmail-GUI\\\\72fbc25c-916f-4845-b9a9-6a893bf95d40\\\\scratchpad\\\\icon.ico\" \"D:\\\\Code\\\\src\\\\JavaScript\\\\Qmail-GUI\\\\public\\\\icon.ico\")",
+      "PowerShell(npx eslint src/qmail/screens/QMailDashboard.jsx 2>&1 | Select-Object -Last 10)"
     ]
   }
 }

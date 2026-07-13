@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-
-    <path d="M18 74 C30 70, 42 70, 54 74 S78 78, 84 74" fill="none" stroke="#f4edd1" stroke-width="4.8" stroke-linecap="round" />
-    <path d="M36 70 H58" stroke="#f4edd1" stroke-width="5" stroke-linecap="round" />
-    <path d="M42 70 V48 M54 70 V52 M66 70 V56" stroke="#fff4bf" stroke-width="3.2" stroke-linecap="round" />
-    
-  
-</svg>

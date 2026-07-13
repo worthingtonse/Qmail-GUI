@@ -319,10 +319,10 @@
 .email-list-pane__item {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-md);
+  flex-direction: column;
+  gap: var(--space-xs);
   min-height: 4.5rem;
-  padding: var(--space-md);
+  padding: var(--space-sm) var(--space-md) calc(var(--space-xs) + 2px);
   border-bottom: 1px solid var(--border-subtle);
   border-inline-start: 3px solid transparent;
   background: var(--secondary-bg);
@@ -333,6 +333,14 @@
     box-shadow calc(200ms * var(--motion-scale)) ease,
     transform calc(200ms * var(--motion-scale)) ease,
     opacity calc(200ms * var(--motion-scale)) ease;
+}
+
+/* Elevate the open-menu row above siblings so the popover is not covered.
+   Item already has position:relative; no overflow:hidden on the row itself.
+   (.email-list-pane overflow:hidden is the pane chrome; the scroll list uses
+   overflow-y:auto and does not clip the popover relative to siblings.) */
+.email-list-pane__item--menu-open {
+  z-index: 30;
 }
 
 .email-list-pane__item:hover {
@@ -365,13 +373,45 @@
   opacity: 0.7;
 }
 
+/* Header: hamburger + sender address + date/star, rule underneath.
+   header-leading and action-column share the same fixed icon-column width so
+   the ☰ sits directly above the envelope/trash stack. */
+.email-list-pane__item-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+  padding-bottom: calc(var(--space-xs) / 2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.email-list-pane__header-leading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+}
+
+/* Body: icon stack + large cartouche + subject/preview */
+.email-list-pane__item-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
 .email-list-pane__action-column {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
-  margin-top: calc(var(--space-xs) / 2);
+  width: 1.5rem;
+  min-width: 1.5rem;
+  margin-top: 0;
 }
 
 .email-list-pane__read-indicator,
@@ -382,8 +422,10 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  width: 1.5rem;
   min-width: 1.5rem;
   min-height: 1.5rem;
+  padding: 0;
 }
 
 .email-list-pane__read-indicator {
@@ -430,9 +472,19 @@
 .email-list-pane__row-menu {
   position: relative;
   z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  min-width: 1.5rem;
 }
 
 .email-list-pane__row-menu-button {
+  box-sizing: border-box;
+  width: 1.5rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -482,6 +534,21 @@
   cursor: pointer;
 }
 
+.email-list-pane__row-menu-item svg,
+.email-list-pane__row-menu-emoji {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.email-list-pane__row-menu-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .email-list-pane__row-menu-item:hover:not(:disabled),
 .email-list-pane__row-menu-item:focus-visible:not(:disabled) {
   background: var(--card-hover);
@@ -502,7 +569,6 @@
 }
 
 .email-list-pane__pending-icon {
-  margin-top: calc(var(--space-xs) / 2);
   color: var(--accent-warning);
 }
 
@@ -542,40 +608,43 @@
 .email-list-pane__avatar {
   position: relative;
   flex-shrink: 0;
-  margin-top: calc(var(--space-xs) / 2);
+  margin-top: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
-/* was: .sender-avatar-circle */
+/* was: .sender-avatar-circle — ~72px to fill body height beside subject+preview */
 .email-list-pane__avatar-circle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 4.5rem;
+  height: 4.5rem;
   border-radius: 999px;
   background: var(--email-list-pane-avatar-bg);
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-lg);
   font-weight: 700;
   box-shadow: var(--shadow-sm);
 }
 
 .email-list-pane__avatar-cartouche {
   display: block;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 4.5rem;
+  height: 4.5rem;
 }
 
 /* was: .coin-badge */
 .email-list-pane__coin-badge {
   position: absolute;
-  inset-inline-end: calc(var(--space-xs) * -1);
-  inset-block-end: calc(var(--space-xs) * -1);
+  inset-inline-end: calc(var(--space-xs) * -0.5);
+  inset-block-end: calc(var(--space-xs) * -0.5);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
+  width: 1.125rem;
+  height: 1.125rem;
   border: 2px solid var(--secondary-bg);
   border-radius: 999px;
   font-size: var(--font-size-2xs);
@@ -606,16 +675,9 @@
   display: flex;
   flex: 1;
   flex-direction: column;
+  justify-content: center;
   gap: calc(var(--space-xs) / 2);
   min-width: 0;
-}
-
-/* was: .email-sender-row */
-.email-list-pane__sender-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
 }
 
 .email-list-pane__sender-left,
@@ -630,12 +692,17 @@
   flex: 1;
 }
 
+.email-list-pane__sender-right {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+
 /* was: .email-sender */
 .email-list-pane__sender {
   overflow: hidden;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -913,13 +980,21 @@
   .email-list-pane__item {
     min-height: 4rem;
     padding: var(--space-sm);
+    gap: var(--space-xs);
+  }
+
+  .email-list-pane__item-body {
     gap: var(--space-sm);
   }
 
+  .email-list-pane__avatar-circle,
+  .email-list-pane__avatar-cartouche {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+
   .email-list-pane__avatar-circle {
-    width: 2rem;
-    height: 2rem;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
   }
 
   .email-list-pane__sender,

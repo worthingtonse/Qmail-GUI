@@ -1,5 +1,7 @@
 /* eslint-disable react/prop-types */
 import { avatarColorFromString } from "./avatarColor";
+import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
+import { getQmailAvatarTierName } from "../avatar/qmailAvatar";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
 const SenderAvatar = ({ sender, email, status, senderSn, senderDenominationCode }) => {
@@ -16,16 +18,26 @@ const SenderAvatar = ({ sender, email, status, senderSn, senderDenominationCode 
 
   const colorKey = email || sender || "";
   const { bg } = avatarColorFromString(colorKey);
-  const cartoucheAvatar = (
-    <QmailCartoucheAvatar
-      serialNumber={senderSn}
-      denominationCode={senderDenominationCode}
-    />
-  );
+  const symbols = useDrdSymbols(senderDenominationCode, senderSn);
+  // Users without chosen DRD symbols still get a cartouche: the symbols
+  // derive from the address's serial bytes (high byte top, low byte
+  // bottom). The letter-circle only remains for rows with no usable
+  // address (no serial / unknown denomination).
+  const shownSymbols =
+    getQmailAvatarTierName(senderDenominationCode) !== null
+      ? symbols ?? addressDerivedSymbols(senderSn)
+      : null;
 
   return (
     <div className="email-list-pane__avatar">
-      {cartoucheAvatar || (
+      {shownSymbols ? (
+        <QmailCartoucheAvatar
+          firstSymbol={shownSymbols.firstSymbol}
+          secondSymbol={shownSymbols.secondSymbol}
+          denominationCode={senderDenominationCode}
+          serialNumber={senderSn}
+        />
+      ) : (
         <div
           className="email-list-pane__avatar-circle"
           style={{ "--email-list-pane-avatar-bg": bg }}

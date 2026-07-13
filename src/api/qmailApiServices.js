@@ -166,7 +166,7 @@ const getSenderDenominationCode = (source = {}) => {
     source.sender_denomination_code,
     source.senderDenominationCode,
   );
-  return code !== null && code >= 0 && code <= 4 ? code : null;
+  return code !== null && code >= 0 && code <= 5 ? code : null;
 };
 
 const getSenderDenominationValue = (source = {}) => {
@@ -269,7 +269,7 @@ const getRecipientDenominationCode = (source = {}, parsedAddress = null) => {
     source.recipient_denomination_code,
     source.recipientDenominationCode,
   );
-  if (code !== null && code >= 0 && code <= 4) return code;
+  if (code !== null && code >= 0 && code <= 5) return code;
 
   const value = readNumericApiField(
     source.recipient_denomination,
@@ -3419,4 +3419,685 @@ export const emptyTrashFolder = async (emailIds = []) => {
         ? `Failed to delete ${failed.length} message${failed.length === 1 ? "" : "s"}.`
         : null,
   };
+};
+
+// --- DRD (Distributed Resource Directory) ---
+
+/**
+ * Encode UTF-8 text as websafe base64 (base64url): `+`→`-`, `/`→`_`, no padding.
+ * Empty/nullish input returns an empty string.
+ * @param {string|null|undefined} text
+ * @returns {string}
+ */
+export const encodeWebsafeBase64 = (text) => {
+  if (text == null || text === "") return "";
+  const bytes = new TextEncoder().encode(String(text));
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+};
+
+/**
+ * Decode websafe (or standard) base64 back to UTF-8 text.
+ * Tolerates missing padding and standard `+/` alphabet.
+ * On any decode failure returns the input string unchanged.
+ * @param {string} encoded
+ * @returns {string}
+ */
+export const decodeWebsafeBase64 = (encoded) => {
+  if (encoded == null) return encoded;
+  try {
+    let s = String(encoded).replace(/-/g, "+").replace(/_/g, "/");
+    const pad = s.length % 4;
+    if (pad) {
+      s += "=".repeat(4 - pad);
+    }
+    const binary = atob(s);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return encoded;
+  }
+};
+
+/**
+ * Parse a QMail address string (e.g. "78.34@bit") into DRD coin fields.
+ * QMail denomination codes 0..4 are used directly as DRD denomination.
+ * @param {string} address
+ * @returns {{ok: true, denomination: number, serialNumber: number, canonical: string}
+ *          |{ok: false, error: string}}
+ */
+export const qmailAddressToDrdCoin = (address) => {
+  const parsed = parseQmailAddress(address);
+  if (!parsed || !parsed.ok) {
+    return {
+      ok: false,
+      error: (parsed && parsed.error) || "Invalid QMail address",
+    };
+  }
+  return {
+    ok: true,
+    denomination: parsed.denominationCode,
+    serialNumber: parsed.serialNumber,
+    canonical: parsed.canonical,
+  };
+};
+
+/** Clamp a value to an integer in 0..255. */
+const clampByteSymbol = (value, fallback = 0) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(255, Math.trunc(n)));
+};
+
+/** UTF-8 byte length of a string. */
+const utf8ByteLength = (text) =>
+  new TextEncoder().encode(String(text ?? "")).length;
+
+/**
+ * Map a DRD user record (snake_case) to the GUI camelCase shape.
+ * Decodes `description` from websafe-base64 when present.
+ * @param {object} user
+ * @returns {object}
+ */
+const mapDrdUser = (user = {}) => {
+  const denomination = readNumericApiField(user.denomination);
+  const serialNumber = readNumericApiField(
+    user.serial_number,
+    user.serialNumber,
+  );
+  const rawDescription =
+    typeof user.description === "string" ? user.description : "";
+  const description =
+    rawDescription !== ""
+      ? decodeWebsafeBase64(rawDescription)
+      : "";
+
+  return {
+    denomination,
+    serialNumber,
+    inboxFee: user.inbox_fee ?? user.inboxFee ?? "0",
+    inboxFeeUnits: readNumericApiField(
+      user.inbox_fee_units,
+      user.inboxFeeUnits,
+    ),
+    firstSymbol: readNumericApiField(user.first_symbol, user.firstSymbol) ?? 0,
+    secondSymbol:
+      readNumericApiField(user.second_symbol, user.secondSymbol) ?? 0,
+    classRejection:
+      readNumericApiField(user.class_rejection, user.classRejection) ?? 0,
+    createdAt: readNumericApiField(user.created_at, user.createdAt),
+    updatedAt: readNumericApiField(user.updated_at, user.updatedAt),
+    accountAgeSeconds: readNumericApiField(
+      user.account_age_seconds,
+      user.accountAgeSeconds,
+    ),
+    firstName:
+      typeof user.first_name === "string"
+        ? user.first_name
+        : typeof user.firstName === "string"
+          ? user.firstName
+          : "",
+    lastName:
+      typeof user.last_name === "string"
+        ? user.last_name
+        : typeof user.lastName === "string"
+          ? user.lastName
+          : "",
+    description,
+    // QMail address only for denomination codes 0..4
+    address:
+      denomination !== null &&
+      denomination >= 0 &&
+      denomination <= 5 &&
+      serialNumber
+        ? formatQmailAddress(serialNumber, denomination)
+        : null,
+  };
+};
+
+/**
+ * Map write-operation fan-out fields to camelCase.
+ * @param {object} data
+ * @returns {{passCount: number, failCount: number, quorum: boolean, raidaResults: any[]}}
+ */
+const mapDrdFanout = (data = {}) => ({
+  passCount: readNumericApiField(data.pass_count, data.passCount) ?? 0,
+  failCount: readNumericApiField(data.fail_count, data.failCount) ?? 0,
+  quorum: Boolean(data.quorum),
+  raidaResults: Array.isArray(data.raida_results)
+    ? data.raida_results
+    : Array.isArray(data.raidaResults)
+      ? data.raidaResults
+      : [],
+});
+
+/**
+ * Register or update the caller's DRD directory profile (identity coin auth).
+ * Always omits `sn` so the backend uses the QMail identity coin.
+ * @param {Object} [options]
+ * @param {string} [options.fee="0"] - Inbox fee as decimal CC string
+ * @param {number} [options.firstSymbol=0] - Symbol index 0..255
+ * @param {number} [options.secondSymbol=0] - Symbol index 0..255
+ * @param {number} [options.classRejection=0] - 0 = accept all, else -8..6
+ * @param {string} [options.firstName=""] - Max 63 UTF-8 bytes
+ * @param {string} [options.lastName=""] - Max 63 UTF-8 bytes
+ * @param {string} [options.description=""] - Profile description (forward-compat websafe-base64)
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const postDrdUserProfile = async ({
+  fee = "0",
+  firstSymbol = 0,
+  secondSymbol = 0,
+  classRejection = 0,
+  firstName = "",
+  lastName = "",
+  description = "",
+} = {}) => {
+  try {
+    const first = String(firstName ?? "");
+    const last = String(lastName ?? "");
+    if (utf8ByteLength(first) > 63 || utf8ByteLength(last) > 63) {
+      return {
+        success: false,
+        error: "Name too long (max 63 bytes each)",
+      };
+    }
+
+    const params = new URLSearchParams();
+    params.set("fee", String(fee ?? "0"));
+    params.set("first_symbol", String(clampByteSymbol(firstSymbol, 0)));
+    params.set("second_symbol", String(clampByteSymbol(secondSymbol, 0)));
+    params.set("class_rejection", String(classRejection ?? 0));
+    params.set("first_name", first);
+    params.set("last_name", last);
+    // ALWAYS omit sn — identity coin auth
+    if (description != null && String(description) !== "") {
+      params.set("description", encodeWebsafeBase64(String(description)));
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/drd/user/post?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: mapDrdFanout(data),
+    };
+  } catch (error) {
+    console.error("Post DRD user profile failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Look up a DRD user profile by denomination and serial number (open read).
+ * A 404 "not registered" is treated as success with registered: false.
+ * @param {Object} options
+ * @param {number} options.denomination - DRD denomination (-8..6)
+ * @param {number} options.serialNumber - Coin serial number
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getDrdUserProfile = async ({ denomination, serialNumber }) => {
+  try {
+    const params = new URLSearchParams({
+      denomination: String(denomination),
+      sn: String(serialNumber),
+    });
+    const response = await fetch(
+      `${API_BASE_URL}/drd/user/get?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    if (data && data.user) {
+      return {
+        success: true,
+        data: {
+          registered: true,
+          user: mapDrdUser(data.user),
+          quorum: Boolean(data.quorum),
+        },
+      };
+    }
+
+    return {
+      success: true,
+      data: { registered: false, user: null },
+    };
+  } catch (error) {
+    const message = error?.message || String(error);
+    if (/not registered/i.test(message)) {
+      return {
+        success: true,
+        data: { registered: false, user: null },
+      };
+    }
+    console.error("Get DRD user profile failed:", error);
+    return { success: false, error: message };
+  }
+};
+
+/**
+ * Search DRD users by first and/or last name prefix.
+ * At least one of firstName or lastName is required.
+ * @param {Object} [options]
+ * @param {string} [options.firstName=""]
+ * @param {string} [options.lastName=""]
+ * @param {number} [options.limit=0] - 0 = server default max
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const searchDrdUsers = async ({
+  firstName = "",
+  lastName = "",
+  limit = 0,
+} = {}) => {
+  try {
+    const first = String(firstName ?? "").trim();
+    const last = String(lastName ?? "").trim();
+    if (!first && !last) {
+      return {
+        success: false,
+        error: "Give at least one of firstName, lastName",
+      };
+    }
+
+    const params = new URLSearchParams();
+    if (first) params.set("first_name", first);
+    if (last) params.set("last_name", last);
+    if (limit) params.set("limit", String(limit));
+
+    const response = await fetch(
+      `${API_BASE_URL}/drd/user/search?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    const users = Array.isArray(data?.users)
+      ? data.users.map((u) => mapDrdUser(u))
+      : [];
+
+    return {
+      success: true,
+      data: {
+        count: readNumericApiField(data?.count) ?? users.length,
+        users,
+        quorum: Boolean(data?.quorum),
+      },
+    };
+  } catch (error) {
+    console.error("Search DRD users failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Delete the caller's own DRD directory record (identity coin auth).
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const deleteDrdUserProfile = async () => {
+  try {
+    // ALWAYS omit sn — identity coin auth
+    const response = await fetch(`${API_BASE_URL}/drd/user/delete`);
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: mapDrdFanout(data),
+    };
+  } catch (error) {
+    console.error("Delete DRD user profile failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get the caller's white/black list entries (identity coin auth).
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const getDrdLists = async () => {
+  try {
+    // ALWAYS omit sn — identity coin auth
+    const response = await fetch(`${API_BASE_URL}/drd/list/get`);
+    const data = await handleResponse(response);
+
+    const rawEntries = Array.isArray(data?.entries) ? data.entries : [];
+    const entries = rawEntries.map((entry) => {
+      const denomination = readNumericApiField(entry.denomination);
+      const serialNumber = readNumericApiField(
+        entry.serial_number,
+        entry.serialNumber,
+      );
+      const listType =
+        typeof entry.list_type === "string"
+          ? entry.list_type
+          : typeof entry.listType === "string"
+            ? entry.listType
+            : "";
+      const address =
+        denomination !== null &&
+        denomination >= 0 &&
+        denomination <= 4 &&
+        serialNumber
+          ? formatQmailAddress(serialNumber, denomination)
+          : null;
+      return {
+        denomination,
+        serialNumber,
+        listType,
+        address,
+      };
+    });
+
+    return {
+      success: true,
+      data: {
+        count: readNumericApiField(data?.count) ?? entries.length,
+        entries,
+      },
+    };
+  } catch (error) {
+    console.error("Get DRD lists failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Add or update white/black list entries (identity coin auth).
+ * @param {Array<{denomination: number, serialNumber: number, listType: 'white'|'black'}>} entries
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const setDrdListEntries = async (entries) => {
+  try {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return { success: false, error: "No entries given" };
+    }
+    if (entries.length > 200) {
+      return {
+        success: false,
+        error: "Too many entries (max 200 per request)",
+      };
+    }
+
+    const serialized = entries
+      .map((e) => `${e.denomination}:${e.serialNumber}:${e.listType}`)
+      .join(",");
+    const params = new URLSearchParams({ entries: serialized });
+    // ALWAYS omit sn — identity coin auth
+    const response = await fetch(
+      `${API_BASE_URL}/drd/list/set?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: mapDrdFanout(data),
+    };
+  } catch (error) {
+    console.error("Set DRD list entries failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Remove white/black list entries (identity coin auth).
+ * @param {Array<{denomination: number, serialNumber: number}>} entries
+ * @returns {Promise<{success: boolean, data?: any, error?: string}>}
+ */
+export const removeDrdListEntries = async (entries) => {
+  try {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return { success: false, error: "No entries given" };
+    }
+    if (entries.length > 200) {
+      return {
+        success: false,
+        error: "Too many entries (max 200 per request)",
+      };
+    }
+
+    const serialized = entries
+      .map((e) => `${e.denomination}:${e.serialNumber}`)
+      .join(",");
+    const params = new URLSearchParams({ entries: serialized });
+    // ALWAYS omit sn — identity coin auth
+    const response = await fetch(
+      `${API_BASE_URL}/drd/list/remove?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: mapDrdFanout(data),
+    };
+  } catch (error) {
+    console.error("Remove DRD list entries failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Append a query param only when the value is meaningfully set.
+ * Empty string / null / undefined are omitted so the handler sees "absent".
+ * @param {URLSearchParams} params
+ * @param {string} key
+ * @param {*} value
+ */
+const appendDrdLocalSearchParam = (params, key, value) => {
+  if (value === undefined || value === null || value === "") return;
+  params.append(key, String(value));
+};
+
+/**
+ * Map a local-search user row: reuse mapDrdUser, then merge `deleted` and
+ * prefer the backend's `address` field when present (local search always
+ * emits it; mapDrdUser only builds addresses for den 0..4).
+ * @param {object} raw
+ * @returns {object}
+ */
+const mapDrdLocalSearchUser = (raw = {}) => {
+  const mapped = mapDrdUser(raw);
+  const backendAddress =
+    typeof raw.address === "string" && raw.address.trim()
+      ? raw.address.trim()
+      : null;
+  return {
+    ...mapped,
+    deleted: Boolean(raw.deleted),
+    address: backendAddress ?? mapped.address,
+  };
+};
+
+/**
+ * Search the local DRD replica (pure SQL, no network).
+ * All filter params combine with AND; omit unset filters entirely.
+ *
+ * @param {Object} [filters={}]
+ * @param {string} [filters.firstName]
+ * @param {string} [filters.lastName]
+ * @param {string} [filters.name]
+ * @param {string} [filters.description]
+ * @param {number} [filters.classExact] - maps to `class`
+ * @param {number} [filters.classMin]
+ * @param {number} [filters.classMax]
+ * @param {number[]} [filters.symbols] - up to 2 → repeated `symbol` params
+ * @param {number} [filters.symbol1]
+ * @param {number} [filters.symbol2]
+ * @param {number} [filters.classRejection]
+ * @param {string|number} [filters.feeMin]
+ * @param {string|number} [filters.feeMax]
+ * @param {number} [filters.sn]
+ * @param {number} [filters.snMin]
+ * @param {number} [filters.snMax]
+ * @param {number} [filters.createdAfter]
+ * @param {number} [filters.createdBefore]
+ * @param {number} [filters.updatedAfter]
+ * @param {number} [filters.updatedBefore]
+ * @param {boolean} [filters.includeDeleted]
+ * @param {string} [filters.sort] - name|created_at|updated_at|fee|class
+ * @param {string} [filters.order] - asc|desc
+ * @param {number} [filters.limit]
+ * @param {number} [filters.offset]
+ * @returns {Promise<{success: boolean, data?: {count: number, total: number, users: object[]}, error?: string, httpStatus?: number}>}
+ */
+export const searchDrdLocal = async (filters = {}) => {
+  try {
+    const params = new URLSearchParams();
+
+    appendDrdLocalSearchParam(params, "first_name", filters.firstName);
+    appendDrdLocalSearchParam(params, "last_name", filters.lastName);
+    appendDrdLocalSearchParam(params, "name", filters.name);
+    appendDrdLocalSearchParam(params, "description", filters.description);
+    appendDrdLocalSearchParam(params, "class", filters.classExact);
+    appendDrdLocalSearchParam(params, "class_min", filters.classMin);
+    appendDrdLocalSearchParam(params, "class_max", filters.classMax);
+
+    if (Array.isArray(filters.symbols)) {
+      filters.symbols.slice(0, 2).forEach((sym) => {
+        if (sym === undefined || sym === null || sym === "") return;
+        params.append("symbol", String(sym));
+      });
+    }
+
+    appendDrdLocalSearchParam(params, "symbol1", filters.symbol1);
+    appendDrdLocalSearchParam(params, "symbol2", filters.symbol2);
+    appendDrdLocalSearchParam(
+      params,
+      "class_rejection",
+      filters.classRejection,
+    );
+    appendDrdLocalSearchParam(params, "fee_min", filters.feeMin);
+    appendDrdLocalSearchParam(params, "fee_max", filters.feeMax);
+    appendDrdLocalSearchParam(params, "sn", filters.sn);
+    appendDrdLocalSearchParam(params, "sn_min", filters.snMin);
+    appendDrdLocalSearchParam(params, "sn_max", filters.snMax);
+    appendDrdLocalSearchParam(params, "created_after", filters.createdAfter);
+    appendDrdLocalSearchParam(params, "created_before", filters.createdBefore);
+    appendDrdLocalSearchParam(params, "updated_after", filters.updatedAfter);
+    appendDrdLocalSearchParam(params, "updated_before", filters.updatedBefore);
+
+    if (filters.includeDeleted === true) {
+      params.set("include_deleted", "true");
+    } else if (filters.includeDeleted === false) {
+      params.set("include_deleted", "false");
+    }
+
+    appendDrdLocalSearchParam(params, "sort", filters.sort);
+    appendDrdLocalSearchParam(params, "order", filters.order);
+    appendDrdLocalSearchParam(params, "limit", filters.limit);
+    appendDrdLocalSearchParam(params, "offset", filters.offset);
+
+    const qs = params.toString();
+    const response = await fetch(
+      `${API_BASE_URL}/drd/local/search${qs ? `?${qs}` : ""}`,
+    );
+    const data = await handleResponse(response);
+
+    const users = Array.isArray(data?.users)
+      ? data.users.map((u) => mapDrdLocalSearchUser(u))
+      : [];
+
+    return {
+      success: true,
+      data: {
+        count: readNumericApiField(data?.count) ?? users.length,
+        total: readNumericApiField(data?.total) ?? users.length,
+        users,
+      },
+    };
+  } catch (error) {
+    console.error("Search local DRD failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus,
+    };
+  }
+};
+
+/**
+ * Kick a local DRD sync cycle (async task). Idempotent when already running.
+ * @param {Object} [options]
+ * @param {boolean} [options.full=false] - force zero cursors (full re-download)
+ * @returns {Promise<{success: boolean, data?: {taskId: string, url: string, full: boolean}, error?: string}>}
+ */
+export const kickDrdLocalSync = async ({ full = false } = {}) => {
+  try {
+    const params = new URLSearchParams();
+    params.set("full", full ? "true" : "false");
+    const response = await fetch(
+      `${API_BASE_URL}/drd/local/sync?${params.toString()}`,
+    );
+    const data = await handleResponse(response);
+
+    return {
+      success: true,
+      data: {
+        taskId: data?.task_id ?? data?.taskId ?? null,
+        url: data?.url ?? null,
+        full: Boolean(data?.full ?? full),
+      },
+    };
+  } catch (error) {
+    console.error("Kick local DRD sync failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Read local DRD replica status (counts, last sync, per-shard cursors).
+ * @returns {Promise<{success: boolean, data?: object, error?: string, httpStatus?: number}>}
+ */
+export const getDrdLocalStatus = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/drd/local/status`);
+    const data = await handleResponse(response);
+
+    const rawShards = Array.isArray(data?.shards) ? data.shards : [];
+    const shards = rawShards.map((sh) => ({
+      raidaId: readNumericApiField(sh.raida_id, sh.raidaId),
+      shardIndex: readNumericApiField(sh.shard_index, sh.shardIndex),
+      cursorUpdatedAt: readNumericApiField(
+        sh.cursor_updated_at,
+        sh.cursorUpdatedAt,
+      ),
+      lastSyncAt: readNumericApiField(sh.last_sync_at, sh.lastSyncAt),
+      completed: Boolean(sh.completed),
+    }));
+
+    return {
+      success: true,
+      data: {
+        recordCount: Number(
+          readNumericApiField(data?.record_count, data?.recordCount) ?? 0,
+        ),
+        tombstoneCount: Number(
+          readNumericApiField(data?.tombstone_count, data?.tombstoneCount) ?? 0,
+        ),
+        lastSyncAt: Number(
+          readNumericApiField(data?.last_sync_at, data?.lastSyncAt) ?? 0,
+        ),
+        syncRunning: Boolean(data?.sync_running ?? data?.syncRunning),
+        shardCount: Number(
+          readNumericApiField(data?.shard_count, data?.shardCount) ??
+            shards.length,
+        ),
+        shards,
+      },
+    };
+  } catch (error) {
+    console.error("Get local DRD status failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus,
+    };
+  }
 };

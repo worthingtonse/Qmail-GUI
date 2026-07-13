@@ -296,6 +296,17 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
+/* Radios need the same escape from the global width:100% + padding rule
+   as checkboxes, or they stretch across their row (Set Lowest Accepted
+   Class regression). */
+input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
 .glass-container {
   background: var(--glass-bg-strong);
   backdrop-filter: var(--glass-blur);

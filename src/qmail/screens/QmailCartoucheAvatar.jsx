@@ -1,10 +1,7 @@
 /* eslint-disable react/prop-types */
-import { getQmailAvatarAssetHref, getQmailAvatarModel } from "../avatar/qmailAvatar";
-
-// MVP: cartouches/qcons are hidden until the cartouche system is secured.
-// The svg still renders (layout keeps its space) but is invisible.
-// Set to false to bring all cartouches back.
-const HIDE_CARTOUCHES_FOR_MVP = true;
+import { useId } from "react";
+import { getQmailAvatarAssetHref, getQmailAvatarTierName } from "../avatar/qmailAvatar";
+import { serialSymbolColors } from "../avatar/serialColor";
 
 // Inner content area of the 100x100 frame: the frames/*.svg draw an
 // upright chamfered placard (plate x=24..76, y=10..86 with a ~3px metal
@@ -15,21 +12,41 @@ const CONTENT_Y = 14;
 const CONTENT_HEIGHT = 64;
 
 /**
- * Cartouche avatar for a dotted-decimal QMail address: the frame color
- * encodes the denomination, and one colored symbol per significant serial
- * byte (1-3, mirroring the address's dropped leading zeros) stacks top to
- * bottom in byte order — e.g. 51.254@bit shows symbol 051 above 254
- * inside the "bit" frame. Fewer symbols render larger.
+ * Cartouche avatar for a QMail user: the frame encodes the denomination
+ * tier (bit/byte/kilo/mega/giga/epic), and the user's two CHOSEN DRD
+ * symbols stack top to bottom (firstSymbol above secondSymbol) inside the
+ * placard.
+ *
+ * Symbol COLORS come from the user's serial number: its last two bytes are
+ * a 2-byte color space, read BIG-ENDIAN for the top symbol and
+ * LITTLE-ENDIAN for the bottom (see avatar/serialColor.js) — two distinct
+ * identity colors per user. The symbol SVGs draw with currentColor, so the
+ * serial color is applied by alpha-masking a colored rect with the symbol
+ * image; when no valid serialNumber is given the symbols fall back to
+ * their baked golden-angle colors.
+ *
+ * Pass null for either symbol (or omit both) when symbols are unknown /
+ * not chosen; this component then renders nothing so the caller can show
+ * its fallback (letter-circle, qmailalpha.webp, etc.). Callers / the DRD
+ * cache apply the (0,0)→null convention before props reach here.
  */
 const QmailCartoucheAvatar = ({
-  serialNumber,
+  firstSymbol,
+  secondSymbol,
   denominationCode,
+  serialNumber,
   className = "email-list-pane__avatar-cartouche",
 }) => {
-  const avatarModel = getQmailAvatarModel({ serialNumber, denominationCode });
-  if (!avatarModel) return null;
+  // React 18 useId contains ':' which is invalid inside url(#...) refs.
+  const maskIdBase = useId().replace(/:/g, "");
 
-  const { tierName, symbolIndices } = avatarModel;
+  if (firstSymbol == null || secondSymbol == null) return null;
+
+  const tierName = getQmailAvatarTierName(denominationCode);
+  if (!tierName) return null;
+
+  const colors = serialSymbolColors(serialNumber);
+  const symbolIndices = [firstSymbol, secondSymbol];
   const slotHeight = CONTENT_HEIGHT / symbolIndices.length;
 
   return (
@@ -38,7 +55,6 @@ const QmailCartoucheAvatar = ({
       viewBox="0 0 100 100"
       aria-hidden="true"
       focusable="false"
-      style={HIDE_CARTOUCHES_FOR_MVP ? { visibility: "hidden" } : undefined}
     >
       <image
         href={getQmailAvatarAssetHref("frame", tierName)}
@@ -47,19 +63,65 @@ const QmailCartoucheAvatar = ({
         width="100"
         height="100"
       />
-      {symbolIndices.map((symbolIndex, position) => (
-        <image
-          // Position in the key: the same symbol may appear twice
-          // (e.g. serial 51.51) and each occurrence is its own layer.
-          key={`${position}-${symbolIndex}`}
-          href={getQmailAvatarAssetHref("symbol", symbolIndex)}
-          x={CONTENT_X}
-          y={CONTENT_Y + position * slotHeight}
-          width={CONTENT_WIDTH}
-          height={slotHeight}
-          preserveAspectRatio="xMidYMid meet"
-        />
-      ))}
+      {symbolIndices.map((symbolIndex, position) => {
+        const href = getQmailAvatarAssetHref("symbol", symbolIndex);
+        const x = CONTENT_X;
+        const y = CONTENT_Y + position * slotHeight;
+        // Position in the key: the same symbol may appear twice
+        // and each occurrence is its own layer.
+        const key = `${position}-${symbolIndex}`;
+
+        if (!colors) {
+          // No serial available — render the baked symbol color as-is.
+          return (
+            <image
+              key={key}
+              href={href}
+              x={x}
+              y={y}
+              width={CONTENT_WIDTH}
+              height={slotHeight}
+              preserveAspectRatio="xMidYMid meet"
+            />
+          );
+        }
+
+        const color = position === 0 ? colors.top : colors.bottom;
+        const maskId = `${maskIdBase}-s${position}`;
+        return (
+          <g key={key}>
+            <mask
+              id={maskId}
+              // Alpha mask: the symbol's opaque pixels reveal the colored
+              // rect below, so the glyph renders in the serial color
+              // regardless of the color baked into the SVG file.
+              style={{ maskType: "alpha" }}
+              maskUnits="userSpaceOnUse"
+              x={x}
+              y={y}
+              width={CONTENT_WIDTH}
+              height={slotHeight}
+            >
+              <image
+                href={href}
+                x={x}
+                y={y}
+                width={CONTENT_WIDTH}
+                height={slotHeight}
+                preserveAspectRatio="xMidYMid meet"
+              />
+            </mask>
+            <rect
+              x={x}
+              y={y}
+              width={CONTENT_WIDTH}
+              height={slotHeight}
+              fill={color}
+              mask={`url(#${maskId})`}
+            />
+          </g>
+        );
+      })}
     </svg>
   );
 };
