@@ -598,8 +598,11 @@ function showNativeTitleBarColorPicker() {
   }
 }
 
-// BUG-51: CLI surface for QMail.exe. Parses our own flags; everything
-// not recognized triggers usage + exit. Long-options are GNU style.
+// BUG-51: CLI surface for QMail.exe. Parses our own flags; unrecognized
+// OPTIONS trigger usage + exit, while harness-injected flags (--inspect*,
+// --remote-debugging-port*, --no-sandbox) and positional args are
+// tolerated so automation tooling can drive the app. Long-options are
+// GNU style.
 // All flags map 1:1 to core.exe flags of the same name (defined in
 // rest_core/api_src/main_rest.c) — keep the names aligned.
 const QMAIL_USAGE =
@@ -633,6 +636,22 @@ function parseQMailArgs(argv) {
   const args = argv.slice(process.defaultApp ? 2 : 1);
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
+    // Flags injected by automation/debug harnesses (Playwright's _electron
+    // launcher, `electron --inspect`). Electron/Chromium consume these;
+    // they are not user input, so tolerate instead of exiting with usage.
+    if (
+      a.startsWith('--inspect') ||
+      a.startsWith('--remote-debugging-port') ||
+      a === '--no-sandbox'
+    ) {
+      continue;
+    }
+    // When a harness injects flags before the app path, Electron's
+    // defaultApp arg shifting can land the app-dir positional inside our
+    // slice. Positionals are never QMail options — skip them.
+    if (!a.startsWith('-')) {
+      continue;
+    }
     if (a === '--help' || a === '-h') {
       process.stdout.write(QMAIL_USAGE + '\n');
       app.exit(0);
@@ -856,7 +875,7 @@ function createSplashWindow() {
 <html>
 <head>
 <meta charset="utf-8">
-<title>QMail Alpha</title>
+<title>QMail Beta</title>
 <style>
   html, body {
     margin: 0;
@@ -921,7 +940,7 @@ function createSplashWindow() {
 </head>
 <body>
   <div class="container">
-    <div class="logo">QMail Alpha</div>
+    <div class="logo">QMail Beta</div>
     <div class="tagline">Quantum-safe secure mail</div>
     <div class="status"><span class="spinner"></span>Starting QMail&hellip;</div>
     <div class="disclaimer">${SPLASH_DISCLAIMER}</div>
@@ -1024,6 +1043,12 @@ function buildApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        { role: process.platform === 'darwin' ? 'close' : 'quit' },
+      ],
+    },
+    {
+      label: 'Wallet',
+      submenu: [
         {
           label: 'Add Funds',
           click: () => sendQmailMenuCommand('add-funds'),
@@ -1036,8 +1061,6 @@ function buildApplicationMenu() {
           label: 'Purchase Coins',
           click: () => shell.openExternal('https://cloudcoin.com/pay/'),
         },
-        { type: 'separator' },
-        { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],
     },
     {
@@ -1057,6 +1080,11 @@ function buildApplicationMenu() {
     {
       label: 'Mailbox',
       submenu: [
+        {
+          label: 'Compose',
+          click: () => sendQmailMenuCommand('compose-new'),
+        },
+        { type: 'separator' },
         {
           label: 'Empty Trash',
           click: () => sendQmailMenuCommand('empty-trash'),
@@ -1088,7 +1116,7 @@ function buildApplicationMenu() {
       ],
     },
     {
-      label: 'Edit Public Profile',
+      label: 'Profile',
       submenu: [
         { label: 'Edit White List', click: () => sendQmailMenuCommand('profile-whitelist') },
         { label: 'Edit Black List', click: () => sendQmailMenuCommand('profile-blacklist') },
@@ -1517,6 +1545,92 @@ async function getSentAttachmentMetadata(apiPort, emailId) {
 
 ipcMain.handle('qmail:sent-attachment-metadata', async (_event, apiPort, emailId) => {
   return getSentAttachmentMetadata(apiPort, emailId);
+});
+
+// Sent-box full recipient lists (to/cc/bcc) from the local send receipt.
+// Same validation and sanitization boundary as getSentAttachmentMetadata:
+// the raw receipt never reaches the renderer. Used to enable Reply All on
+// multi-recipient sent mail (list rows only carry recipient_address + count).
+async function getSentRecipients(apiPort, emailId) {
+  const id = String(emailId || '');
+  const port = Number(apiPort);
+  if (
+    !/^[0-9a-fA-F]{32}$/.test(id) ||
+    !Number.isInteger(port) ||
+    port !== backendPort
+  ) {
+    return { success: false, error: 'Invalid receipt request.' };
+  }
+
+  try {
+    const response = await fetch(`http://localhost:${port}/api/qmail/receipts?guid=${id}`);
+    // No receipt (send predates receipts): empty lists, success true.
+    if (response.status === 404) {
+      return { success: true, data: { to: [], cc: [], bcc: [] } };
+    }
+    if (!response.ok) {
+      return { success: false, error: `Receipt request failed (${response.status}).` };
+    }
+
+    const data = await response.json();
+    const receipt = (data && data.receipt) || data;
+    const rows =
+      receipt && receipt.tell && Array.isArray(receipt.tell.recipients)
+        ? receipt.tell.recipients
+        : [];
+
+    const denomNames = ['bit', 'byte', 'kilo', 'mega', 'giga', 'epic'];
+    const formatFromSnDenom = (snRaw, denomRaw) => {
+      const sn = Number(snRaw);
+      const denom = Number(denomRaw);
+      if (!Number.isInteger(sn) || sn <= 0 || sn > 0xffffff) return '';
+      if (!Number.isInteger(denom) || denom < 0 || denom >= denomNames.length) {
+        return '';
+      }
+      const word = denomNames[denom];
+      const b1 = Math.floor(sn / 65536) % 256;
+      const b2 = Math.floor(sn / 256) % 256;
+      const b3 = sn % 256;
+      if (b1 !== 0) return `${b1}.${b2}.${b3}@${word}`;
+      if (b2 !== 0) return `${b2}.${b3}@${word}`;
+      return `${b3}@${word}`;
+    };
+
+    const to = [];
+    const cc = [];
+    const bcc = [];
+    for (const row of rows) {
+      // Prefer stored address; older receipts left address blank — rebuild
+      // from serial_number + denomination so multi-recipient Sent still works.
+      let address =
+        typeof row?.address === 'string' ? row.address.trim() : '';
+      if (!address) {
+        address = formatFromSnDenom(
+          row?.serial_number ?? row?.serialNumber,
+          row?.denomination ?? row?.denomination_code,
+        );
+      }
+      if (!address) continue;
+      const kind = String(row?.kind || 'to').toLowerCase();
+      if (kind === 'cc') {
+        cc.push(address);
+      } else if (kind === 'bcc') {
+        bcc.push(address);
+      } else {
+        // "to" and any unknown kind land in To.
+        to.push(address);
+      }
+    }
+
+    return { success: true, data: { to, cc, bcc } };
+  } catch (error) {
+    log('qmail:sent-recipients failed: ' + error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+ipcMain.handle('qmail:sent-recipients', async (_event, apiPort, emailId) => {
+  return getSentRecipients(apiPort, emailId);
 });
 
 // Resolve the path from the authoritative local receipt. The renderer only

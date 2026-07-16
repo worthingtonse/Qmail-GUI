@@ -82,6 +82,15 @@
   gap: calc(var(--space-xs) / 2);
 }
 
+/* Name + optional copy-all-recipients control share one row so the icon
+   sits beside the primary recipient label (sent folder only). */
+.reading-pane__sender-name-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
 /* was: .sender-name */
 .reading-pane__sender-name {
   color: var(--text-primary);
@@ -89,12 +98,69 @@
   font-weight: 600;
 }
 
+/* Compact icon button: copy to+cc+bcc addresses for sent messages. */
+.reading-pane__copy-recipients {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: var(--space-xs);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    color calc(250ms * var(--motion-scale)) ease,
+    background-color calc(250ms * var(--motion-scale)) ease;
+}
+
+.reading-pane__copy-recipients:hover,
+.reading-pane__copy-recipients:focus-visible {
+  background: var(--card-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
 /* Muted secondary line showing the QMail address under the contact name in
-   the open-message header. Only rendered when a distinct contact name exists. */
+   the open-message header. For multi-recipient Sent mail this is the full
+   comma-separated list (not just the primary +N summary). */
 .reading-pane__sender-address {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   font-weight: 400;
+  word-break: break-word;
+}
+
+/* Full To/Cc/Bcc breakdown under the header identity. */
+.reading-pane__recipient-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-xs);
+  min-width: 0;
+}
+
+.reading-pane__recipient-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+}
+
+.reading-pane__recipient-label {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  min-width: 2rem;
+}
+
+.reading-pane__recipient-values {
+  color: var(--text-secondary);
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* was: .email-actions */

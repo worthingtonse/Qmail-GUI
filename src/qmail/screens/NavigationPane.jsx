@@ -15,8 +15,6 @@ import {
   Key,
   Archive,
   AlertTriangle,
-  Info,
-  X,
 } from "lucide-react";
 import { echoRaida, getServers } from "../../api/qmailApiServices";
 import {
@@ -29,8 +27,6 @@ import { useDrdSymbols } from "../avatar/drdSymbols";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 import "./NavigationPane.css";
 
-const CLOUDCOIN_PURCHASE_URL = "https://cloudcoin.com/pay/";
-
 // qmailalpha.webp lives in public/; BASE_URL join matches qmailAvatar.js so
 // the packaged Electron build resolves it too. Shown when the signed-in
 // user's DRD symbols are unknown / not chosen (null cartouche).
@@ -39,72 +35,6 @@ const QMAIL_ALPHA_SRC = (() => {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   return `${normalizedBase}qmailalpha.webp`;
 })();
-
-const DMS_REGISTER_URL = "https://DistributedMailSystem.com";
-
-// Open a URL in the system browser (Electron) or a new tab (plain Vite build).
-const openExternalUrl = (url) => {
-  if (window.electronAPI?.openExternal) {
-    window.electronAPI.openExternal(url);
-  } else {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-};
-
-// Raw URLs don't wrap and overflow the narrow pane, so external references
-// are rendered as named hyperlinks with wrappable words.
-const DMP_PAYMENT_INFO = [
-  {
-    id: "dmp",
-    content:
-      "QMail uses an open standard protocol called DMP (Distributed Mail Protocol) that helps reduce spam, phishing, and inbox overload by using an Inbox Fee.",
-  },
-  {
-    id: "inbox-fee",
-    content: (
-      <>
-        The Inbox Fee lets recipients get paid for their attention when
-        receiving qmails. Influencers can set their own inbox fee by
-        registering at{" "}
-        <a
-          href={DMS_REGISTER_URL}
-          className="navigation-pane__wallet-info-link"
-          onClick={(event) => {
-            event.preventDefault();
-            openExternalUrl(DMS_REGISTER_URL);
-          }}
-        >
-          Distributed Mail System
-        </a>
-        .
-      </>
-    ),
-  },
-  {
-    id: "currencies",
-    content:
-      "The DMP open standard can support up to 65 thousand different payment currencies. In Phase 1, QMail uses CloudCoin: a quantum-safe, energy-efficient, instant digital cash technology that does not require usernames, logins, or private keys. Like physical cash, it provides strong privacy.",
-  },
-  {
-    id: "purchase",
-    content: (
-      <>
-        Places you can purchase CloudCoin include{" "}
-        <a
-          href={CLOUDCOIN_PURCHASE_URL}
-          className="navigation-pane__wallet-info-link"
-          onClick={(event) => {
-            event.preventDefault();
-            openExternalUrl(CLOUDCOIN_PURCHASE_URL);
-          }}
-        >
-          CloudCoin.com
-        </a>
-        .
-      </>
-    ),
-  },
-];
 
 const formatBalance = (value) => {
   if (value == null) return "0";
@@ -212,18 +142,26 @@ const NavigationPane = ({
   folders,
   raidaEchoSnapshot,
   qmailAddress = "",
+  onWalletAction,
 }) => {
   const [raidaHealth, setRaidaHealth] = useState(null);
   const [raidaDetails, setRaidaDetails] = useState(null);
   const [healthSummary, setHealthSummary] = useState(null);
   const [qmailServers, setQmailServers] = useState(null);
   const [qmailSummary, setQmailSummary] = useState(null);
-  const [showWalletPaymentInfo, setShowWalletPaymentInfo] = useState(false);
   const [addressCopied, setAddressCopied] = useState(false);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  // Viewport coordinates for the fixed-position wallet menu ({left, top} or
+  // {left, bottom}), computed from the trigger when the menu opens. Fixed
+  // positioning keeps the menu out of the pane's overflow-y scroll clipping.
+  const [walletMenuPosition, setWalletMenuPosition] = useState(null);
   // True while a server-health check is running, so concurrent triggers (button,
   // interval, isRefreshing toggle) cannot stack overlapping echo calls.
   const checkInFlightRef = useRef(false);
   const wasRefreshingRef = useRef(false);
+  const walletMenuRef = useRef(null);
+  const walletTriggerRef = useRef(null);
+  const walletMenuListRef = useRef(null);
 
   const showUnknownRaidaHealth = useCallback(() => {
     setRaidaHealth(null);
@@ -434,6 +372,118 @@ const NavigationPane = ({
   const walletLockedValue = getWalletLockedValue(walletBalance);
   const walletCombinedValue = getWalletCombinedValue(walletBalance);
   const walletBalanceTitle = getWalletBalanceTitle(walletBalance, walletBalanceStatus);
+
+  // Estimated menu box height (3 items + padding) used only to decide
+  // whether the menu fits above the trigger; 11rem min width in px.
+  const WALLET_MENU_HEIGHT_PX = 160;
+  const WALLET_MENU_MIN_WIDTH_PX = 176;
+
+  const closeWalletMenu = useCallback((restoreFocus = false) => {
+    setWalletMenuOpen(false);
+    if (restoreFocus) {
+      walletTriggerRef.current?.focus();
+    }
+  }, []);
+
+  const toggleWalletMenu = () => {
+    if (walletMenuOpen) {
+      setWalletMenuOpen(false);
+      return;
+    }
+    const trigger = walletTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const left = Math.max(
+      8,
+      Math.min(rect.left, window.innerWidth - WALLET_MENU_MIN_WIDTH_PX - 8),
+    );
+    // Prefer opening above the row; fall back to below near the viewport top.
+    setWalletMenuPosition(
+      rect.top >= WALLET_MENU_HEIGHT_PX
+        ? { left, bottom: window.innerHeight - rect.top + 4 }
+        : { left, top: rect.bottom + 4 },
+    );
+    setWalletMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!walletMenuOpen) return undefined;
+
+    const handleMouseDown = (event) => {
+      if (walletMenuRef.current && !walletMenuRef.current.contains(event.target)) {
+        setWalletMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeWalletMenu(true);
+      }
+    };
+
+    // The menu is position:fixed, so its coordinates go stale if anything
+    // scrolls or the window resizes while it is open — just close it.
+    const handleScrollOrResize = () => setWalletMenuOpen(false);
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [walletMenuOpen, closeWalletMenu]);
+
+  // ARIA menu-button contract: focus moves into the menu when it opens.
+  useEffect(() => {
+    if (!walletMenuOpen) return;
+    walletMenuListRef.current?.querySelector("button")?.focus();
+  }, [walletMenuOpen]);
+
+  // Arrow/Home/End cycle focus through the items; Tab closes and moves on.
+  // Escape is handled by the document-level listener (restores focus).
+  const handleWalletMenuKeyDown = (event) => {
+    const items = Array.from(
+      walletMenuListRef.current?.querySelectorAll("button") || [],
+    );
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement);
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      items[(currentIndex + delta + items.length) % items.length].focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      items[0].focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      items[items.length - 1].focus();
+    } else if (event.key === "Tab") {
+      setWalletMenuOpen(false);
+    }
+  };
+
+  const openPurchasePage = () => {
+    const url = "https://cloudcoin.com/pay/";
+    if (window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+    else window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleWalletMenuItem = (action) => {
+    closeWalletMenu(true);
+    if (action === "purchase") {
+      openPurchasePage();
+      return;
+    }
+    if (typeof onWalletAction === "function") {
+      onWalletAction(action);
+    }
+  };
+
   const trimmedQmailAddress = String(qmailAddress || "").trim();
   const displayQmailAddress = formatQmailAddressForDisplay(trimmedQmailAddress);
   const parsedQmailAddress = useMemo(
@@ -583,35 +633,65 @@ const NavigationPane = ({
             </span>
           )}
         </div>
-        {/* Future wallet details navigation:
-            onClick={() => setActiveView("account")} */}
-        <div className="navigation-pane__link navigation-pane__link--static">
-          <Wallet size={18} />
-          <span className="navigation-pane__link-label">Wallet</span>
-          {walletBalance && (
-            <span
-              className={`navigation-pane__wallet-balance navigation-pane__wallet-balance--${walletBalanceStatus}`}
-              title={walletBalanceTitle}
-              aria-label={walletBalanceTitle}
-            >
-              {(walletBalanceStatus === "empty" || walletBalanceStatus === "low") && (
-                <AlertTriangle size={12} className="navigation-pane__wallet-balance-icon" />
-              )}
-              {formatBalance(walletCombinedValue)} CC
-            </span>
-          )}
-        </div>
-        <div className="navigation-pane__wallet-purchase-row">
+        <div className="navigation-pane__wallet" ref={walletMenuRef}>
           <button
             type="button"
-            className="navigation-pane__wallet-info-button"
-            onClick={() => setShowWalletPaymentInfo((show) => !show)}
-            title="Why payments are needed"
-            aria-label="Why payments are needed"
-            aria-expanded={showWalletPaymentInfo}
+            ref={walletTriggerRef}
+            className="navigation-pane__link navigation-pane__link--wallet-trigger"
+            onClick={toggleWalletMenu}
+            aria-haspopup="menu"
+            aria-expanded={walletMenuOpen}
           >
-            <Info size={14} />
+            <Wallet size={18} />
+            <span className="navigation-pane__link-label">Wallet</span>
+            {walletBalance && (
+              <span
+                className={`navigation-pane__wallet-balance navigation-pane__wallet-balance--${walletBalanceStatus}`}
+                title={walletBalanceTitle}
+                aria-label={walletBalanceTitle}
+              >
+                {(walletBalanceStatus === "empty" || walletBalanceStatus === "low") && (
+                  <AlertTriangle size={12} className="navigation-pane__wallet-balance-icon" />
+                )}
+                {formatBalance(walletCombinedValue)} CC
+              </span>
+            )}
           </button>
+          {walletMenuOpen && (
+            <div
+              className="navigation-pane__wallet-menu"
+              role="menu"
+              aria-label="Wallet actions"
+              ref={walletMenuListRef}
+              style={walletMenuPosition || undefined}
+              onKeyDown={handleWalletMenuKeyDown}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="navigation-pane__wallet-menu-item"
+                onClick={() => handleWalletMenuItem("add")}
+              >
+                Add Funds
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="navigation-pane__wallet-menu-item"
+                onClick={() => handleWalletMenuItem("withdraw")}
+              >
+                Withdraw Funds
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="navigation-pane__wallet-menu-item"
+                onClick={() => handleWalletMenuItem("purchase")}
+              >
+                Purchase Coins
+              </button>
+            </div>
+          )}
         </div>
         {parsedQmailAddress.ok && (
           <div
@@ -621,28 +701,9 @@ const NavigationPane = ({
             <Key size={14} />
             <span className="navigation-pane__staked-label">Staked:</span>
             <span className="navigation-pane__staked-value">
-              {parsedQmailAddress.denominationName}(
-              {formatBalance(10 ** parsedQmailAddress.denominationCode)})
+              @{parsedQmailAddress.denominationName}{" "}
+              {formatBalance(10 ** parsedQmailAddress.denominationCode)} CC
             </span>
-          </div>
-        )}
-        {showWalletPaymentInfo && (
-          <div
-            className="navigation-pane__wallet-info-popover"
-            role="dialog"
-            aria-label="Why QMail payments are needed"
-          >
-            <button
-              type="button"
-              className="navigation-pane__wallet-info-close"
-              onClick={() => setShowWalletPaymentInfo(false)}
-              aria-label="Close payment information"
-            >
-              <X size={14} />
-            </button>
-            {DMP_PAYMENT_INFO.map(({ id, content }) => (
-              <p key={id}>{content}</p>
-            ))}
           </div>
         )}
       </nav>
@@ -655,7 +716,7 @@ const NavigationPane = ({
           type="button"
         >
           <RefreshCw size={16} className={isRefreshing ? "spinning" : ""} />
-          <span>{isRefreshing ? "Refreshing..." : "Refresh"}</span>
+          <span>{isRefreshing ? "Refreshing RAIDA Status..." : "Refresh RAIDA Status"}</span>
         </button>
 
         <section

@@ -81,8 +81,11 @@
   opacity: 0.72;
 }
 
-.qmail-dashboard > *,
-.qmail-dashboard__panes > * {
+/* Keep dashboard children above the decorative background, but keep this
+   default at 0 specificity so fixed-position overlay children (compose
+   workspace, wallet modal, confirm dialogs) always win regardless of CSS
+   bundle order. */
+:where(.qmail-dashboard > *, .qmail-dashboard__panes > *) {
   position: relative;
   z-index: 1;
 }

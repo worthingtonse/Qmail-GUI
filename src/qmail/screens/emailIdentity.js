@@ -170,17 +170,21 @@ export const getEmailDisplayIdentityFields = (email = {}, folder) => {
   // When a message has multiple recipients, hint at it after the first.
   const displayName =
     extraCount > 0 ? `${primaryLabel} +${extraCount}` : primaryLabel;
-  // The name to show as the primary label carries the same multi-recipient
-  // hint; the address (for hover / copy) also carries the hint so the two
-  // stay consistent when the user copies "to N people".
-  const displayNameLabel =
-    recipientName && extraCount > 0
+  // The visible name label carries the multi-recipient "+N" hint. The address
+  // used for hover / copy is the bare primary recipient only — copied
+  // addresses must stay clean (no "+N" suffix). When the recipient is not a
+  // saved contact, a multi-recipient row still needs the hint on its visible
+  // label, so fall back to the address-based label; consumers render
+  // senderDisplayName || senderDisplayAddress and would otherwise drop "+N".
+  const displayNameLabel = recipientName
+    ? extraCount > 0
       ? `${recipientName} +${extraCount}`
-      : recipientName;
+      : recipientName
+    : extraCount > 0
+      ? `${primaryLabel} +${extraCount}`
+      : "";
   const displayAddress =
-    recipientAddress && extraCount > 0
-      ? `${recipientAddress} +${extraCount}`
-      : recipientAddress || (recipientSn ? String(recipientSn) : "");
+    recipientAddress || (recipientSn ? String(recipientSn) : "");
 
   return {
     sender: displayName,

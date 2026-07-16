@@ -1,0 +1,275 @@
+================================================================================
+NOTE TO FRONTEND AI: QMAIL STORAGE SUBSCRIPTIONS, WELFARE, AND THE
+ZERO-LOCKER UPLOAD GATE — what the GUI needs to build
+================================================================================
+From:  Claude (server-side AI, raidax repo — /root/raidax, master)
+Date:  2026-07-14
+Re:    RAIDA command 85 "Subscribe" (group 6) + the new upload funding model
+
+--------------------------------------------------------------------------------
+0. READ THESE FIRST — the hidden protocol docs
+--------------------------------------------------------------------------------
+
+Both pages are LIVE but deliberately UNLISTED (not on any nav bar / sidebar).
+They exist and render; you just won't find them by browsing. Go direct:
+
+  RAIDA wire format (what the server actually parses):
+    https://cloudcoin.org/protocol/qmail-subscribe.php
+    source: /var/www/cloudcoin.org/protocol/qmail-subscribe.php
+
+  REST API the GUI will actually call (core endpoint, fans out to all RAIDA):
+    https://cloudcoin.org/qmail-commands/subscribe.php
+    source: /var/www/cloudcoin.org/qmail-commands/subscribe.php
+
+They stay unlisted on purpose: Subscribe is a vendor-only billing operation,
+not a user feature. Don't add them to the nav, and don't link to them from any
+user-facing page. If you change the REST contract, update the second page.
+
+Related existing docs you'll want open: protocol/qmail-object-transfer-v1.php
+(the upload path this all hangs off of).
+
+--------------------------------------------------------------------------------
+1. WHY THIS EXISTS — the one-paragraph version
+--------------------------------------------------------------------------------
+
+Today a QMail sender proves they paid for storage by attaching a payment
+locker key to an upload. That's friction: the sender needs coins in a wallet
+at send time, every time. Subscriptions replace that with a prepaid balance:
+a vendor pre-funds a mailbox, and the mailbox then uploads with an ALL-ZERO
+locker code while the RAIDA draws the storage cost down from that balance.
+
+The all-zero locker code used to mean "free" (Phase 1). It now means
+"charge my subscription." That is a semantic change to a value the GUI
+already sends, which is why you're getting this note.
+
+--------------------------------------------------------------------------------
+2. CURRENT STATE — IMPORTANT, READ BEFORE YOU PLAN
+--------------------------------------------------------------------------------
+
+The server ships this in two halves, and only ONE half is live:
+
+  LIVE NOW ......... Subscribe (cmd 85). Vendors can credit mailboxes today.
+                     Balances are really written to each RAIDA's drd.db.
+                     Verified end-to-end on the fleet.
+
+  DORMANT .......... The upload gate that SPENDS that credit. It is compiled
+                     out behind QMAIL_SUBSCRIPTION_ENFORCE = 0 in
+                     qmail_structs.h. Right now a zero-locker upload still
+                     behaves exactly as it does today (free under Phase 1),
+                     and the begin/commit responses return ZEROED credit
+                     fields.
+
+This is deliberate. We are pre-loading balances while nothing spends them, so
+that on the day we flip the switch fleet-wide, mailboxes are already funded
+and nobody's send breaks. **The switch does not flip until the clients — that
+includes your GUI — can handle the new statuses and the credit_state field.**
+You are, in effect, the gate on the gate. That's the point of this note.
+
+So: build against the new fields NOW, while they're guaranteed to read zero.
+Zero is a valid, non-scary value. Design so that zeros render as "nothing to
+say here," not as "0 KB remaining, you are broke."
+
+--------------------------------------------------------------------------------
+3. THE FUNDING MODEL — get the user-facing wording right
+--------------------------------------------------------------------------------
+
+When enforcement is on, a zero-locker upload is resolved per-RAIDA in this
+precedence order. Your UI copy should reflect it, because users WILL ask
+"why did that send cost me nothing?"
+
+  1. FREE FLOOR — the stripe this server received is under 100 KB
+     (QMAIL_FREE_UPLOAD_FLOOR_BYTES). Free. No balance touched.
+  2. SUBSCRIPTION — prepaid credit covers the whole stripe: consume it.
+  3. WELFARE — no credit, but the mailbox is inside a rolling free tier:
+     300 KB per 3 days (QMAIL_WELFARE_LIMIT_BYTES / _WINDOW_SECONDS).
+     Allowed, but flagged. Over the cap -> denied (171).
+  4. DENY — too big for welfare, no subscription -> denied (170).
+
+CRITICAL NUANCE FOR YOUR COPY: messages are RAID-striped across the QMail
+RAIDA. **Each server only ever sees its own stripe — never the total message
+size, never the stripe count.** So the "100 KB free floor" is 100 KB PER
+SERVER, not per message. Never tell the user "messages under 100 KB are free";
+that's wrong and they'll catch you out. Say something like "small messages are
+free" or don't quantify it at all. Same trap with welfare: "300 KB" is a
+per-server allowance, so do not present it as a message-size budget.
+
+Also: welfare grants are NOT refunded if a transfer aborts or expires;
+subscription charges ARE. Don't build a UI that promises a refund.
+
+--------------------------------------------------------------------------------
+4. YOUR GOALS
+--------------------------------------------------------------------------------
+
+GOAL A — Vendor Subscribe screen (buildable today, fully unblocked)
+------------------------------------------------------------------
+An admin/vendor-only screen that credits mailboxes. This is NOT a user
+feature; gate it behind whatever admin surface you use, and don't advertise it.
+
+  POST /api/qmail/subscribe?wallet=Mail&vendor_sn=5220
+
+  Single mailbox (query params):
+    &mailbox_den=4&mailbox_sn=5243&credit_bytes=1048576
+
+  Batch (preferred): plain-text body, one entry per line,
+  "mailbox_den,mailbox_sn,credit_bytes", UP TO 150 LINES. A body, when
+  present, takes precedence over the single-entry query params.
+
+    4,5243,1048576
+    4,5244,2000000
+    4,5245,500000
+
+  Response (per-RAIDA fan-out summary):
+    {
+      "command": "qmail-subscribe", "success": true,
+      "entry_count": 3, "pass_count": 25, "fail_count": 0,
+      "no_response_count": 0, "skipped_count": 0, "quorum": true,
+      "raida_results": [ { "raida": 0, "success": true, "status": 250 }, ... ]
+    }
+
+  What the screen must get right:
+
+  * 150 IS A HARD CAP, and it's a packet-size cap, not a taste decision:
+    150 x 9 + 48 preamble + 2 terminator = 1400 bytes, which is our ceiling
+    for a RAIDA request. Chunk anything larger into multiple requests
+    client-side. Don't try to raise it.
+  * PARTIAL SUCCESS IS THE NORMAL CASE, not an error. Each RAIDA keeps its
+    OWN balance table. A mailbox funded on only 20 of 25 servers will fail to
+    upload against the other 5. So the result UI must show per-RAIDA state and
+    make "retry the stragglers" a first-class action — not a generic
+    "success/failure" toast. `pass_count` is the number that matters, and it
+    should read as "funded on N of M servers."
+  * Re-running is SAFE and ADDITIVE. Credit accumulates (saturating at
+    2^32-1 = 4294967295 bytes). Retrying a partial batch double-credits the
+    servers that already succeeded. That's an accepted trade — say so in the
+    UI rather than trying to be clever about it.
+  * ADDRESSES ARE DOTTED BASE-256 AND THIS IS THE #1 BUG SOURCE. "20.100@giga"
+    means serial = 20*256 + 100 = 5220, and the domain names the denomination
+    (giga = 4). It is NOT serial 20100. I lost real time to exactly this. If
+    your form takes a human address like "20.123@giga", convert it and
+    ECHO BACK the decoded (den, sn) for confirmation before sending.
+    Existing helper: /api/qmail/local/address/from-sn does the reverse
+    direction; check for a forward equivalent before hand-rolling the math.
+  * Vendors are ALLOW-LISTED AND HARD-CODED in the server binary
+    (qmail_subscribe.h). Currently: {4, 5220} = 20.100@giga (production
+    billing address) and {4, 5243} = 20.123@giga (Sean's test vendor, to be
+    removed before prod). An off-list vendor gets status 172 on every RAIDA.
+    The GUI cannot add vendors — that's a code change + redeploy. If you show
+    a vendor picker, source it from config/user input, but expect 172 and
+    render it as "this address is not authorized to sell storage," not as a
+    network error.
+  * The endpoint 404s with "Vendor coin not found in wallet" unless the vendor
+    coin actually exists in the Mail wallet's Bank/Fracked folder. That's an
+    expected, explainable state — handle it with a real message.
+
+  Per-RAIDA statuses worth special-casing in this screen:
+    250 success | 172 vendor not allow-listed | 200 bad vendor AN
+    8 vendor coin not found on that RAIDA | 16 malformed batch
+    40 denomination out of range (-8..+6) | 194 server DB write failed
+
+  ROLLOUT CAVEAT (temporary, but it will bite you if you don't know):
+  RAIDA still running the older single-entry build silently credit ONLY THE
+  FIRST ENTRY of a batch and still return 250 — their length check is a
+  minimum, so extra entries are ignored rather than rejected. There is no way
+  to detect this from the response. Until the fleet finishes redeploying, a
+  batch may be under-applied on some servers while reporting success. If you
+  need certainty before the fleet converges, send one entry per request.
+  Ask before assuming it's done; I can confirm fleet state.
+
+GOAL B — Send path: handle 170 / 171 / credit_state (BLOCKED — see below)
+-------------------------------------------------------------------------
+This is the half that actually gates the fleet-wide switch, and it is the
+more important of the two goals.
+
+  * ERROR_NO_STORAGE_CREDIT = 170 — hard denial. The upload did not happen.
+    The user needs credit, or needs to attach a funded locker.
+  * ERROR_WELFARE_EXHAUSTED = 171 — hard denial. They burned the free tier
+    for this window. This one is time-based, so the message should convey
+    "for now" rather than "you must pay" — the window rolls.
+  * credit_state (in the object-begin response, cmd 76): 0 = OK,
+    1 = LOW, 2 = EMPTY, 3 = WELFARE. Plus a remaining-KB figure (3 bytes,
+    big-endian, saturating at 0xFFFFFF) for the active funding mode.
+
+  The design intent — and this came directly from the project owner — is that
+  LOW and WELFARE are **advisory, and must not block the send**. They are
+  carried as a response-body FIELD precisely so they can't be mistaken for a
+  failure status. The send succeeded. Show a quiet, dismissible nudge
+  ("running low on storage credit" / "sent using your free allowance"), not a
+  modal, not an error style. Only 170 and 171 are refusals.
+
+  BLOCKER: as of today the REST core does NOT yet surface credit_state or
+  remaining_kb in the JSON from the object-upload path. The RAIDA sends them
+  on the wire; rest_core drops them on the floor. Plumbing them through is
+  pending server-side/core work that I own. **Do not fake it and do not build
+  against a shape I haven't confirmed.** Tell me you're ready for Goal B and
+  I'll wire the fields through and hand you the exact JSON keys. Design the
+  component now, bind it last.
+
+  Also note remaining-KB is reported for the ACTIVE mode only — under welfare
+  it's remaining welfare, not remaining subscription. Label it by mode; a bare
+  "N KB left" will mislead.
+
+GOAL C — "Am I funded?" surfacing (design input wanted, not yet buildable)
+-------------------------------------------------------------------------
+There is currently NO read endpoint for a mailbox's own balance — Subscribe
+writes, nothing reads. The upload response is the only place credit becomes
+visible, which is late and only for senders.
+
+Before I build a balance-read endpoint I want to know what the GUI actually
+needs: a number in settings? a pre-send check (there's an existing
+/api/qmail/local/can-send you may want to extend rather than duplicate)? a
+passive badge? Per-RAIDA detail, or a single rolled-up figure — bearing in
+mind the honest answer is per-server and may be ragged? Tell me the shape you
+want and I'll build to it, rather than me guessing and you wrapping it.
+
+--------------------------------------------------------------------------------
+5. WHAT SUCCESS LOOKS LIKE
+--------------------------------------------------------------------------------
+
+  * A vendor can fund 150 mailboxes in one action and can SEE which RAIDA
+    took it and retry only the ones that didn't.
+  * Nobody ever types "20100" and wonders why it 404s.
+  * With QMAIL_SUBSCRIPTION_ENFORCE = 0 (today), the GUI looks and behaves
+    EXACTLY as it does now. Zeroed credit fields must be invisible, not
+    rendered as an empty balance.
+  * When we flip enforcement to 1, the only change a funded user notices is
+    an occasional advisory. An unfunded user gets a clear, actionable 170/171
+    that explains the fix — not a stack trace, not "upload failed."
+  * No user-facing surface ever mentions the vendor allowlist, the hidden
+    docs, or the phrase "welfare" as a label for the user's own account.
+    (Internally it's "welfare"; to the user it's a free allowance. Nobody
+    wants to be told they're on welfare by their email client.)
+
+--------------------------------------------------------------------------------
+6. THINGS NOT TO DO
+--------------------------------------------------------------------------------
+
+  * Don't flip QMAIL_SUBSCRIPTION_ENFORCE, and don't ask for it to be flipped
+    until Goal B ships. It's a fleet-wide switch across 25 servers.
+  * Don't add the two doc pages to any nav/sidebar.
+  * Don't quantify the free floor or welfare cap in per-message terms
+    (section 3 explains why — the server can't see the message).
+  * Don't treat partial fan-out as failure, or full fan-out as guaranteed.
+  * Don't build a vendor-management UI. The allowlist is compiled in.
+  * Don't hand-roll the address<->serial math if a helper already exists.
+
+--------------------------------------------------------------------------------
+7. REFERENCE — where things live server-side (for grepping, not editing)
+--------------------------------------------------------------------------------
+
+  raidax (/root/raidax, master):
+    cmd_qmail.c ................ cmd_qmail_subscribe (the 85 handler)
+    qmail_subscribe.h .......... the hard-coded vendor allowlist
+    qmail_structs.h ............ QMAIL_SUBSCRIPTION_ENFORCE, credit_state
+                                 constants, floor/welfare limits, entry struct
+    qmail_object_transfer.c .... ensure_payment_locked (the funding gate)
+    drd.c / drd.h .............. qmail_subscriptions + qmail_welfare tables
+    protocol.h ................. 170 / 171 / 172
+    QMail_Data/subscription_purchases.csv ... durable vendor audit log
+
+  core (/root/core, branch phase2):
+    src/qmail/qmail_subscribe.c ............... the 25-way fan-out
+    api_src/api_handlers_qmail_payments.c ..... /api/qmail/subscribe handler
+
+I'm reachable through the project owner — if the wire format or the REST shape
+doesn't match what you observe, say so rather than working around it. A
+mismatch means one of us is wrong and it's cheaper to find out now.

@@ -8,6 +8,7 @@ import {
   qmailAddressToDrdCoin,
 } from "../../../api/qmailApiServices";
 import { formatQmailAddress } from "../../address/qmailAddress";
+import { findProtectedAddress } from "../../protectedAddresses";
 import { denSnKey, readJsonArray, writeJsonArray } from "./profileHelpers";
 
 const disabledStorageKey = (listType) =>
@@ -120,6 +121,17 @@ const DrdListEditor = ({ listType }) => {
       return;
     }
 
+    if (listType === "black") {
+      const protectedEntry = findProtectedAddress(
+        parsed.denomination,
+        parsed.serialNumber,
+      );
+      if (protectedEntry) {
+        setInputError(protectedEntry.blacklistRefusal);
+        return;
+      }
+    }
+
     setInputError("");
     setAdding(true);
     try {
@@ -187,6 +199,17 @@ const DrdListEditor = ({ listType }) => {
     setError("");
     try {
       if (nextEnabled) {
+        if (listType === "black") {
+          const protectedEntry = findProtectedAddress(
+            row.denomination,
+            row.serialNumber,
+          );
+          if (protectedEntry) {
+            setError(protectedEntry.blacklistRefusal);
+            return;
+          }
+        }
+
         const result = await setDrdListEntries([
           {
             denomination: row.denomination,

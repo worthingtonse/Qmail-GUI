@@ -20,6 +20,7 @@ import {
   getDrafts,
   getEmailAttachments,
   getSentAttachmentMetadata,
+  getSentRecipients,
   revealSentAttachment,
   getQMailWalletBalance,
   getQMailCanSend,
@@ -78,6 +79,7 @@ import {
 } from "../activeTransferRegistry";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { buildWindowTitle } from "./windowTitle";
+import { ensureProtectedWhitelist } from "../ensureProtectedWhitelist";
 
 import "./QMailDashboard.css";
 
@@ -906,6 +908,8 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
 
   useEffect(() => {
     loadInitialData();
+    // Fire-and-forget: restore fee-waived support addresses (DRD white + contacts).
+    void ensureProtectedWhitelist();
 
     return () => {
       if (searchDebounceTimerRef.current) {
@@ -1775,9 +1779,14 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     if (canLoadStoredEmail) {
       // FIX: Removed setLoading(true) so the list doesn't disappear and jump!
       try {
-        const [attRes, bodyRes] = await Promise.allSettled([
+        // Sent mail: also hydrate full to/cc/bcc from the local send receipt
+        // so Reply All has recipient data (/db/messages/get returns none).
+        const [attRes, bodyRes, recipientsRes] = await Promise.allSettled([
           getEmailAttachments(email.id),
           getEmailById(email.id),
+          emailFolder === "sent"
+            ? getSentRecipients(email.id)
+            : Promise.resolve({ success: false }),
         ]);
 
         if (attRes.status === "fulfilled" && attRes.value.success) {
@@ -1867,6 +1876,43 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
                 : e,
             ),
           );
+        }
+
+        // Merge receipt to/cc/bcc only when the body fetch did not already
+        // supply those lists. Skip if the user selected a different row.
+        if (
+          emailFolder === "sent" &&
+          recipientsRes.status === "fulfilled" &&
+          recipientsRes.value?.success &&
+          recipientsRes.value.data
+        ) {
+          const receiptLists = recipientsRes.value.data;
+          const bodyData =
+            bodyRes.status === "fulfilled" && bodyRes.value?.success
+              ? bodyRes.value.data || {}
+              : {};
+          const bodyHasTo =
+            hasRecipientValue(bodyData.to) ||
+            hasRecipientValue(bodyData.To) ||
+            hasRecipientValue(bodyData.to_addresses);
+          const bodyHasCc =
+            hasRecipientValue(bodyData.cc) ||
+            hasRecipientValue(bodyData.CC) ||
+            hasRecipientValue(bodyData.cc_addresses);
+          const bodyHasBcc =
+            hasRecipientValue(bodyData.bcc) ||
+            hasRecipientValue(bodyData.BCC) ||
+            hasRecipientValue(bodyData.bcc_addresses);
+
+          setSelectedEmail((prev) => {
+            if (prev?.id !== email.id) return prev;
+            return {
+              ...prev,
+              ...(!bodyHasTo ? { to: receiptLists.to || [] } : {}),
+              ...(!bodyHasCc ? { cc: receiptLists.cc || [] } : {}),
+              ...(!bodyHasBcc ? { bcc: receiptLists.bcc || [] } : {}),
+            };
+          });
         }
       } catch (e) {
         console.error("Failed to load full email payload", e);
@@ -2995,6 +3041,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
   const handleQmailMenuCommand = async (command) => {
     try {
       switch (command) {
+        case "compose-new":
+          await handleOpenCompose();
+          break;
         case "empty-trash":
           await handleEmptyFolderCommand("trash");
           break;
@@ -3917,6 +3966,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         folders={folders}
         raidaEchoSnapshot={raidaEchoSnapshot}
         qmailAddress={qmailAddress}
+        onWalletAction={handleOpenWalletAction}
       />
 
       {(activeView === "inbox" ||

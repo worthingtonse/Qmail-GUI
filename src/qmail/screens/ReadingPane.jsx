@@ -1,4 +1,5 @@
 /* eslint-disable react/prop-types */
+import { useEffect, useRef, useState } from "react";
 import {
   Mail,
   Reply,
@@ -18,6 +19,8 @@ import {
   X,
   ChevronUp,
   ChevronDown,
+  Copy,
+  Check,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
@@ -74,11 +77,43 @@ const ReadingPane = ({
   hasPreviousEmail = false,
   hasNextEmail = false,
 }) => {
+  const [recipientsCopied, setRecipientsCopied] = useState(false);
+  const copyRecipientsResetRef = useRef(null);
+  // The clipboard write resolves asynchronously and can land after this
+  // pane unmounts; the guard keeps the late resolve from touching state.
+  const isMountedRef = useRef(true);
+
+  // Hooks must run before any early return. Drafts / no-email skip the lookup.
+  // Setup re-asserts true because StrictMode replays setup/cleanup/setup in
+  // dev — cleanup alone would leave the ref false on a mounted component.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (copyRecipientsResetRef.current) {
+        clearTimeout(copyRecipientsResetRef.current);
+      }
+    };
+  }, []);
+
   const emailId = email?.id || email?.guid;
+  // Tracks the currently displayed message so a clipboard write that
+  // resolves after the user switched messages can't mark the new one copied.
+  const currentEmailIdRef = useRef(emailId);
+  currentEmailIdRef.current = emailId;
+
+  // Reset the copied indicator when the displayed message changes so the
+  // Check icon from the previous message can't carry over to another one.
+  useEffect(() => {
+    if (copyRecipientsResetRef.current) {
+      clearTimeout(copyRecipientsResetRef.current);
+      copyRecipientsResetRef.current = null;
+    }
+    setRecipientsCopied(false);
+  }, [emailId]);
   const headerSenderSn = email?.senderSn ?? email?.sender_sn ?? null;
   const headerSenderDenominationCode =
     email?.senderDenominationCode ?? email?.sender_denomination_code ?? null;
-  // Hooks must run before any early return. Drafts / no-email skip the lookup.
   const headerDrdSymbols = useDrdSymbols(
     email && !email.isDraft ? headerSenderDenominationCode : null,
     email && !email.isDraft ? headerSenderSn : null,
@@ -143,13 +178,6 @@ const ReadingPane = ({
   };
 
   const getEmailField = (field) => email[field];
-  const hasReplyAllRecipientData =
-    hasRecipientValue(getEmailField("to")) ||
-    hasRecipientValue(getEmailField("To")) ||
-    hasRecipientValue(getEmailField("to_addresses")) ||
-    hasRecipientValue(getEmailField("cc")) ||
-    hasRecipientValue(getEmailField("CC")) ||
-    hasRecipientValue(getEmailField("cc_addresses"));
 
   const currentFolder = email.folder || "inbox";
   const isUndownloaded =
@@ -159,6 +187,104 @@ const ReadingPane = ({
       email.isDownloaded === false ||
       email.isDownloaded === "false" ||
       email.isDownloaded === 0);
+
+  // Normalize to/cc/bcc (array or comma/semicolon string) and build a single
+  // de-duplicated copy string for "copy all recipients".
+  const normalizeRecipientField = (value) => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) =>
+          typeof item === "string" ? item.trim() : String(item ?? "").trim(),
+        )
+        .filter(Boolean);
+    }
+    if (typeof value === "string") {
+      return value
+        .split(/[,;]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  // First non-empty field among aliases (API may use to / To / to_addresses).
+  const firstRecipientList = (...values) => {
+    for (const value of values) {
+      const list = normalizeRecipientField(value);
+      if (list.length > 0) return list;
+    }
+    return [];
+  };
+
+  const toAddresses = firstRecipientList(
+    email.to,
+    email.To,
+    email.to_addresses,
+  );
+  const ccAddresses = firstRecipientList(
+    email.cc,
+    email.CC,
+    email.cc_addresses,
+  );
+  const bccAddresses = firstRecipientList(
+    email.bcc,
+    email.BCC,
+    email.bcc_addresses,
+  );
+
+  const hasReplyAllRecipientData =
+    hasRecipientValue(getEmailField("to")) ||
+    hasRecipientValue(getEmailField("To")) ||
+    hasRecipientValue(getEmailField("to_addresses")) ||
+    hasRecipientValue(getEmailField("cc")) ||
+    hasRecipientValue(getEmailField("CC")) ||
+    hasRecipientValue(getEmailField("cc_addresses")) ||
+    toAddresses.length > 0 ||
+    ccAddresses.length > 0;
+
+  const buildAllRecipientsList = () => {
+    const combined = [...toAddresses, ...ccAddresses, ...bccAddresses];
+    const seen = new Set();
+    const unique = [];
+    for (const address of combined) {
+      const key = address.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(address);
+    }
+    return unique.join(", ");
+  };
+
+  const allRecipientsList = buildAllRecipientsList();
+  const multiRecipient =
+    toAddresses.length + ccAddresses.length + bccAddresses.length > 1;
+  // Sent always offers copy when we have addresses; elsewhere when multi-recipient.
+  const showCopyRecipients =
+    allRecipientsList.length > 0 &&
+    (currentFolder === "sent" || multiRecipient);
+
+  const handleCopyRecipients = (event) => {
+    event.stopPropagation();
+    if (!allRecipientsList) return;
+
+    const copiedForId = currentEmailIdRef.current;
+    const markCopied = () => {
+      if (!isMountedRef.current || currentEmailIdRef.current !== copiedForId) {
+        return;
+      }
+      setRecipientsCopied(true);
+      if (copyRecipientsResetRef.current) {
+        clearTimeout(copyRecipientsResetRef.current);
+      }
+      copyRecipientsResetRef.current = setTimeout(() => {
+        if (isMountedRef.current) setRecipientsCopied(false);
+      }, 1500);
+    };
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(allRecipientsList).then(markCopied, () => {});
+    }
+  };
 
   const formatFileSize = (bytes) => {
     if (!bytes) return "Unknown size";
@@ -349,6 +475,9 @@ const ReadingPane = ({
             <div className="reading-pane__sender">
               <div className="reading-pane__sender-details">
                 {(() => {
+                  // For Sent, header identity is the primary recipient; full
+                  // To/Cc/Bcc lists are shown below so multi-recipient mail is
+                  // not reduced to "first@addr +N".
                   const address =
                     email.senderDisplayAddress ||
                     email.from ||
@@ -356,15 +485,78 @@ const ReadingPane = ({
                     email.sender ||
                     "";
                   const name = email.senderDisplayName || "";
+                  // Prefer full recipient list on the subtitle when present.
+                  const subtitleAddresses =
+                    currentFolder === "sent" && allRecipientsList
+                      ? allRecipientsList
+                      : address;
                   return (
                     <>
-                      <span className="reading-pane__sender-name">
-                        {name || address}
-                      </span>
-                      {name && address && address !== name && (
-                        <span className="reading-pane__sender-address">
-                          {address}
+                      <div className="reading-pane__sender-name-row">
+                        <span className="reading-pane__sender-name">
+                          {name || address}
                         </span>
+                        {showCopyRecipients && (
+                          <button
+                            type="button"
+                            className="reading-pane__copy-recipients"
+                            onClick={handleCopyRecipients}
+                            title="Copy all recipient addresses"
+                            aria-label="Copy all recipient addresses"
+                          >
+                            {recipientsCopied ? (
+                              <Check size={14} />
+                            ) : (
+                              <Copy size={14} />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      {subtitleAddresses &&
+                        subtitleAddresses !== name && (
+                        <span
+                          className="reading-pane__sender-address"
+                          title={subtitleAddresses}
+                        >
+                          {subtitleAddresses}
+                        </span>
+                      )}
+                      {(toAddresses.length > 0 ||
+                        ccAddresses.length > 0 ||
+                        bccAddresses.length > 0) && (
+                        <div className="reading-pane__recipient-lists">
+                          {toAddresses.length > 0 && (
+                            <div className="reading-pane__recipient-line">
+                              <span className="reading-pane__recipient-label">
+                                To
+                              </span>
+                              <span className="reading-pane__recipient-values">
+                                {toAddresses.join(", ")}
+                              </span>
+                            </div>
+                          )}
+                          {ccAddresses.length > 0 && (
+                            <div className="reading-pane__recipient-line">
+                              <span className="reading-pane__recipient-label">
+                                Cc
+                              </span>
+                              <span className="reading-pane__recipient-values">
+                                {ccAddresses.join(", ")}
+                              </span>
+                            </div>
+                          )}
+                          {bccAddresses.length > 0 &&
+                            currentFolder === "sent" && (
+                            <div className="reading-pane__recipient-line">
+                              <span className="reading-pane__recipient-label">
+                                Bcc
+                              </span>
+                              <span className="reading-pane__recipient-values">
+                                {bccAddresses.join(", ")}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </>
                   );

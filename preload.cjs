@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // the raw send receipt never enters the renderer (docs/attachment.views.txt).
   getSentAttachmentMetadata: (apiPort, emailId) =>
     ipcRenderer.invoke('qmail:sent-attachment-metadata', apiPort, emailId),
+  // Sent-box full to/cc/bcc from the same receipt (sanitized in main).
+  getSentRecipients: (apiPort, emailId) =>
+    ipcRenderer.invoke('qmail:sent-recipients', apiPort, emailId),
   revealSentAttachment: (apiPort, emailId, attachmentId) =>
     ipcRenderer.invoke(
       'qmail:reveal-sent-attachment',

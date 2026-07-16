@@ -194,6 +194,51 @@
   color: var(--text-secondary);
 }
 
+.navigation-pane__link--wallet-trigger {
+  cursor: pointer;
+  width: 100%;
+}
+
+.navigation-pane__wallet {
+  position: relative;
+}
+
+/* Fixed-position so the pane's overflow-y scroll clipping cannot cut the
+   menu off; viewport coordinates come from the trigger via inline style. */
+.navigation-pane__wallet-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem;
+  padding: var(--space-xs);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background-color: var(--secondary-bg);
+  box-shadow: var(--shadow-lg);
+}
+
+.navigation-pane__wallet-menu-item {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color calc(250ms * var(--motion-scale)) ease,
+    color calc(250ms * var(--motion-scale)) ease;
+}
+
+.navigation-pane__wallet-menu-item:hover {
+  background-color: var(--card-hover);
+  color: var(--text-primary);
+}
+
 .navigation-pane__link--active {
   background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent-primary) 100%);
   color: var(--text-primary);
@@ -248,14 +293,6 @@
   color: var(--text-primary);
 }
 
-.navigation-pane__wallet-purchase-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin: 0 0 var(--space-sm);
-}
-
 /* The identity ("mailbox key") coin is staked, not spendable — surface it
    under the wallet balance so users don't read the missing value as lost funds. */
 .navigation-pane__staked-row {
@@ -274,78 +311,6 @@
   white-space: nowrap;
 }
 
-.navigation-pane__wallet-info-button,
-.navigation-pane__wallet-info-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-sm);
-  background: var(--card-bg);
-  color: var(--accent-secondary);
-  cursor: pointer;
-  transition:
-    background-color calc(250ms * var(--motion-scale)) ease,
-    border-color calc(250ms * var(--motion-scale)) ease,
-    color calc(250ms * var(--motion-scale)) ease;
-}
-
-.navigation-pane__wallet-info-button {
-  min-width: 2rem;
-  min-height: 2rem;
-  padding: 0;
-}
-
-.navigation-pane__wallet-info-button:hover,
-.navigation-pane__wallet-info-close:hover {
-  border-color: var(--border-strong);
-  background: var(--card-hover);
-  color: var(--text-primary);
-}
-
-.navigation-pane__wallet-info-popover {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  margin: 0 0 var(--space-sm);
-  padding: var(--space-md);
-  padding-right: calc(var(--space-md) + 2rem);
-  border: 1px solid color-mix(in srgb, var(--status-info) 45%, transparent);
-  border-radius: var(--radius-md);
-  background: var(--glass-bg-strong);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  box-shadow: var(--shadow-md);
-}
-
-.navigation-pane__wallet-info-popover p {
-  margin: 0;
-  /* Long unbroken tokens (URLs, addresses) must wrap, not overflow the pane. */
-  overflow-wrap: break-word;
-}
-
-.navigation-pane__wallet-info-link {
-  color: var(--accent-secondary);
-  text-decoration: underline;
-}
-
-.navigation-pane__wallet-info-link:hover {
-  color: var(--accent-primary);
-}
-
-.navigation-pane__wallet-info-close {
-  position: absolute;
-  top: var(--space-xs);
-  right: var(--space-xs);
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-tertiary);
-}
 /* was: .email-count, .email-count-info */
 .navigation-pane__count {
   min-width: calc(var(--space-md) + var(--space-xs));
@@ -519,11 +484,8 @@
     white-space: nowrap;
   }
 
-  .navigation-pane__wallet-purchase-row {
-    display: flex;
+  .navigation-pane__wallet {
     flex: none;
-    gap: var(--space-xs);
-    margin: 0;
   }
 
   .navigation-pane__staked-row {
@@ -536,18 +498,6 @@
     margin-left: var(--space-xs);
   }
 
-  .navigation-pane__wallet-info-button {
-    width: 2.5rem;
-    min-width: 2.5rem;
-  }
-
-  .navigation-pane__wallet-info-popover {
-    position: absolute;
-    top: calc(100% + var(--space-sm));
-    left: var(--space-lg);
-    z-index: 20;
-    width: min(24rem, calc(100vw - (2 * var(--space-lg))));
-  }
   .navigation-pane__footer {
     display: flex;
     align-items: flex-start;
@@ -601,10 +551,6 @@
     min-width: 5rem;
   }
 
-  .navigation-pane__wallet-info-button {
-    min-width: 2.5rem;
-    width: 2.5rem;
-  }
   .navigation-pane__link-label,
   .navigation-pane__refresh-button span {
     display: none;

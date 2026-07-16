@@ -8,7 +8,7 @@ import {
 } from "./windowTitle";
 
 const TITLE_PREFIX =
-  "QMail Alpha      Limited Functionality. Attachment Max Size and Count: 250KB and 2     ";
+  "QMail Beta . . . . . . . Version: ";
 
 describe("buildWindowTitle", () => {
   it("uses the stable version/address format with 10 spaced periods", () => {
@@ -40,7 +40,7 @@ describe("buildWindowTitle", () => {
     });
 
     expect(title).toBe(
-      `${TITLE_PREFIX}June 26, 2026 (build 7)     Folder: D:\\Apps\\QMail ${".  ".repeat(9)}. Your Qmail Address: 15:33@mega`,
+      `${TITLE_PREFIX}June 26, 2026 (build 7) . . . . . . . Folder: D:\\Apps\\QMail ${".  ".repeat(9)}. Your Qmail Address: 15:33@mega`,
     );
   });
 

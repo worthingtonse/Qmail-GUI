@@ -26,7 +26,7 @@ export const buildWindowTitle = ({
   buildNumber = BUILD_NUMBER,
   appDir = "",
 } = {}) => {
-  let prefix = `QMail Alpha . . . . . . . Version: ${formatVersionForDisplay(buildDate, buildNumber)}`;
+  let prefix = `QMail Beta . . . . . . . Version: ${formatVersionForDisplay(buildDate, buildNumber)}`;
 
   const folder = String(appDir || "").trim();
   if (folder) prefix += ` . . . . . . . Folder: ${folder}`;

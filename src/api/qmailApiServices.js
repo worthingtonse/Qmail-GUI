@@ -1576,6 +1576,85 @@ export const getSentAttachmentMetadata = async (emailId) => {
   }
 };
 
+/**
+ * Resolve a receipt.tell.recipients row to a QMail address.
+ * Prefer the stored address string; if empty (older receipts left address
+ * blank), rebuild from serial_number + denomination so Sent copy / Reply
+ * All still work for multi-recipient mail.
+ * Keep in sync with getSentRecipients in electron.cjs.
+ */
+export const receiptRecipientAddress = (row) => {
+  if (typeof row?.address === "string" && row.address.trim()) {
+    return row.address.trim();
+  }
+  const sn = Number(row?.serial_number ?? row?.serialNumber);
+  const denom = Number(row?.denomination ?? row?.denomination_code);
+  if (!Number.isInteger(sn) || sn <= 0) return "";
+  if (!Number.isInteger(denom) || denom < 0 || denom > 5) return "";
+  return formatQmailAddress(sn, denom) || "";
+};
+
+/**
+ * Map receipt.tell.recipients rows into { to, cc, bcc } string arrays.
+ * Unknown kinds land in To. Empty addresses are reconstructed from SN+denom
+ * when possible, then dropped only if still empty.
+ * Keep in sync with getSentRecipients in electron.cjs.
+ */
+export const mapReceiptRecipients = (recipients) => {
+  const to = [];
+  const cc = [];
+  const bcc = [];
+  for (const row of Array.isArray(recipients) ? recipients : []) {
+    const address = receiptRecipientAddress(row);
+    if (!address) continue;
+    const kind = String(row?.kind || "to").toLowerCase();
+    if (kind === "cc") {
+      cc.push(address);
+    } else if (kind === "bcc") {
+      bcc.push(address);
+    } else {
+      to.push(address);
+    }
+  }
+  return { to, cc, bcc };
+};
+
+/**
+ * Sent-mail full recipient lists from the local send receipt
+ * (receipt.tell.recipients). Used so Reply All can hydrate to/cc/bcc when
+ * /db/messages/get returns none. Same Electron-main sanitization boundary as
+ * getSentAttachmentMetadata; browser/Vite falls back to a direct fetch.
+ *
+ * HTTP 404 (no receipt) is a definitive empty result; transport errors return
+ * success:false.
+ */
+export const getSentRecipients = async (emailId) => {
+  try {
+    if (!emailId) throw new Error("Email ID is required");
+
+    if (window.electronAPI?.getSentRecipients) {
+      return await window.electronAPI.getSentRecipients(
+        Number(API_PORT),
+        String(emailId),
+      );
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/qmail/receipts?guid=${encodeURIComponent(emailId)}`,
+    );
+    if (response.status === 404) {
+      return { success: true, data: { to: [], cc: [], bcc: [] } };
+    }
+    const data = await handleResponse(response);
+    const receipt = data?.receipt || data;
+    const lists = mapReceiptRecipients(receipt?.tell?.recipients);
+    return { success: true, data: lists };
+  } catch (error) {
+    console.warn("Sent recipients receipt lookup failed:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
 export const revealSentAttachment = async (
   emailId,
   attachmentId = "receipt-0",

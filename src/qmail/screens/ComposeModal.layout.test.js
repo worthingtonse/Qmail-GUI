@@ -33,4 +33,19 @@ describe("ComposeModal layout", () => {
     expect(footerIndex).toBeGreaterThan(bodyIndex);
     expect(attachmentButtonIndex).toBeGreaterThan(footerIndex);
   });
+
+  it("renders To, then Subject, then Advanced toggle, then Message", () => {
+    const markup = renderCompose();
+    const toIndex = markup.indexOf('id="to"');
+    const subjectIndex = markup.indexOf('id="subject"');
+    const advancedIndex = markup.indexOf(
+      'class="compose-modal__advanced-toggle"',
+    );
+    const bodyIndex = markup.indexOf('id="body"');
+
+    expect(toIndex).toBeGreaterThanOrEqual(0);
+    expect(subjectIndex).toBeGreaterThan(toIndex);
+    expect(advancedIndex).toBeGreaterThan(subjectIndex);
+    expect(bodyIndex).toBeGreaterThan(advancedIndex);
+  });
 });

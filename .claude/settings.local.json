@@ -123,7 +123,21 @@
       "Bash(php -l \"D:\\\\Code\\\\src\\\\PHP\\\\cloudcoin.org-main\\\\bugs-submit.php\")",
       "Bash(cp \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Code-src-JavaScript-Qmail-GUI\\\\72fbc25c-916f-4845-b9a9-6a893bf95d40\\\\scratchpad\\\\icon.png\" \"D:\\\\Code\\\\src\\\\JavaScript\\\\Qmail-GUI\\\\public\\\\icon.png\")",
       "Bash(cp \"C:\\\\Users\\\\User\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Code-src-JavaScript-Qmail-GUI\\\\72fbc25c-916f-4845-b9a9-6a893bf95d40\\\\scratchpad\\\\icon.ico\" \"D:\\\\Code\\\\src\\\\JavaScript\\\\Qmail-GUI\\\\public\\\\icon.ico\")",
-      "PowerShell(npx eslint src/qmail/screens/QMailDashboard.jsx 2>&1 | Select-Object -Last 10)"
+      "PowerShell(npx eslint src/qmail/screens/QMailDashboard.jsx 2>&1 | Select-Object -Last 10)",
+      "Read(//d/Code/p2/core/docs/**)",
+      "Read(//d/Code/p2/**)",
+      "Bash(where grok *)",
+      "Bash(where codex *)",
+      "Bash(where grok.cmd codex.cmd)",
+      "Read(//c/Users/User/.claude/agents/**)",
+      "Bash(grok --help)",
+      "Bash(codex --help)",
+      "Bash(codex review *)",
+      "Bash(codex exec *)",
+      "Bash(grok agent *)",
+      "Bash(npm i *)",
+      "Bash(timeout 30 bash -c 'until curl -s -o /dev/null http://localhost:5173; do sleep 1; done')",
+      "Bash(npm test *)"
     ]
   }
 }

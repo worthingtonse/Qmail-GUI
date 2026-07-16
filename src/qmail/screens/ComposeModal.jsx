@@ -139,7 +139,7 @@ const parseEmailList = (emailValue) => {
   }
 
   return emailString
-    .split(",")
+    .split(/[,;]/)
     .map((email) => email.trim())
     .filter((email) => email.length > 0);
 };
@@ -483,6 +483,38 @@ const ComposeModal = ({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!contactSuggestionField || typeof document === "undefined") {
+      return undefined;
+    }
+
+    const closeContactSuggestions = () => {
+      setContactSuggestionField(null);
+      setContactQuery("");
+    };
+
+    const handleDocumentMouseDown = (event) => {
+      if (event.target?.closest?.(".compose-modal__recipient-input")) {
+        return;
+      }
+      closeContactSuggestions();
+    };
+
+    const handleDocumentKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeContactSuggestions();
+      }
+    };
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [contactSuggestionField]);
+
+  useEffect(() => {
     if (!advancedPersistenceMountedRef.current) {
       advancedPersistenceMountedRef.current = true;
       return;
@@ -630,9 +662,9 @@ const ComposeModal = ({
       // any touched fields; untouched recipient fields don't matter on
       // create because there's nothing to preserve.
       const draftData = { subject, body };
-      if (touchedFields.to) draftData.to = to;
-      if (touchedFields.cc) draftData.cc = cc;
-      if (touchedFields.bcc) draftData.bcc = bcc;
+      if (touchedFields.to) draftData.to = parseEmailList(to).join(", ");
+      if (touchedFields.cc) draftData.cc = parseEmailList(cc).join(", ");
+      if (touchedFields.bcc) draftData.bcc = parseEmailList(bcc).join(", ");
       if (touchedFields.subsubject) draftData.subsubject = subsubject;
 
       let result;
@@ -698,16 +730,10 @@ const ComposeModal = ({
   // to leave headroom for future backend changes and for the comma
   // separators themselves. Overflow is silently dropped by the
   // backend today (no error returned), so the guard has to be
-  // GUI-side. MVP: the file count is capped at 2 (far below the
-  // backend's 245) until larger transfers are supported.
-  const MAX_ATTACHMENT_COUNT = 2;
+  // GUI-side. The GUI file count cap now matches the backend's
+  // UPLOAD_MAX_ATTACHMENTS cap.
+  const MAX_ATTACHMENT_COUNT = 245;
   const MAX_ATTACHMENT_PATH_BYTES = 12000;
-
-  // MVP: individual attachments are capped at 250 KB. The native file
-  // picker can't hide larger files, so oversized picks are rejected
-  // here with an explanation, and re-checked at send time in case the
-  // file grew on disk between staging and send.
-  const MAX_ATTACHMENT_FILE_BYTES = 250 * 1024;
 
   // gpt-batch5 #1: the backend serializes the attachment list to a
   // comma/semicolon-joined string and then strtok_r-splits it on
@@ -756,13 +782,6 @@ const ComposeModal = ({
               name,
               reason:
                 "filename contains a comma or semicolon (not yet supported)",
-            });
-            continue;
-          }
-          if (!(Number(entry.size) <= MAX_ATTACHMENT_FILE_BYTES)) {
-            rejected.push({
-              name,
-              reason: `file is ${formatAttachmentSize(Number(entry.size)) || "too large"} — attachments are limited to 250 KB each for now`,
             });
             continue;
           }
@@ -860,13 +879,14 @@ const ComposeModal = ({
     findUnknownRecipients(toList, contacts, getContactAddress);
 
   const getRecipientSearchToken = (value) => {
-    const tokens = String(value || "").split(",");
+    const tokens = String(value || "").split(/[,;]/);
     return tokens[tokens.length - 1].trim();
   };
 
   const normalizePastedRecipientText = (value) =>
     String(value || "")
       .replace(/[\r\n\t]+/g, ", ")
+      .replace(/\s*;\s*/g, ", ")
       .replace(/\s*,\s*/g, ", ")
       .trim();
 
@@ -892,10 +912,10 @@ const ComposeModal = ({
 
   const mergeContactAddress = (value, address, replaceLastToken) => {
     const currentValue = String(value || "");
-    const tokens = currentValue.split(",");
-    const isAppendingAfterComma = /,\s*$/.test(currentValue);
+    const tokens = currentValue.split(/[,;]/);
+    const isAppendingAfterDelimiter = /[,;]\s*$/.test(currentValue);
 
-    if (currentValue.trim() && (!replaceLastToken || isAppendingAfterComma)) {
+    if (currentValue.trim() && (!replaceLastToken || isAppendingAfterDelimiter)) {
       tokens.push(address);
     } else if (tokens.length > 1 || tokens[0].trim()) {
       tokens[tokens.length - 1] = address;
@@ -1165,16 +1185,6 @@ const ComposeModal = ({
         );
         setAttachError(
           "An attachment was removed or changed after selection. Review the attachment list and send again.",
-        );
-        return;
-      }
-      // Sizes verified unchanged above, so the staged sizes are current.
-      const oversized = attachments.find(
-        (attachment) => !(Number(attachment.size) <= MAX_ATTACHMENT_FILE_BYTES),
-      );
-      if (oversized) {
-        setAttachError(
-          `"${oversized.name}" is larger than the 250 KB attachment limit. Remove it to send this qmail.`,
         );
         return;
       }
@@ -2011,7 +2021,23 @@ const ComposeModal = ({
             field: "to",
             label: "To:",
             value: to,
+            placeholder: "address1, address2, … (e.g. 51.254@bit)",
           })}
+
+          <div className="compose-modal__field">
+            <label htmlFor="subject">Subject: </label>
+            <input
+              type="text"
+              id="subject"
+              value={subject}
+              onChange={(e) => {
+                setSubject(e.target.value);
+                scheduleAutosave();
+              }}
+              disabled={isSending}
+              placeholder="Qmail subject"
+            />
+          </div>
 
           {/* Advanced options toggle */}
           <div className="compose-modal__advanced-toggle">
@@ -2032,11 +2058,13 @@ const ComposeModal = ({
                 field: "cc",
                 label: "CC:",
                 value: cc,
+                placeholder: "address1, address2, …",
               })}
               {renderRecipientField({
                 field: "bcc",
                 label: "BCC:",
                 value: bcc,
+                placeholder: "address1, address2, …",
               })}
               <div className="compose-modal__field">
                 <label htmlFor="subsubject">Sub-Subject:</label>
@@ -2070,20 +2098,6 @@ const ComposeModal = ({
             </>
           )}
 
-          <div className="compose-modal__field">
-            <label htmlFor="subject">Subject: </label>
-            <input
-              type="text"
-              id="subject"
-              value={subject}
-              onChange={(e) => {
-                setSubject(e.target.value);
-                scheduleAutosave();
-              }}
-              disabled={isSending}
-              placeholder="Qmail subject"
-            />
-          </div>
           <div className="compose-modal__field compose-modal__field--message">
             <label htmlFor="body">Message: </label>
             <textarea
@@ -2151,7 +2165,7 @@ const ComposeModal = ({
             disabled={isSending || !attachmentsSupported}
             title={
               attachmentsSupported
-                ? "Attach files to this message (max 2 files, 250 KB each)"
+                ? "Attach files to this message"
                 : "File attachments require the desktop build"
             }
           >

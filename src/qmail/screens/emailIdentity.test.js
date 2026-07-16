@@ -142,7 +142,7 @@ describe("getEmailDisplayIdentityFields — outgoing recipient display", () => {
     expect(fields.senderDisplayAddress).toBe("197@bit");
   });
 
-  it("appends a +N hint to BOTH the name and the address for multiple recipients", () => {
+  it("appends a +N hint to the display name but not the copyable address for multiple recipients", () => {
     const fields = getEmailDisplayIdentityFields(
       {
         recipient_name: "Alice Johnson",
@@ -152,14 +152,14 @@ describe("getEmailDisplayIdentityFields — outgoing recipient display", () => {
       },
       "sent",
     );
-    // Name label and address stay consistent so "copy" reflects the fan-out.
+    // Visible labels keep +N; hover/copy address is the bare primary only.
     expect(fields.senderDisplayName).toBe("Alice Johnson +2");
-    expect(fields.senderDisplayAddress).toBe("16.0.0@kilo +2");
+    expect(fields.senderDisplayAddress).toBe("16.0.0@kilo");
     // The legacy `sender` label (used by the avatar) also carries the hint.
     expect(fields.sender).toBe("Alice Johnson +2");
   });
 
-  it("appends the +N hint to the address even when there is no recipient name", () => {
+  it("keeps +N on the visible label but not the address when there is no recipient name", () => {
     const fields = getEmailDisplayIdentityFields(
       {
         recipient_name: "",
@@ -169,9 +169,11 @@ describe("getEmailDisplayIdentityFields — outgoing recipient display", () => {
       },
       "sent",
     );
-    expect(fields.senderDisplayName).toBe("");
-    expect(fields.senderDisplayAddress).toBe("197@bit +3");
-    // The visible label falls back to the address-with-hint.
+    // Consumers render senderDisplayName || senderDisplayAddress, so the
+    // visible label must carry the +N hint even without a contact name,
+    // while the copyable address stays clean.
+    expect(fields.senderDisplayName).toBe("197@bit +3");
+    expect(fields.senderDisplayAddress).toBe("197@bit");
     expect(fields.sender).toBe("197@bit +3");
   });
 
@@ -187,5 +189,20 @@ describe("getEmailDisplayIdentityFields — outgoing recipient display", () => {
     );
     expect(fields.senderDisplayName).toBe("Alice Johnson");
     expect(fields.senderDisplayAddress).toBe("16.0.0@kilo");
+  });
+
+  it("copyable address never includes a +N suffix even for multi-recipient sent mail", () => {
+    const fields = getEmailDisplayIdentityFields(
+      {
+        recipient_name: "Bob",
+        recipient_address: "20.100@giga",
+        recipient_sn: 20,
+        recipient_count: 5,
+      },
+      "sent",
+    );
+    expect(fields.senderDisplayName).toBe("Bob +4");
+    expect(fields.senderDisplayAddress).toBe("20.100@giga");
+    expect(fields.senderDisplayAddress).not.toMatch(/\+\d/);
   });
 });

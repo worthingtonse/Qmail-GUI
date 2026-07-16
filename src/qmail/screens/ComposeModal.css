@@ -2,10 +2,12 @@
 
 /* ==================== COMPOSE MODAL ==================== */
 
-/* The dashboard applies position:relative to every direct child. Include the
-   parent here so this fixed compose workspace wins that cascade reliably. */
+/* The dashboard applies position:relative to every direct child, and compose
+   is usually mounted under .qmail-dashboard__panes. Include both possible
+   parents so this fixed workspace wins that cascade reliably. */
 .compose-modal__overlay,
-.qmail-dashboard > .compose-modal__overlay {
+.qmail-dashboard > .compose-modal__overlay,
+.qmail-dashboard__panes > .compose-modal__overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
