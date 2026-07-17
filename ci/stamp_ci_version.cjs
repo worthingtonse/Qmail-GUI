@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
 const versionFile = path.join(root, 'version.json');
@@ -13,16 +12,12 @@ if (!Number.isInteger(iid) || iid <= 0) {
   process.exit(2);
 }
 
-const stamp = spawnSync(process.execPath, [path.join(root, 'scripts', 'stamp-version.cjs')], {
-  cwd: root,
-  stdio: 'inherit',
-});
-if (stamp.status !== 0) {
-  process.exit(stamp.status || 1);
-}
-
-const version = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
-version.buildNumber = iid;
+const now = new Date();
+const pad = (n) => String(n).padStart(2, '0');
+const version = {
+  buildDate: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`,
+  buildNumber: iid,
+};
 fs.writeFileSync(versionFile, `${JSON.stringify(version, null, 2)}\n`);
 
 const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'));

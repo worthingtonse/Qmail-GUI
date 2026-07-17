@@ -79,7 +79,7 @@ publish-desktop:
     - job: package-linux
       artifacts: true
   script:
-    - cmp ci-build/version-windows.json ci-build/version-linux.json
+    - bash ci/assert_same_build_date.sh ci-build/version-windows.json ci-build/version-linux.json
     - bash ci/publish_gui_bin.sh release/QMail.exe release/QMail.AppImage ci-build/version-windows.json
   artifacts:
     paths:
