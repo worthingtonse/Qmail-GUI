@@ -23,10 +23,11 @@ read_build_date() {
 
 BUILD_DATE=$(read_build_date "$VERSION_JSON")
 tmp_local=$(mktemp)
-trap 'rm -f "$tmp_local" "$tmp_local.live"' EXIT
+trap 'rm -f "$tmp_local" "$tmp_local.live" "$tmp_local.live.norm"' EXIT
 
 ssh $SSH_OPTS r11 "cat '$REMOTE_PATH'" > "$tmp_local.live"
-if ! grep -Eq '^echo "[0-9]{4}-[0-9]{2}-[0-9]{2}";$' "$tmp_local.live"; then
+tr -d '\r' < "$tmp_local.live" > "$tmp_local.live.norm"
+if ! grep -Eq '^echo "[0-9]{4}-[0-9]{2}-[0-9]{2}";$' "$tmp_local.live.norm"; then
   echo "live qmail_client_version.php format is not the expected hardcoded echo; refusing to rewrite" >&2
   cat "$tmp_local.live" >&2
   exit 1
