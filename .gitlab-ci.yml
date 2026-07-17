@@ -13,6 +13,7 @@ variables:
   GIT_DEPTH: "20"
   QMAIL_BIN_BASE_URL: "https://cloudcoinconsortium.com/bin"
   ELECTRON_BUILDER_IMAGE: "electronuserland/builder:18-wine-mono-05.26"
+  WINDOWS_SIGNING: "off"
 
 validate:
   stage: validate
