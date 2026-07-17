@@ -1,4 +1,3 @@
-/* eslint-disable react/prop-types */
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { qmailAddressToDrdCoin } from "../../../api/qmailApiServices";

@@ -217,6 +217,9 @@ function App() {
     };
 
     initializeApp();
+    // Startup should run once; checkIdentity/prewarmInbox are safe here because
+    // this effect owns the initial boot sequence and must not restart mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Listen for backend-ready signal from Electron main process.
@@ -236,6 +239,9 @@ function App() {
     // Listen for backend-ready event from Electron IPC
     const unsubscribe = window.electronAPI.onBackendReady(handleBackendReady);
     return unsubscribe;
+    // The retry only needs to rebind when selectedService changes; checkIdentity
+    // is the same identity probe used by the initial boot path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedService]);
 
   useEffect(() => {

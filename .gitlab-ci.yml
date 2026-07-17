@@ -1,0 +1,100 @@
+# CI/CD for ccv3/gui - Phase 5 of consensus-plan-FINAL.txt.
+# Every branch/MR validates. Every merge to protected phase2 packages Windows
+# and Linux desktop artifacts with the newest published core binaries, publishes
+# both to bin/, then and only then bumps qmail_client_version.
+
+stages:
+  - validate
+  - package
+  - publish
+  - probe
+
+variables:
+  GIT_DEPTH: "20"
+  QMAIL_BIN_BASE_URL: "https://cloudcoinconsortium.com/bin"
+  ELECTRON_BUILDER_IMAGE: "electronuserland/builder:18-wine-mono-05.26"
+
+validate:
+  stage: validate
+  tags: [linux-build]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  cache:
+    key: "gui-npm-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .npm/
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run lint
+    - npm run test
+    - npm run build
+
+package-windows:
+  stage: package
+  tags: [windows-build]
+  timeout: 90m
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -Command "node -v; npm -v"
+    - npm ci
+    - powershell -NoProfile -ExecutionPolicy Bypass -File ci\package_windows.ps1
+  artifacts:
+    paths:
+      - release/QMail.exe
+      - ci-build/version-windows.json
+      - ci-build/qmail-windows.sha256
+      - ci-build/windows-core.sha256
+    expire_in: 1 week
+
+package-linux:
+  stage: package
+  tags: [linux-build]
+  timeout: 90m
+  variables:
+    GIT_CLEAN_FLAGS: -ffdx -e .npm -e .cache
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  script:
+    - bash ci/package_linux_in_docker.sh
+  artifacts:
+    paths:
+      - release/QMail.AppImage
+      - ci-build/version-linux.json
+      - ci-build/qmail-linux-desktop.sha256
+      - ci-build/linux-core.sha256
+    expire_in: 1 week
+
+publish-desktop:
+  stage: publish
+  tags: [fleet-deploy]
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  needs:
+    - job: package-windows
+      artifacts: true
+    - job: package-linux
+      artifacts: true
+  script:
+    - cmp ci-build/version-windows.json ci-build/version-linux.json
+    - bash ci/publish_gui_bin.sh release/QMail.exe release/QMail.AppImage ci-build/version-windows.json
+  artifacts:
+    paths:
+      - ci-build/version-windows.json
+      - ci-build/qmail-windows.sha256
+      - ci-build/qmail-linux-desktop.sha256
+    expire_in: 1 week
+
+bump-client-version-probe:
+  stage: probe
+  tags: [fleet-deploy]
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  needs:
+    - job: publish-desktop
+      artifacts: true
+  script:
+    - bash ci/bump_qmail_client_version.sh ci-build/version-windows.json
