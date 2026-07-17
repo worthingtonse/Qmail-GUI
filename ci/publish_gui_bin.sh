@@ -16,7 +16,18 @@ if [[ ! -s "$WIN" || ! -s "$LINUX" || ! -s "$VERSION_JSON" ]]; then
   exit 1
 fi
 
-BUILD_DATE=$(node -e "const v=require('./$VERSION_JSON'); if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(v.buildDate)){process.exit(2)} process.stdout.write(v.buildDate)")
+read_build_date() {
+  local file=${1:?}
+  local date
+  date=$(sed -nE 's/^.*"buildDate"[[:space:]]*:[[:space:]]*"([0-9]{4}-[0-9]{2}-[0-9]{2})".*$/\1/p' "$file" | head -n 1)
+  if [[ ! "$date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "could not parse YYYY-MM-DD buildDate from $file" >&2
+    exit 1
+  fi
+  printf '%s\n' "$date"
+}
+
+BUILD_DATE=$(read_build_date "$VERSION_JSON")
 
 WIN_DATED="qmail-windows-${BUILD_DATE}.exe"
 WIN_LATEST="qmail-windows-latest.exe"
