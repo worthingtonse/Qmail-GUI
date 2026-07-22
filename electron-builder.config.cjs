@@ -70,6 +70,44 @@ const config = {
     ],
   },
 
+  mac: {
+    // DMG: the standard macOS drag-to-Applications installer. arch is
+    // taken from the host (Apple Silicon -> arm64) unless overridden on
+    // the electron-builder CLI with --arm64 / --x64 / --universal.
+    target: [
+      {
+        target: "dmg",
+        arch: [process.arch === "arm64" ? "arm64" : "x64"],
+      },
+    ],
+    artifactName: isIntl ? "QMail-intl.dmg" : "QMail.dmg",
+    category: "public.app-category.social-networking",
+    icon: "public/icon.icns",
+    // Hardened runtime + entitlements are required for Apple notarization.
+    // They are harmless on an unsigned/ad-hoc local build (electron-builder
+    // skips signing when no identity is available) and mean a real
+    // Developer ID build "just works" once a cert is provided — see below.
+    hardenedRuntime: true,
+    gatekeeperAssess: false,
+    entitlements: "build/entitlements.mac.plist",
+    entitlementsInherit: "build/entitlements.mac.plist",
+    // The bundled `core` backend is a Mach-O that we ship ALREADY universal
+    // (arm64 + x86_64). @electron/universal's merge step otherwise aborts on
+    // a Mach-O that is byte-identical across the two arch builds; this rule
+    // tells it that file is expected and should be taken as-is.
+    x64ArchFiles: "**/backend/core",
+    // The backend binary is a bare `core` Mach-O, same as Linux. Ship it
+    // under resources/backend where electron.cjs looks (process.resourcesPath).
+    // It is shipped universal (arm64 + x86_64) so the app runs natively on
+    // both Apple Silicon and Intel Macs.
+    extraResources: [
+      {
+        from: "backend/core",
+        to: "backend/core",
+      },
+    ],
+  },
+
   linux: {
     // AppImage: a single self-contained executable file, the Linux
     // analogue of the portable Windows .exe — no install step, runs
