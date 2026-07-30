@@ -403,6 +403,9 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const [folders, setFolders] = useState([]);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [walletActionMode, setWalletActionMode] = useState(null);
+  // Preselection coming from the Wallet > Add Funds menu (method, files,
+  // folder picked in the main process before the modal opens).
+  const [walletActionContext, setWalletActionContext] = useState(null);
   const [profileEditor, setProfileEditor] = useState(null);
   const [composeContext, setComposeContext] = useState(null);
   const [raidaEchoSnapshot, setRaidaEchoSnapshot] = useState(null);
@@ -1164,12 +1167,14 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
-  const handleOpenWalletAction = (mode) => {
+  const handleOpenWalletAction = (mode, context = null) => {
+    setWalletActionContext(context);
     setWalletActionMode(mode === "withdraw" ? "withdraw" : "add");
   };
 
   const handleCloseWalletAction = () => {
     setWalletActionMode(null);
+    setWalletActionContext(null);
   };
 
   const handleWalletUpdated = async () => {
@@ -3038,7 +3043,13 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     );
   };
 
-  const handleQmailMenuCommand = async (command) => {
+  const handleQmailMenuCommand = async (rawCommand) => {
+    // Menu commands are plain strings, except Add Funds, which arrives as
+    // { command: "add-funds", method, files?, folder? } after the main
+    // process has already run the file/folder picker.
+    const payload =
+      typeof rawCommand === "string" ? { command: rawCommand } : rawCommand || {};
+    const command = payload.command;
     try {
       switch (command) {
         case "compose-new":
@@ -3057,10 +3068,27 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           await handleMarkAllAsReadCommand();
           break;
         case "add-funds":
-          handleOpenWalletAction("add");
+          handleOpenWalletAction(
+            "add",
+            payload.method
+              ? {
+                  addMethod: payload.method,
+                  files: Array.isArray(payload.files) ? payload.files : null,
+                  folder: payload.folder || null,
+                }
+              : null,
+          );
           break;
         case "withdraw-funds":
-          handleOpenWalletAction("withdraw");
+          handleOpenWalletAction(
+            "withdraw",
+            payload.method
+              ? {
+                  withdrawMethod: payload.method,
+                  withdrawDestination: payload.destination || null,
+                }
+              : null,
+          );
           break;
         case "profile-whitelist":
           setProfileEditor("whitelist");
@@ -3946,6 +3974,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       <WalletActionModal
         isOpen={Boolean(walletActionMode)}
         initialMode={walletActionMode || "add"}
+        initialAddMethod={walletActionContext?.addMethod || "locker"}
+        initialSelectedFiles={walletActionContext?.files || null}
+        initialSelectedFolder={walletActionContext?.folder || null}
+        initialWithdrawMethod={walletActionContext?.withdrawMethod || "locker"}
+        initialWithdrawDestination={walletActionContext?.withdrawDestination || null}
         walletBalance={walletBalance}
         onClose={handleCloseWalletAction}
         onWalletUpdated={handleWalletUpdated}

@@ -353,6 +353,7 @@ const ServiceSelectionScreen = ({ onSelectService }) => {
         isOpen={Boolean(activeAddMethod)}
         initialMode="add"
         initialAddMethod={resumeProvisioning ? 'locker' : activeAddMethod || 'locker'}
+        autoOpenPicker={activeAddMethod === 'files' || activeAddMethod === 'folder'}
         onboardingMode
         resumeProvisioning={resumeProvisioning}
         onClose={handleModalClose}

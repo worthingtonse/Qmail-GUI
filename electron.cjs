@@ -1024,6 +1024,255 @@ function setThemeFromMenu(themeId) {
   sendThemeToRenderer(themeId);
 }
 
+// ---------------------------------------------------------------------------
+// Recent coin locations ("Add Funds" sources and "Withdraw" destinations).
+//
+// Each list is stored one path per line, most recent first, in a file under
+// Client_Data/ so the backend's GET /api/system/dropdown?file=<name> can
+// serve the same list. The Electron main process owns the writes (core.exe
+// has no write endpoint for dropdown files) — it spawns core.exe, so it
+// knows where Client_Data is.
+// ---------------------------------------------------------------------------
+const DEPOSIT_LOCATIONS_FILE = 'deposit-locations.txt';
+const WITHDRAW_LOCATIONS_FILE = 'withdraw-locations.txt';
+const MAX_RECENT_LOCATIONS = 15;
+
+function getRecentLocationsPath(fileName) {
+  if (!backendDataDir) return null;
+  return path.join(backendDataDir, 'Client_Data', fileName);
+}
+
+// Windows paths are case-insensitive; compare accordingly so the same folder
+// picked with different casing does not appear twice in the list.
+const recentLocationKey = (value) =>
+  process.platform === 'win32' ? String(value).toLowerCase() : String(value);
+
+function readRecentLocations(fileName) {
+  const filePath = getRecentLocationsPath(fileName);
+  if (!filePath) return [];
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const seen = new Set();
+    const locations = [];
+    for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+      const location = line.trim();
+      if (!location) continue;
+      const key = recentLocationKey(location);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      locations.push(location);
+      if (locations.length >= MAX_RECENT_LOCATIONS) break;
+    }
+    return locations;
+  } catch (error) {
+    log('Could not read ' + fileName + ': ' + error.message);
+    return [];
+  }
+}
+
+function rememberRecentLocation(fileName, location) {
+  const trimmed = String(location || '').trim();
+  const filePath = getRecentLocationsPath(fileName);
+  if (!trimmed || !filePath) return;
+
+  const key = recentLocationKey(trimmed);
+  const next = [
+    trimmed,
+    ...readRecentLocations(fileName).filter((entry) => recentLocationKey(entry) !== key),
+  ].slice(0, MAX_RECENT_LOCATIONS);
+
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, next.join('\n') + '\n', 'utf8');
+  } catch (error) {
+    log('Could not write ' + fileName + ': ' + error.message);
+    return;
+  }
+  // Keep the Wallet menu's location submenus in sync with the new list.
+  buildApplicationMenu();
+}
+
+const readRecentDepositLocations = () => readRecentLocations(DEPOSIT_LOCATIONS_FILE);
+const rememberDepositLocation = (location) =>
+  rememberRecentLocation(DEPOSIT_LOCATIONS_FILE, location);
+const readRecentWithdrawLocations = () => readRecentLocations(WITHDRAW_LOCATIONS_FILE);
+const rememberWithdrawLocation = (location) =>
+  rememberRecentLocation(WITHDRAW_LOCATIONS_FILE, location);
+
+// Where a picker should open when the caller did not name a location: the
+// most recently used location from the given list that still exists on disk.
+function resolvePickerStartLocation(preferredLocation, recentLocations) {
+  const candidates = [preferredLocation, ...recentLocations];
+  for (const candidate of candidates) {
+    const location = String(candidate || '').trim();
+    if (location && fs.existsSync(location)) return location;
+  }
+  return null;
+}
+
+async function pickCoinFilesFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose CloudCoin files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack'] }],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentDepositLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickCoinFiles dialog error: ' + error.message);
+    return [];
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return [];
+  }
+
+  rememberDepositLocation(path.dirname(result.filePaths[0]));
+
+  const enriched = await Promise.all(
+    result.filePaths.map(async (filePath) => {
+      try {
+        const stat = await fs.promises.stat(filePath);
+        return {
+          path: filePath,
+          name: path.basename(filePath),
+          size: stat.size,
+        };
+      } catch (error) {
+        log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
+        return null;
+      }
+    }),
+  );
+
+  return enriched.filter((entry) => entry !== null);
+}
+
+async function pickCoinFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose CloudCoin folder',
+    properties: ['openDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentDepositLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickCoinFolder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberDepositLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+async function pickWithdrawFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose withdraw destination folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentWithdrawLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickWithdrawFolder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberWithdrawLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+// Menu entry point for Wallet > Add Funds > Entire Folder / Files. Runs the
+// picker (seeded with the chosen recent location, if any) and only then tells
+// the renderer to open the Add Funds modal with the selection filled in.
+async function addFundsFromMenu(method, location = null) {
+  if (method === 'files') {
+    const files = await pickCoinFilesFromDisk(location);
+    if (files.length > 0) {
+      sendQmailMenuCommand({ command: 'add-funds', method: 'files', files });
+    }
+    return;
+  }
+  const folder = await pickCoinFolderFromDisk(location);
+  if (folder) {
+    sendQmailMenuCommand({ command: 'add-funds', method: 'folder', folder });
+  }
+}
+
+// Submenu shared by "Entire Folder" and "Files": the recent deposit
+// locations (most recent first), then "Choose New Location…" which opens the
+// picker in the last-used folder.
+function buildDepositLocationMenuItems(method) {
+  const items = readRecentDepositLocations().map((location) => ({
+    label: location,
+    click: () => addFundsFromMenu(method, location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => addFundsFromMenu(method, null),
+  });
+  return items;
+}
+
+// Menu entry point for Wallet > Withdraw Funds > .bin File. A location
+// chosen from the recent list goes straight to the Withdraw modal (which
+// prompts for amount and memo); "Choose New Location…" runs the folder
+// picker first, seeded with the last-used destination.
+async function withdrawToBinFromMenu(location = null) {
+  let destination = null;
+  if (location) {
+    rememberWithdrawLocation(location); // bump to most-recent
+    destination = { path: location, name: path.basename(location) || location };
+  } else {
+    destination = await pickWithdrawFolderFromDisk(null);
+  }
+  if (destination) {
+    sendQmailMenuCommand({ command: 'withdraw-funds', method: 'file', destination });
+  }
+}
+
+// Submenu for ".bin File": recent withdraw destinations (most recent first),
+// then "Choose New Location…" which opens the picker in the last-used folder.
+function buildWithdrawLocationMenuItems() {
+  const items = readRecentWithdrawLocations().map((location) => ({
+    label: location,
+    click: () => withdrawToBinFromMenu(location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => withdrawToBinFromMenu(null),
+  });
+  return items;
+}
+
 function buildApplicationMenu() {
   const template = [
     ...(process.platform === 'darwin' ? [{
@@ -1051,11 +1300,33 @@ function buildApplicationMenu() {
       submenu: [
         {
           label: 'Add Funds',
-          click: () => sendQmailMenuCommand('add-funds'),
+          submenu: [
+            {
+              label: 'Entire Folder',
+              submenu: buildDepositLocationMenuItems('folder'),
+            },
+            {
+              label: 'Files',
+              submenu: buildDepositLocationMenuItems('files'),
+            },
+            {
+              label: 'From Locker…',
+              click: () => sendQmailMenuCommand({ command: 'add-funds', method: 'locker' }),
+            },
+          ],
         },
         {
           label: 'Withdraw Funds',
-          click: () => sendQmailMenuCommand('withdraw-funds'),
+          submenu: [
+            {
+              label: 'Locker Key…',
+              click: () => sendQmailMenuCommand({ command: 'withdraw-funds', method: 'locker' }),
+            },
+            {
+              label: '.bin File',
+              submenu: buildWithdrawLocationMenuItems(),
+            },
+          ],
         },
         {
           label: 'Purchase Coins',
@@ -1673,63 +1944,52 @@ ipcMain.handle('qmail:reveal-sent-attachment', async (
   }
 });
 
-ipcMain.handle('wallet:pickCoinFiles', async () => {
-  let result;
-  try {
-    result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose CloudCoin files',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack'] }],
-    });
-  } catch (error) {
-    log('wallet:pickCoinFiles dialog error: ' + error.message);
-    return [];
-  }
-
-  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
-    return [];
-  }
-
-  const enriched = await Promise.all(
-    result.filePaths.map(async (filePath) => {
-      try {
-        const stat = await fs.promises.stat(filePath);
-        return {
-          path: filePath,
-          name: path.basename(filePath),
-          size: stat.size,
-        };
-      } catch (error) {
-        log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
-        return null;
-      }
-    }),
-  );
-
-  return enriched.filter((entry) => entry !== null);
+ipcMain.handle('wallet:pickCoinFiles', async (_event, options) => {
+  return pickCoinFilesFromDisk(options?.defaultPath || null);
 });
 
-ipcMain.handle('wallet:pickCoinFolder', async () => {
-  let result;
+ipcMain.handle('wallet:pickCoinFolder', async (_event, options) => {
+  return pickCoinFolderFromDisk(options?.defaultPath || null);
+});
+
+ipcMain.handle('wallet:pickWithdrawFolder', async (_event, options) => {
+  return pickWithdrawFolderFromDisk(options?.defaultPath || null);
+});
+
+// Open Explorer/Finder on a finished .bin withdrawal. Only destinations the
+// user actually picked (they are recorded in withdraw-locations.txt at pick
+// time) can be revealed, so the renderer cannot use this to open arbitrary
+// paths.
+ipcMain.handle('wallet:revealWithdrawnFile', async (_event, payload) => {
   try {
-    result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose CloudCoin folder',
-      properties: ['openDirectory'],
-    });
+    const destination = String(payload?.destination || '').trim();
+    if (!destination) return { success: false, error: 'Destination is empty.' };
+
+    const destinationKey = recentLocationKey(path.resolve(destination));
+    const isKnown = readRecentWithdrawLocations().some(
+      (location) => recentLocationKey(path.resolve(location)) === destinationKey,
+    );
+    if (!isKnown) {
+      return { success: false, error: 'Opening this folder is not permitted.' };
+    }
+
+    // Highlight the exported file when we know its name and it exists;
+    // otherwise just open the destination folder.
+    const filename = String(payload?.filename || '').trim();
+    if (filename && path.basename(filename) === filename) {
+      const filePath = path.join(destination, filename);
+      if (fs.existsSync(filePath)) {
+        shell.showItemInFolder(filePath);
+        return { success: true };
+      }
+    }
+
+    const openError = await shell.openPath(destination);
+    if (openError) return { success: false, error: openError };
+    return { success: true };
   } catch (error) {
-    log('wallet:pickCoinFolder dialog error: ' + error.message);
-    return null;
+    return { success: false, error: error.message };
   }
-
-  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
-    return null;
-  }
-
-  const folderPath = result.filePaths[0];
-  return {
-    path: folderPath,
-    name: path.basename(folderPath) || folderPath,
-  };
 });
 
 ipcMain.handle('get-downloads-dir', async () => app.getPath('downloads'));

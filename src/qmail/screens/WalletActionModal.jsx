@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
@@ -23,6 +23,7 @@ import {
   provisionQMailIdentityFromDefault,
   validateLockerCode,
   waitForTaskCompletion,
+  withdrawToBinFile,
   withdrawToLockerCode,
 } from "../../api/qmailApiServices";
 import { RAIDA_COUNT } from "./serverStatusUi";
@@ -34,6 +35,11 @@ const ADD_METHODS = [
   { id: "locker", label: "Locker", icon: KeyRound },
   { id: "folder", label: "Folder", icon: FolderOpen },
   { id: "files", label: "Files", icon: File },
+];
+
+const WITHDRAW_METHODS = [
+  { id: "locker", label: "Locker Key", icon: KeyRound },
+  { id: "file", label: ".bin File", icon: File },
 ];
 
 const SUPPORTED_DEPOSIT_FILE_LABEL = ".bin, .stack";
@@ -368,6 +374,11 @@ const WalletActionModal = ({
   isOpen,
   initialMode = "add",
   initialAddMethod = "locker",
+  initialSelectedFiles = null,
+  initialSelectedFolder = null,
+  initialWithdrawMethod = "locker",
+  initialWithdrawDestination = null,
+  autoOpenPicker = false,
   onboardingMode = false,
   resumeProvisioning = false,
   walletBalance,
@@ -381,7 +392,10 @@ const WalletActionModal = ({
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [lockerCode, setLockerCode] = useState("");
+  const [memo, setMemo] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawMethod, setWithdrawMethod] = useState("locker");
+  const [withdrawDestination, setWithdrawDestination] = useState(null);
   const [isWorking, setIsWorking] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [error, setError] = useState("");
@@ -409,10 +423,17 @@ const WalletActionModal = ({
     if (!isOpen) return;
     setMode(initialMode === "withdraw" ? "withdraw" : "add");
     setAddMethod(ADD_METHODS.some(({ id }) => id === initialAddMethod) ? initialAddMethod : "locker");
-    setSelectedFiles([]);
-    setSelectedFolder(null);
+    setSelectedFiles(Array.isArray(initialSelectedFiles) ? initialSelectedFiles : []);
+    setSelectedFolder(initialSelectedFolder?.path ? initialSelectedFolder : null);
     setLockerCode("");
+    setMemo(onboardingMode ? "First Startup" : "");
     setWithdrawAmount("");
+    setWithdrawMethod(
+      WITHDRAW_METHODS.some(({ id }) => id === initialWithdrawMethod)
+        ? initialWithdrawMethod
+        : "locker",
+    );
+    setWithdrawDestination(initialWithdrawDestination?.path ? initialWithdrawDestination : null);
     setIsWorking(false);
     setStatusMessage("");
     setError("");
@@ -433,7 +454,61 @@ const WalletActionModal = ({
     setShowRawReceipt(false);
     setDepositCompleted(onboardingMode && resumeProvisioning);
     setIdentityAssignment(null);
-  }, [initialAddMethod, initialMode, isOpen, onboardingMode, resumeProvisioning]);
+  }, [
+    initialAddMethod,
+    initialMode,
+    initialSelectedFiles,
+    initialSelectedFolder,
+    initialWithdrawDestination,
+    initialWithdrawMethod,
+    isOpen,
+    onboardingMode,
+    resumeProvisioning,
+  ]);
+
+  // First-startup shortcut: when the launch screen says "Use CloudCoin
+  // Files/Folder", pop the native picker right away instead of making the
+  // user click Choose Files/Choose Folder a second time. The picker opens
+  // in the last-used deposit location (the main process remembers it).
+  // The ref makes this once-per-open even under StrictMode's double effect
+  // invocation, which would otherwise stack two native dialogs in dev.
+  const autoPickRanRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      autoPickRanRef.current = false;
+      return undefined;
+    }
+    if (!autoOpenPicker || autoPickRanRef.current) return undefined;
+    if (initialAddMethod !== "files" && initialAddMethod !== "folder") return undefined;
+    if (
+      typeof window === "undefined" ||
+      !window.electronAPI ||
+      typeof window.electronAPI.pickWalletCoinFiles !== "function" ||
+      typeof window.electronAPI.pickWalletCoinFolder !== "function"
+    ) {
+      return undefined;
+    }
+
+    autoPickRanRef.current = true;
+    let cancelled = false;
+    (async () => {
+      if (initialAddMethod === "files") {
+        const files = await window.electronAPI.pickWalletCoinFiles();
+        if (!cancelled && Array.isArray(files) && files.length > 0) {
+          setSelectedFiles(files);
+        }
+      } else {
+        const folder = await window.electronAPI.pickWalletCoinFolder();
+        if (!cancelled && folder?.path) {
+          setSelectedFolder(folder);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoOpenPicker, initialAddMethod, isOpen]);
 
   const modalTitle = onboardingMode
     ? "Set Up QMail"
@@ -521,6 +596,28 @@ const WalletActionModal = ({
     setAddMethod(nextMethod);
   };
 
+  const handleWithdrawMethodChange = (nextMethod) => {
+    if (isWorking || withdrawMethod === nextMethod) return;
+    resetOperationState();
+    setWithdrawMethod(nextMethod);
+  };
+
+  const handlePickWithdrawFolder = async () => {
+    resetOperationState();
+    if (
+      typeof window === "undefined" ||
+      typeof window.electronAPI?.pickWalletWithdrawFolder !== "function"
+    ) {
+      setError("Folder picker is only available in the QMail desktop app.");
+      return;
+    }
+
+    const folder = await window.electronAPI.pickWalletWithdrawFolder();
+    if (folder?.path) {
+      setWithdrawDestination(folder);
+    }
+  };
+
   const handlePickFiles = async () => {
     resetOperationState();
     if (!walletPickerSupported) {
@@ -594,6 +691,8 @@ const WalletActionModal = ({
     setIsWorking(true);
 
     try {
+      // An empty memo falls back to each API's default label.
+      const memoValue = memo.trim() || undefined;
       let result;
       let receiptTaskId = null;
       if (addMethod === "files") {
@@ -602,7 +701,7 @@ const WalletActionModal = ({
           return;
         }
         setStatusMessage("Starting deposit...");
-        result = await depositCloudCoinFiles(selectedFiles.map((file) => file.path));
+        result = await depositCloudCoinFiles(selectedFiles.map((file) => file.path), memoValue);
         receiptTaskId = result?.data?.task_id || result?.data?.taskId;
         result = await finishDepositTask(result);
       } else if (addMethod === "folder") {
@@ -611,7 +710,7 @@ const WalletActionModal = ({
           return;
         }
         setStatusMessage("Starting deposit...");
-        result = await depositCloudCoinFolder(selectedFolder.path);
+        result = await depositCloudCoinFolder(selectedFolder.path, memoValue);
         receiptTaskId = result?.data?.task_id || result?.data?.taskId;
         result = await finishDepositTask(result);
       } else {
@@ -627,7 +726,7 @@ const WalletActionModal = ({
           return;
         }
         setStatusMessage("Downloading locker...");
-        result = await downloadLockerToDefaultWallet(lockerCode);
+        result = await downloadLockerToDefaultWallet(lockerCode, null, memoValue || "");
         receiptTaskId = result?.data?.task_id || result?.data?.taskId;
       }
 
@@ -689,8 +788,45 @@ const WalletActionModal = ({
     setIsWorking(true);
 
     try {
+      const memoValue = memo.trim();
+
+      if (withdrawMethod === "file") {
+        if (!withdrawDestination?.path) {
+          setError("Choose a destination folder for the .bin file.");
+          return;
+        }
+        setStatusMessage("Exporting coins...");
+        const result = await withdrawToBinFile(withdrawAmount, withdrawDestination.path, memoValue);
+        if (!result?.success) {
+          setError(result?.error || "The .bin withdrawal failed.");
+          return;
+        }
+
+        await refreshWallet();
+        const exportedFile = result.data.files[0] || "";
+        const exportedValue = Number(result.data.value_exported);
+        setStatusMessage("");
+        setSuccessMessage(
+          exportedFile
+            ? `Exported ${Number.isFinite(exportedValue) ? exportedValue.toLocaleString() : withdrawAmount} CC to "${exportedFile}".`
+            : "Coins exported.",
+        );
+
+        // Show the user where their coins landed: open Explorer/Finder on
+        // the exported file. Best-effort — the export already succeeded.
+        try {
+          await window.electronAPI?.revealWithdrawnFile?.({
+            destination: withdrawDestination.path,
+            filename: exportedFile,
+          });
+        } catch {
+          // Ignore: the reveal is a convenience, not part of the withdrawal.
+        }
+        return;
+      }
+
       setStatusMessage("Creating locker...");
-      const result = await withdrawToLockerCode(withdrawAmount);
+      const result = await withdrawToLockerCode(withdrawAmount, null, memoValue);
       if (!result?.success) {
         setError(result?.error || "Withdraw failed.");
         return;
@@ -705,7 +841,7 @@ const WalletActionModal = ({
       setError(err?.message || "Withdraw failed.");
     } finally {
       // Clear on every exit path — a failed withdraw must not leave the
-      // "Creating locker..." spinner running next to the error.
+      // "Creating locker..." / "Exporting coins..." spinner next to an error.
       setStatusMessage("");
       setIsWorking(false);
     }
@@ -770,7 +906,10 @@ const WalletActionModal = ({
       (addMethod === "locker" && !lockerInputValid);
 
   const withdrawSubmitDisabled =
-    isWorking || !Number.isInteger(Number(withdrawAmount)) || Number(withdrawAmount) <= 0;
+    isWorking ||
+    !Number.isInteger(Number(withdrawAmount)) ||
+    Number(withdrawAmount) <= 0 ||
+    (withdrawMethod === "file" && !withdrawDestination?.path);
 
   return (
     <>
@@ -887,9 +1026,59 @@ const WalletActionModal = ({
                   />
                 </div>
               )}
+
+              <div className="compose-modal__field wallet-action-modal__field">
+                <label htmlFor="wallet-add-funds-memo">Memo (optional)</label>
+                <input
+                  id="wallet-add-funds-memo"
+                  type="text"
+                  value={memo}
+                  onChange={(event) => setMemo(event.target.value)}
+                  placeholder="Describe this transaction"
+                  maxLength={120}
+                  disabled={isWorking || (onboardingMode && depositCompleted)}
+                  autoComplete="off"
+                />
+              </div>
             </section>
           ) : (
             <section className="wallet-action-modal__section" aria-label="Withdraw funds">
+              <div className="wallet-action-modal__method-tabs" role="tablist" aria-label="Withdraw destination">
+                {WITHDRAW_METHODS.map((method) => {
+                  const Icon = method.icon;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      className={`wallet-action-modal__method-tab ${withdrawMethod === method.id ? "wallet-action-modal__method-tab--active" : ""}`}
+                      onClick={() => handleWithdrawMethodChange(method.id)}
+                      disabled={isWorking}
+                    >
+                      <Icon size={15} />
+                      <span>{method.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {withdrawMethod === "file" && (
+                <div className="wallet-action-modal__picker">
+                  <button
+                    className="wallet-action-modal__picker-button"
+                    type="button"
+                    onClick={handlePickWithdrawFolder}
+                    disabled={isWorking}
+                  >
+                    <FolderOpen size={16} />
+                    <span>Choose Destination</span>
+                  </button>
+                  <span className="wallet-action-modal__selection">
+                    {withdrawDestination?.path || "No destination selected"}
+                  </span>
+                  <small>The coins are combined into a single .bin file at this folder.</small>
+                </div>
+              )}
+
               <div className="compose-modal__field wallet-action-modal__field">
                 <label htmlFor="wallet-withdraw-amount">Amount</label>
                 <input
@@ -904,6 +1093,20 @@ const WalletActionModal = ({
                   }}
                   disabled={isWorking}
                   inputMode="numeric"
+                />
+              </div>
+
+              <div className="compose-modal__field wallet-action-modal__field">
+                <label htmlFor="wallet-withdraw-memo">Memo (optional)</label>
+                <input
+                  id="wallet-withdraw-memo"
+                  type="text"
+                  value={memo}
+                  onChange={(event) => setMemo(event.target.value)}
+                  placeholder="Describe this transaction"
+                  maxLength={120}
+                  disabled={isWorking}
+                  autoComplete="off"
                 />
               </div>
 

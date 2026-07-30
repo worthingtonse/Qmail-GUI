@@ -49,8 +49,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       emailId,
       attachmentId,
     ),
-  pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
-  pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
+  pickWalletCoinFiles: (options = null) => ipcRenderer.invoke('wallet:pickCoinFiles', options),
+  pickWalletCoinFolder: (options = null) => ipcRenderer.invoke('wallet:pickCoinFolder', options),
+  pickWalletWithdrawFolder: (options = null) =>
+    ipcRenderer.invoke('wallet:pickWithdrawFolder', options),
+  revealWithdrawnFile: (payload) => ipcRenderer.invoke('wallet:revealWithdrawnFile', payload),
   onThemeSelect: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = (_event, themeId) => callback(themeId);

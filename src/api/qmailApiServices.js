@@ -2782,7 +2782,7 @@ export const depositCloudCoinFolder = async (folderPath, memo = "QMail folder de
   }
 };
 
-export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null) => {
+export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null, memo = "") => {
   try {
     const lockerKey = String(lockerCode || "").trim();
     if (!lockerKey) {
@@ -2791,6 +2791,9 @@ export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = nul
 
     const url = new URL(`${API_BASE_URL}/locker/download`);
     url.searchParams.set("locker_key", lockerKey);
+    // Forward-compatible: current core builds label the transaction
+    // "From Locker" and ignore this param; newer builds can honor it.
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
     const resolvedWalletPath = await addWalletPathParam(url, walletPath);
 
     const response = await fetch(url.toString());
@@ -2848,7 +2851,7 @@ export const getQMailIdentityProvisionStatus = async () => {
   }
 };
 
-export const withdrawToLockerCode = async (amount, walletPath = null) => {
+export const withdrawToLockerCode = async (amount, walletPath = null, memo = "") => {
   try {
     const numericAmount = Number(amount);
     if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
@@ -2859,6 +2862,9 @@ export const withdrawToLockerCode = async (amount, walletPath = null) => {
     const url = new URL(`${API_BASE_URL}/locker/upload`);
     url.searchParams.set("locker_key", lockerKey);
     url.searchParams.set("amount", String(numericAmount));
+    // Forward-compatible: current core builds ignore this param on
+    // /locker/upload; newer builds can honor it in the transaction log.
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
     const resolvedWalletPath = await addWalletPathParam(url, walletPath);
 
     const response = await fetch(url.toString());
@@ -2870,6 +2876,52 @@ export const withdrawToLockerCode = async (amount, walletPath = null) => {
     return { success: true, data: { ...data, locker_key: data?.locker_key || lockerKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
   } catch (error) {
     console.error("Withdraw to locker failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Withdraw coins into a single .bin file at a destination folder via
+ * GET /api/transactions/export. Coins are moved out of Bank/Fracked into the
+ * wallet's Exported folder; the backend records the destination in its own
+ * export-locations.csv as well.
+ * @returns On success: { success: true, data: { files, coins_exported, value_exported, destination } }
+ */
+export const withdrawToBinFile = async (amount, destination, memo = "", walletPath = null) => {
+  try {
+    const numericAmount = Number(amount);
+    if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
+      throw new Error("Enter a positive whole-number CloudCoin amount.");
+    }
+
+    const destinationPath = String(destination || "").trim();
+    if (!destinationPath) {
+      throw new Error("Choose a destination folder for the .bin file.");
+    }
+
+    const url = new URL(`${API_BASE_URL}/transactions/export`);
+    url.searchParams.set("amount", String(numericAmount));
+    url.searchParams.set("destination", destinationPath);
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    if (data?.status !== "success") {
+      throw new Error(extractApiErrorMessage(data, "The .bin withdrawal failed."));
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        files: Array.isArray(data?.files) ? data.files : [],
+        destination: destinationPath,
+        wallet_path: data?.wallet_path || resolvedWalletPath,
+      },
+    };
+  } catch (error) {
+    console.error("Withdraw to .bin file failed:", error);
     return { success: false, error: error.message };
   }
 };
