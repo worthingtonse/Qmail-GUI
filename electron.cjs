@@ -46,10 +46,12 @@ const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
 // imports the same file for the renderer.
 const { buildDate: QMAIL_BUILD_DATE, buildNumber: QMAIL_BUILD_NUMBER } = require('./version.json');
 const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
+// Keep in sync with src/qmail/supportConstants.js (renderer cannot require this file).
+const SUPPORT_QMAIL_ADDRESS = '20.123@giga';
 const QMAIL_HELP_MESSAGE =
 `Contact
 Telegram group: t.me/distributedmailsystem
-QMail: 20.123@giga
+QMail: ${SUPPORT_QMAIL_ADDRESS}
 Email: CloudCoin@Protonmail.com`;
 const CHANGE_PASSWORDS_NEXT_BOOT_TEXT =
 `# QMail mailbox authenticity-number rotation
@@ -1035,6 +1037,9 @@ function setThemeFromMenu(themeId) {
 // ---------------------------------------------------------------------------
 const DEPOSIT_LOCATIONS_FILE = 'deposit-locations.txt';
 const WITHDRAW_LOCATIONS_FILE = 'withdraw-locations.txt';
+// Backup destinations use the file name the public dropdown API documents
+// (GET /api/system/dropdown?file=BackupPlaces.txt) — core auto-creates it.
+const BACKUP_LOCATIONS_FILE = 'BackupPlaces.txt';
 const MAX_RECENT_LOCATIONS = 15;
 
 function getRecentLocationsPath(fileName) {
@@ -1098,6 +1103,60 @@ const rememberDepositLocation = (location) =>
 const readRecentWithdrawLocations = () => readRecentLocations(WITHDRAW_LOCATIONS_FILE);
 const rememberWithdrawLocation = (location) =>
   rememberRecentLocation(WITHDRAW_LOCATIONS_FILE, location);
+const readRecentBackupLocations = () => readRecentLocations(BACKUP_LOCATIONS_FILE);
+const rememberBackupLocation = (location) =>
+  rememberRecentLocation(BACKUP_LOCATIONS_FILE, location);
+
+// Wallets for the File > Backup Wallet menu. wallet_paths.txt is the
+// backend's wallet registry (one absolute path per line — it can include
+// wallets outside Client_Data). Fall back to scanning Client_Data/Wallets
+// when the registry is missing or empty.
+function readWalletsForMenu() {
+  if (!backendDataDir) return [];
+  const clientData = path.join(backendDataDir, 'Client_Data');
+
+  const seen = new Set();
+  const wallets = [];
+  const addWallet = (walletPath) => {
+    const trimmed = String(walletPath || '').trim();
+    if (!trimmed) return;
+    const key = recentLocationKey(trimmed);
+    if (seen.has(key)) return;
+    try {
+      if (!fs.statSync(trimmed).isDirectory()) return;
+    } catch {
+      return;
+    }
+    seen.add(key);
+    wallets.push({ name: path.basename(trimmed) || trimmed, path: trimmed });
+  };
+
+  try {
+    const registryPath = path.join(clientData, 'wallet_paths.txt');
+    if (fs.existsSync(registryPath)) {
+      for (const line of fs.readFileSync(registryPath, 'utf8').split(/\r?\n/)) {
+        addWallet(line);
+      }
+    }
+  } catch (error) {
+    log('Could not read wallet_paths.txt: ' + error.message);
+  }
+
+  if (wallets.length === 0) {
+    try {
+      const walletsDir = path.join(clientData, 'Wallets');
+      if (fs.existsSync(walletsDir)) {
+        for (const entry of fs.readdirSync(walletsDir, { withFileTypes: true })) {
+          if (entry.isDirectory()) addWallet(path.join(walletsDir, entry.name));
+        }
+      }
+    } catch (error) {
+      log('Could not scan Wallets directory: ' + error.message);
+    }
+  }
+
+  return wallets;
+}
 
 // Where a picker should open when the caller did not name a location: the
 // most recently used location from the given list that still exists on disk.
@@ -1273,6 +1332,78 @@ function buildWithdrawLocationMenuItems() {
   return items;
 }
 
+async function pickBackupFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose backup destination folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentBackupLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('backup folder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberBackupLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+// Menu entry point for File > Backup Wallet > <wallet> > <location>. A
+// location chosen from the recent list starts the backup right away;
+// "Choose New Location…" runs the folder picker first. The renderer calls
+// POST /api/wallets/backup and reveals the finished ZIP.
+async function backupWalletFromMenu(wallet, location = null) {
+  let destination = null;
+  if (location) {
+    rememberBackupLocation(location); // bump to most-recent
+    destination = { path: location, name: path.basename(location) || location };
+  } else {
+    destination = await pickBackupFolderFromDisk(null);
+  }
+  if (destination) {
+    sendQmailMenuCommand({ command: 'backup-wallet', wallet, destination });
+  }
+}
+
+// Per-wallet submenu of recent backup destinations, then "Choose New
+// Location…". Note: core rejects destinations inside Client_Data.
+function buildBackupLocationMenuItems(wallet) {
+  const items = readRecentBackupLocations().map((location) => ({
+    label: location,
+    click: () => backupWalletFromMenu(wallet, location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => backupWalletFromMenu(wallet, null),
+  });
+  return items;
+}
+
+// File > Backup Wallet: one submenu per known wallet.
+function buildBackupWalletMenuItems() {
+  const wallets = readWalletsForMenu();
+  if (wallets.length === 0) {
+    return [{ label: 'No wallets found', enabled: false }];
+  }
+  return wallets.map((wallet) => ({
+    label: wallet.name,
+    submenu: buildBackupLocationMenuItems(wallet),
+  }));
+}
+
 function buildApplicationMenu() {
   const template = [
     ...(process.platform === 'darwin' ? [{
@@ -1292,6 +1423,11 @@ function buildApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'Backup Wallet',
+          submenu: buildBackupWalletMenuItems(),
+        },
+        { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],
     },
@@ -1482,6 +1618,28 @@ function buildApplicationMenu() {
             detail: QMAIL_HELP_MESSAGE,
             buttons: ['OK'],
           }),
+        },
+        {
+          label: 'Send Logs To Support',
+          click: async () => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            const { response } = await dialog.showMessageBox(mainWindow, {
+              type: 'question',
+              title: 'Send Logs To Support',
+              message: 'Send diagnostic logs to support?',
+              detail:
+                `This creates a support archive (main.log, recent receipts, ` +
+                `transaction logs) and sends it by QMail to ${SUPPORT_QMAIL_ADDRESS}.\n\n` +
+                `Do not send if you do not want that data shared with support.`,
+              buttons: ['Cancel', 'Send Logs'],
+              defaultId: 1,
+              cancelId: 0,
+              noLink: true,
+            });
+            if (response === 1) {
+              sendQmailMenuCommand('send-logs-to-support');
+            }
+          },
         },
         {
           label: 'Upgrade',
@@ -1956,25 +2114,25 @@ ipcMain.handle('wallet:pickWithdrawFolder', async (_event, options) => {
   return pickWithdrawFolderFromDisk(options?.defaultPath || null);
 });
 
-// Open Explorer/Finder on a finished .bin withdrawal. Only destinations the
-// user actually picked (they are recorded in withdraw-locations.txt at pick
-// time) can be revealed, so the renderer cannot use this to open arbitrary
-// paths.
-ipcMain.handle('wallet:revealWithdrawnFile', async (_event, payload) => {
+// Open Explorer/Finder on a file the backend just wrote (a .bin withdrawal
+// or a wallet-backup ZIP). Only destinations the user actually picked — they
+// are recorded in the given recent-locations list at pick time — can be
+// revealed, so the renderer cannot use this to open arbitrary paths.
+async function revealFileInKnownLocation(payload, knownLocations) {
   try {
     const destination = String(payload?.destination || '').trim();
     if (!destination) return { success: false, error: 'Destination is empty.' };
 
     const destinationKey = recentLocationKey(path.resolve(destination));
-    const isKnown = readRecentWithdrawLocations().some(
+    const isKnown = knownLocations.some(
       (location) => recentLocationKey(path.resolve(location)) === destinationKey,
     );
     if (!isKnown) {
       return { success: false, error: 'Opening this folder is not permitted.' };
     }
 
-    // Highlight the exported file when we know its name and it exists;
-    // otherwise just open the destination folder.
+    // Highlight the file when we know its name and it exists; otherwise
+    // just open the destination folder.
     const filename = String(payload?.filename || '').trim();
     if (filename && path.basename(filename) === filename) {
       const filePath = path.join(destination, filename);
@@ -1990,6 +2148,14 @@ ipcMain.handle('wallet:revealWithdrawnFile', async (_event, payload) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+}
+
+ipcMain.handle('wallet:revealWithdrawnFile', async (_event, payload) => {
+  return revealFileInKnownLocation(payload, readRecentWithdrawLocations());
+});
+
+ipcMain.handle('wallet:revealBackupZip', async (_event, payload) => {
+  return revealFileInKnownLocation(payload, readRecentBackupLocations());
 });
 
 ipcMain.handle('get-downloads-dir', async () => app.getPath('downloads'));

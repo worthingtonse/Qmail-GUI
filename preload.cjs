@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pickWalletWithdrawFolder: (options = null) =>
     ipcRenderer.invoke('wallet:pickWithdrawFolder', options),
   revealWithdrawnFile: (payload) => ipcRenderer.invoke('wallet:revealWithdrawnFile', payload),
+  revealBackupZip: (payload) => ipcRenderer.invoke('wallet:revealBackupZip', payload),
   onThemeSelect: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = (_event, themeId) => callback(themeId);

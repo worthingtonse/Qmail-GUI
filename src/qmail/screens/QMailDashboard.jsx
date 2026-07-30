@@ -41,6 +41,10 @@ import {
   depositCloudCoinFolder,
   waitForTaskCompletion,
   sendEmail,
+  sendSupportLogs,
+  createSupportZip,
+  pollSupportSendUntilTerminal,
+  API_PORT,
   getQMailPaymentInfo,
   markQMailPaymentRefunded,
   starEmail,
@@ -51,6 +55,7 @@ import {
   normalizeIdentityForUi,
   lookupMailWalletPath,
   setDrdListEntries,
+  backupWallet,
   SSE_URL,
 } from "../../api/qmailApiServices";
 import { formatTimestamp } from "./formatTimestamp";
@@ -77,6 +82,18 @@ import {
   readActiveTransferRegistry,
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
+import { SUPPORT_QMAIL_ADDRESS } from "../supportConstants";
+import {
+  formatSupportProgressNotification,
+  interpretSupportSendTaskResult,
+  shouldNotifySupportProgress,
+} from "../supportLogsFlow";
+import {
+  forgetPendingSupportSend,
+  readPendingSupportSend,
+  rememberPendingSupportSend,
+  SUPPORT_SEND_STORAGE_KEY_PREFIX,
+} from "../supportSendRegistry";
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { buildWindowTitle } from "./windowTitle";
 import { ensureProtectedWhitelist } from "../ensureProtectedWhitelist";
@@ -88,6 +105,8 @@ const SEARCH_RESULT_LIMIT = 50;
 const EMPTY_BODY_PREVIEW = "(no message body)";
 const REFRESH_STEP_TIMEOUT_MS = 30000;
 const RAIDA_REFRESH_TIMEOUT_MS = 20000;
+const SUPPORT_SEND_STORAGE_KEY =
+  `${SUPPORT_SEND_STORAGE_KEY_PREFIX}:${API_PORT}`;
 const DECRYPT_REVEAL_MIN_MS = 2200;
 const PAYMENT_STATUS_UNCLAIMED = 0;
 const PAYMENT_STATUS_CLAIMED = 1;
@@ -456,6 +475,9 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const previousMailCountsRef = useRef({});
   const pendingMailsRef = useRef([]);
   const mailDownloadPromisesRef = useRef(new Map());
+  /** Guard against double Help → Send Logs To Support clicks. */
+  const sendLogsToSupportInFlightRef = useRef(false);
+  const supportSendPollAbortRef = useRef(null);
   const attachmentDownloadAbortRef = useRef(null);
   const attachmentDownloadInProgressRef = useRef(false);
   const attachmentCancelPendingRef = useRef(false);
@@ -574,6 +596,13 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   useEffect(() => {
     pendingMailsRef.current = pendingMails;
   }, [pendingMails]);
+
+  useEffect(
+    () => () => {
+      supportSendPollAbortRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     restoredTransfersRef.current = restoredTransfers;
@@ -3043,6 +3072,226 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     );
   };
 
+  // File > Backup Wallet > <wallet> > <location>: the main process already
+  // confirmed the destination; run the backup and reveal the finished ZIP.
+  const handleBackupWalletCommand = async (wallet, destination) => {
+    if (!wallet?.path || !destination?.path) return;
+
+    const walletLabel = wallet.name || wallet.path;
+    showDashboardNotification(`Backing up "${walletLabel}"...`, "info");
+
+    const result = await backupWallet(wallet.path, destination.path);
+    if (!result?.success) {
+      showDashboardNotification(
+        result?.error || `The backup of "${walletLabel}" failed.`,
+        "error",
+      );
+      return;
+    }
+
+    const zipPath = String(result.data?.zip_path || "");
+    const zipName = zipPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+    showDashboardNotification(
+      zipPath
+        ? `Wallet "${walletLabel}" backed up to ${zipPath}.`
+        : `Wallet "${walletLabel}" backed up.`,
+      "success",
+    );
+
+    // Show the user where the backup landed — best-effort convenience.
+    try {
+      await window.electronAPI?.revealBackupZip?.({
+        destination: destination.path,
+        filename: zipName,
+      });
+    } catch {
+      // Ignore: the backup itself succeeded.
+    }
+  };
+
+  const finishSupportSendPoll = async (taskId) => {
+    let lastProgressSnapshot = null;
+    supportSendPollAbortRef.current?.abort();
+    const controller = new AbortController();
+    supportSendPollAbortRef.current = controller;
+
+    let pollResult;
+    try {
+      pollResult = await pollSupportSendUntilTerminal(taskId, {
+        intervalMs: 1500,
+        softTimeoutMs: 600000,
+        signal: controller.signal,
+        onUpdate: (task) => {
+          if (!shouldNotifySupportProgress(lastProgressSnapshot, task)) {
+            return;
+          }
+          lastProgressSnapshot = {
+            message: task?.message,
+            progress: task?.progress,
+            softTimeout: Boolean(task?.softTimeout),
+            connectivityLost: Boolean(task?.connectivityLost),
+          };
+          showDashboardNotification(
+            formatSupportProgressNotification(task),
+            "info",
+          );
+        },
+      });
+    } finally {
+      if (supportSendPollAbortRef.current === controller) {
+        supportSendPollAbortRef.current = null;
+      }
+    }
+
+    // Component teardown cancels only this renderer's poll. Keep the
+    // port-scoped pending record so the next dashboard can resume it.
+    if (pollResult.status === "aborted") {
+      return;
+    }
+
+    // HTTP 404 comes from a reachable core and means its task file is gone,
+    // usually after a restart. It is safe to release this stale record.
+    if (pollResult.status === "not_found") {
+      forgetPendingSupportSend(SUPPORT_SEND_STORAGE_KEY);
+      showDashboardNotification(
+        "The previous support task no longer exists, probably because the " +
+          "core restarted. Its ZIP was kept. You may send the logs again.",
+        "warning",
+      );
+      return;
+    }
+
+    // Connectivity loss never returns from the poller. Preserve the record
+    // for any unexpected non-terminal result rather than enabling duplicates.
+    if (!pollResult.success || !pollResult.data) {
+      showDashboardNotification(
+        pollResult.error || "Could not poll support send status.",
+        "error",
+      );
+      return;
+    }
+
+    const interpreted = interpretSupportSendTaskResult(pollResult.data);
+    // Clear pending only after a definitive interpretation of a terminal task.
+    forgetPendingSupportSend(SUPPORT_SEND_STORAGE_KEY);
+
+    if (interpreted.outcome === "full") {
+      showDashboardNotification(interpreted.message, "success");
+      // Keep the ZIP on disk for troubleshooting / retry (product choice).
+    } else if (interpreted.outcome === "partial") {
+      showDashboardNotification(interpreted.message, "warning");
+    } else if (interpreted.outcome === "indeterminate") {
+      showDashboardNotification(interpreted.message, "warning");
+    } else {
+      showDashboardNotification(interpreted.message, "error");
+    }
+  };
+
+  const handleSendLogsToSupport = async () => {
+    if (sendLogsToSupportInFlightRef.current) {
+      showDashboardNotification(
+        "Support logs are already being prepared or sent.",
+        "info",
+      );
+      return;
+    }
+
+    // Resume a previously kicked-off core task (survives remount / reconnect).
+    const pending = readPendingSupportSend(SUPPORT_SEND_STORAGE_KEY);
+    if (pending?.taskId) {
+      sendLogsToSupportInFlightRef.current = true;
+      try {
+        showDashboardNotification(
+          "A support send is already in progress. Checking status…",
+          "info",
+        );
+        await finishSupportSendPoll(pending.taskId);
+      } catch (error) {
+        console.error("Resume support send failed:", error);
+        showDashboardNotification(
+          error?.message ||
+            "Could not reconcile the pending support send. Try again later.",
+          "error",
+        );
+        // Keep pending record so the user cannot start a duplicate.
+      } finally {
+        sendLogsToSupportInFlightRef.current = false;
+      }
+      return;
+    }
+
+    // Stay locked until pre-task failure or a terminal task has been interpreted.
+    sendLogsToSupportInFlightRef.current = true;
+    try {
+      showDashboardNotification("Creating support archive…", "info");
+      const zipResult = await createSupportZip();
+      if (!zipResult.success || !zipResult.data?.fullPath) {
+        showDashboardNotification(
+          zipResult.error || "Could not create the support archive.",
+          "error",
+        );
+        return;
+      }
+
+      const { fullPath, filename, filesAdded } = zipResult.data;
+      showDashboardNotification(
+        `Archive ready (${filesAdded} files). Sending to ${SUPPORT_QMAIL_ADDRESS}…`,
+        "info",
+      );
+
+      const sendResult = await sendSupportLogs({
+        zipPath: fullPath,
+        filename,
+        subject: `QMail support package${filename ? `: ${filename}` : ""}`,
+      });
+      if (!sendResult.success) {
+        showDashboardNotification(
+          sendResult.error || "Could not start send to support.",
+          "error",
+        );
+        return;
+      }
+
+      const taskId = sendResult.data?.taskId;
+      if (!taskId) {
+        showDashboardNotification(
+          "Server did not return a task ID for the support send. " +
+            "The archive remains under Client_Data/Zipped Logs for retry.",
+          "error",
+        );
+        return;
+      }
+
+      // Persist before polling so remount/connectivity loss cannot start a second send.
+      const pendingStored = rememberPendingSupportSend(
+        {
+          taskId,
+          zipPath: fullPath,
+          filename,
+        },
+        SUPPORT_SEND_STORAGE_KEY,
+      );
+      if (!pendingStored) {
+        showDashboardNotification(
+          "The send started, but QMail could not save its task status. " +
+            "Keep this window open until sending finishes.",
+          "warning",
+        );
+      }
+
+      await finishSupportSendPoll(taskId);
+    } catch (error) {
+      console.error("Send logs to support failed:", error);
+      showDashboardNotification(
+        error?.message || "Send logs to support failed.",
+        "error",
+      );
+      // If we already have a pending task id, keep it so duplicates stay blocked.
+    } finally {
+      sendLogsToSupportInFlightRef.current = false;
+    }
+  };
+
   const handleQmailMenuCommand = async (rawCommand) => {
     // Menu commands are plain strings, except Add Funds, which arrives as
     // { command: "add-funds", method, files?, folder? } after the main
@@ -3052,6 +3301,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     const command = payload.command;
     try {
       switch (command) {
+        case "send-logs-to-support":
+          await handleSendLogsToSupport();
+          break;
         case "compose-new":
           await handleOpenCompose();
           break;
@@ -3078,6 +3330,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
                 }
               : null,
           );
+          break;
+        case "backup-wallet":
+          await handleBackupWalletCommand(payload.wallet, payload.destination);
           break;
         case "withdraw-funds":
           handleOpenWalletAction(
