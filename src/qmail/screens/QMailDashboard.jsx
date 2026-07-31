@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { ShieldAlert } from "lucide-react";
 import ComposeModal from "./ComposeModal";
 import WalletActionModal from "./WalletActionModal";
+import CoinEncryptionModal from "./CoinEncryptionModal";
 import ContactsPane from "./ContactsPane";
 import AccountPane from "./AccountPane";
 import NavigationPane from "./NavigationPane";
@@ -97,6 +98,10 @@ import {
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { buildWindowTitle } from "./windowTitle";
 import { ensureProtectedWhitelist } from "../ensureProtectedWhitelist";
+import {
+  formatMailboxCoinPolicyMessage,
+  getMailboxWalletPolicy,
+} from "../walletStoragePolicy";
 
 import "./QMailDashboard.css";
 
@@ -402,7 +407,11 @@ const INITIAL_MAIL_COUNTS = {
   starred: { unread: 0, total: 0 },
 };
 
-const QMailDashboard = ({ initialIdentity, onSignOut }) => {
+const QMailDashboard = ({
+  initialIdentity,
+  initialCoinFileState,
+  onSignOut,
+}) => {
   const [activeView, setActiveView] = useState("inbox");
   const [currentFolder, setCurrentFolder] = useState("inbox");
   const [loading, setLoading] = useState(false);
@@ -425,6 +434,15 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   // Preselection coming from the Wallet > Add Funds menu (method, files,
   // folder picked in the main process before the modal opens).
   const [walletActionContext, setWalletActionContext] = useState(null);
+  const [coinSecurityAction, setCoinSecurityAction] = useState(null);
+  const [coinFileState, setCoinFileState] = useState(
+    initialCoinFileState || {
+      state: "unknown",
+      encryptedCount: 0,
+      decryptedCount: 0,
+      ignoredCount: 0,
+    },
+  );
   const [profileEditor, setProfileEditor] = useState(null);
   const [composeContext, setComposeContext] = useState(null);
   const [raidaEchoSnapshot, setRaidaEchoSnapshot] = useState(null);
@@ -1196,7 +1214,47 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
     }
   };
 
-  const handleOpenWalletAction = (mode, context = null) => {
+  const coinFilesReadyForWalletActivity = () => {
+    if (coinFileState.state !== "mixed") return true;
+    showDashboardNotification(
+      "Coin files are in a mixed encrypted/decrypted state. Finish encrypting or decrypting them from the Security menu before using wallet funds.",
+      "warning",
+    );
+    return false;
+  };
+
+  const handleOpenWalletAction = async (mode, context = null) => {
+    if (!coinFilesReadyForWalletActivity()) return;
+
+    if (mode !== "withdraw") {
+      const latestBalance = await getQMailWalletBalance();
+      const balanceForPolicy = latestBalance.success
+        ? latestBalance.data
+        : walletBalance;
+
+      if (latestBalance.success) {
+        setWalletBalance(latestBalance.data);
+      }
+
+      const policy = getMailboxWalletPolicy(qmailAddress, balanceForPolicy);
+      const policyMessage = formatMailboxCoinPolicyMessage(policy);
+
+      if (policy.status === "blocked") {
+        showDashboardNotification(
+          { message: policyMessage, type: "error", duration: 12000 },
+          "error",
+        );
+        return;
+      }
+
+      if (policy.status === "warning") {
+        showDashboardNotification(
+          { message: policyMessage, type: "warning", duration: 12000 },
+          "warning",
+        );
+      }
+    }
+
     setWalletActionContext(context);
     setWalletActionMode(mode === "withdraw" ? "withdraw" : "add");
   };
@@ -1204,6 +1262,70 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   const handleCloseWalletAction = () => {
     setWalletActionMode(null);
     setWalletActionContext(null);
+  };
+
+  const handleOpenCoinSecurity = async (action) => {
+    if (coinSecurityAction) {
+      showDashboardNotification(
+        "Finish or close the current coin-security operation first.",
+        "info",
+      );
+      return;
+    }
+
+    if (action === "encrypt" && coinFileState.state === "encrypted") {
+      showDashboardNotification("Coin files are already encrypted.", "info");
+      return;
+    }
+    if (action === "decrypt" && coinFileState.state === "decrypted") {
+      showDashboardNotification("Coin files are already decrypted.", "info");
+      return;
+    }
+
+    if (action === "encrypt") {
+      const policy = getMailboxWalletPolicy(qmailAddress, walletBalance);
+      if (!policy.mailboxClass) {
+        showDashboardNotification(
+          "QMail could not determine your mailbox class. Reload your identity and try again.",
+          "error",
+        );
+        return;
+      }
+      if (!policy.canEncryptCoins) {
+        showDashboardNotification(
+          {
+            message:
+              `Your .${policy.mailboxClass} mailbox cannot encrypt coin files. ` +
+              "Upgrade to a .kilo address or higher to use wallet encryption.",
+            type: "warning",
+            duration: 12000,
+          },
+          "warning",
+        );
+        return;
+      }
+    }
+
+    setCoinSecurityAction(action);
+  };
+
+  const handleCloseCoinSecurity = async () => {
+    try {
+      const nextState = await window.electronAPI?.getCoinFileState?.();
+      if (nextState?.state) {
+        setCoinFileState(nextState);
+      }
+    } catch (error) {
+      console.warn("Could not refresh coin-file state:", error);
+    }
+    setCoinSecurityAction(null);
+  };
+
+  const handleCoinSecurityComplete = (nextFileState) => {
+    if (nextFileState?.state) {
+      setCoinFileState(nextFileState);
+    }
+    setCoinSecurityAction(null);
   };
 
   const handleWalletUpdated = async () => {
@@ -1695,6 +1817,14 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
         return result;
       });
 
+      await runRefreshStep("Coin-file security", async () => {
+        const nextState = await window.electronAPI?.getCoinFileState?.();
+        if (nextState?.state) {
+          setCoinFileState(nextState);
+        }
+        return nextState;
+      });
+
       showDashboardNotification(
         hadFailure
           ? "Refresh completed with some service errors."
@@ -1985,6 +2115,8 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   };
 
   const handleOpenCompose = async () => {
+    if (!coinFilesReadyForWalletActivity()) return;
+
     const fundingCheck = await getQMailCanSend();
     if (!fundingCheck.success) {
       showDashboardNotification(
@@ -2034,6 +2166,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
   };
 
   const handleReply = async (email) => {
+    if (!coinFilesReadyForWalletActivity()) return;
     const replyEmail = await resolveReplySender(email);
     setComposeContext({
       mode: "reply",
@@ -2058,6 +2191,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
 
   // FIX-07: handleReplyAll
   const handleReplyAll = async (email) => {
+    if (!coinFilesReadyForWalletActivity()) return;
     if (!hasReplyAllRecipientData(email)) {
       showDashboardNotification(
         "Recipient list not stored with this message.",
@@ -2077,6 +2211,7 @@ const QMailDashboard = ({ initialIdentity, onSignOut }) => {
 
   // FIX-06: handleForward
   const handleForward = async (email) => {
+    if (!coinFilesReadyForWalletActivity()) return;
     if (
       email?.isPending ||
       email?.isDownloaded === false ||
@@ -3320,7 +3455,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           await handleMarkAllAsReadCommand();
           break;
         case "add-funds":
-          handleOpenWalletAction(
+          await handleOpenWalletAction(
             "add",
             payload.method
               ? {
@@ -3369,6 +3504,12 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         case "profile-find-users":
           setProfileEditor("find-users");
           break;
+        case "security-encrypt-coins":
+          await handleOpenCoinSecurity("encrypt");
+          break;
+        case "security-decrypt-coins":
+          await handleOpenCoinSecurity("decrypt");
+          break;
         default:
           break;
       }
@@ -3386,7 +3527,15 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
     // Re-register when mailbox state changes so menu commands use fresh state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFolder, emails, selectedEmail]);
+  }, [
+    coinFileState,
+    coinSecurityAction,
+    currentFolder,
+    emails,
+    qmailAddress,
+    selectedEmail,
+    walletBalance,
+  ]);
 
   // FIX-01: POST /api/qmail/net/messages/download returns metadata
   // (email_id, sender_sn, stripes_*), not the decrypted body. The body
@@ -4148,6 +4297,38 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         onDismiss={handleDismissRestoredTransfer}
         onOpenPath={handleOpenRestoredTransferPath}
       />
+      {coinFileState.state === "mixed" && (
+        <section
+          className="qmail-dashboard__coin-security-warning"
+          role="alert"
+          aria-label="Mixed coin-file security state"
+        >
+          <ShieldAlert size={20} />
+          <div>
+            <strong>Coin Files: Mixed/Unknown</strong>
+            <p>
+              Wallet activity is paused because encrypted and decrypted coin
+              files were both found. Finish one operation before continuing.
+            </p>
+          </div>
+          <div className="qmail-dashboard__coin-security-actions">
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => handleOpenCoinSecurity("decrypt")}
+            >
+              Finish Decrypting
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => handleOpenCoinSecurity("encrypt")}
+            >
+              Finish Encrypting
+            </button>
+          </div>
+        </section>
+      )}
       {pendingDangerousAttachment && (
         <div
           className="qmail-dashboard__attachment-confirm-overlay"
@@ -4235,8 +4416,14 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         initialWithdrawMethod={walletActionContext?.withdrawMethod || "locker"}
         initialWithdrawDestination={walletActionContext?.withdrawDestination || null}
         walletBalance={walletBalance}
+        qmailAddress={qmailAddress}
         onClose={handleCloseWalletAction}
         onWalletUpdated={handleWalletUpdated}
+      />
+      <CoinEncryptionModal
+        action={coinSecurityAction}
+        onClose={handleCloseCoinSecurity}
+        onComplete={handleCoinSecurityComplete}
       />
       <ProfileModal
         editor={profileEditor}
@@ -4254,6 +4441,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         folders={folders}
         raidaEchoSnapshot={raidaEchoSnapshot}
         qmailAddress={qmailAddress}
+        coinFileState={coinFileState}
         onWalletAction={handleOpenWalletAction}
       />
 

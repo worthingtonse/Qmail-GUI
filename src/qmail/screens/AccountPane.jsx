@@ -738,7 +738,7 @@ const AccountPane = ({ userAccount, onSignOut }) => {
                 <div className="account-pane__security-action-content">
                   <div className="account-pane__security-action-title">Sign Out</div>
                   <div className="account-pane__security-action-description">
-                    Return to the start screen on this device
+                    Sign out and close QMail
                   </div>
                 </div>
               </button>
@@ -789,8 +789,8 @@ const AccountPane = ({ userAccount, onSignOut }) => {
               <h3 id="sign-out-title">Sign Out</h3>
             </div>
             <p>
-              QMail will return to the start screen and stay signed out after
-              restart. Your local identity files will remain on this device.
+              QMail will sign out and close immediately. Your local identity
+              files will remain on this device.
             </p>
             {!storageAvailable && (
               <div className="account-pane__confirm-warning">

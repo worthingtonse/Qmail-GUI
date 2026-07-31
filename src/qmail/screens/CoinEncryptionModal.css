@@ -1,0 +1,199 @@
+.coin-encryption-startup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 100vh;
+  background: var(--primary-bg);
+  color: var(--text-secondary);
+}
+
+.coin-encryption-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 74%, transparent);
+  backdrop-filter: var(--glass-blur);
+}
+
+.coin-encryption-modal__dialog {
+  width: min(34rem, 100%);
+  max-height: min(92vh, 52rem);
+  overflow-y: auto;
+  border: var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+}
+
+.coin-encryption-modal__header,
+.coin-encryption-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+}
+
+.coin-encryption-modal__header {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.coin-encryption-modal__footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.coin-encryption-modal__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.coin-encryption-modal__heading h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.coin-encryption-modal__close,
+.coin-encryption-modal__reveal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.coin-encryption-modal__close {
+  padding: var(--space-sm);
+}
+
+.coin-encryption-modal__close:hover:not(:disabled),
+.coin-encryption-modal__reveal:hover:not(:disabled) {
+  border-color: var(--border-medium);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.coin-encryption-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+
+.coin-encryption-modal__intro {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.coin-encryption-modal__status,
+.coin-encryption-modal__warning,
+.coin-encryption-modal__progress,
+.coin-encryption-modal__success,
+.coin-encryption-modal__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+.coin-encryption-modal__status {
+  background: var(--status-info-bg);
+  color: var(--text-secondary);
+}
+
+.coin-encryption-modal__status--warning,
+.coin-encryption-modal__warning {
+  border-color: var(--status-warning);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+}
+
+.coin-encryption-modal__success {
+  border-color: var(--status-success);
+  background: var(--status-success-bg);
+  color: var(--status-success);
+}
+
+.coin-encryption-modal__error {
+  border-color: var(--status-error);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+}
+
+.coin-encryption-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.coin-encryption-modal__field input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.coin-encryption-modal__field input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
+}
+
+.coin-encryption-modal__password-row {
+  position: relative;
+}
+
+.coin-encryption-modal__password-row input {
+  padding-right: 3rem;
+}
+
+.coin-encryption-modal__reveal {
+  position: absolute;
+  top: 50%;
+  right: var(--space-xs);
+  padding: var(--space-xs);
+  transform: translateY(-50%);
+}
+
+.coin-encryption-modal__acknowledgement {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.coin-encryption-modal__acknowledgement input {
+  flex: none;
+  margin-top: 0.2rem;
+}
+
+.coin-encryption-modal__close:disabled,
+.coin-encryption-modal__reveal:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}

@@ -208,6 +208,7 @@ const ComposeModal = ({
   // completes. Empty in the browser/Vite build (no electronAPI).
   const [attachments, setAttachments] = useState([]);
   const [attachError, setAttachError] = useState(null);
+  const [isPickingAttachments, setIsPickingAttachments] = useState(false);
   const attachmentsSupported =
     typeof window !== "undefined" &&
     !!window.electronAPI &&
@@ -451,6 +452,7 @@ const ComposeModal = ({
       // session starts with an empty staging list.
       setAttachments([]);
       setAttachError(null);
+      setIsPickingAttachments(false);
 
       // Reset enhanced states
       setContactSuggestionField(null);
@@ -754,8 +756,9 @@ const ComposeModal = ({
   //   silently dropped at send time.
   // No-op in the browser/Vite build (button is disabled there).
   const handleAttachClick = async () => {
-    if (!attachmentsSupported) return;
+    if (!attachmentsSupported || isPickingAttachments) return;
     setAttachError(null);
+    setIsPickingAttachments(true);
     try {
       const picked = await window.electronAPI.pickAttachments();
       if (!Array.isArray(picked) || picked.length === 0) return; // canceled
@@ -819,6 +822,8 @@ const ComposeModal = ({
     } catch (e) {
       console.warn("pickAttachments failed:", e);
       setAttachError("Could not open the file picker.");
+    } finally {
+      setIsPickingAttachments(false);
     }
   };
 
@@ -2162,7 +2167,9 @@ const ComposeModal = ({
             type="button"
             className="compose-modal__attach-files-button"
             onClick={handleAttachClick}
-            disabled={isSending || !attachmentsSupported}
+            disabled={
+              isSending || isPickingAttachments || !attachmentsSupported
+            }
             title={
               attachmentsSupported
                 ? "Attach files to this message"
@@ -2170,7 +2177,9 @@ const ComposeModal = ({
             }
           >
             <Paperclip size={14} />
-            {attachments.length === 0
+            {isPickingAttachments
+              ? "Opening file picker..."
+              : attachments.length === 0
               ? "Attach files"
               : `Attach files (${attachments.length} attached)`}
           </button>

@@ -51,6 +51,54 @@
   min-height: 0;
 }
 
+.qmail-dashboard__coin-security-warning {
+  position: absolute;
+  top: var(--space-md);
+  left: calc(var(--sidebar-width) + (100% - var(--sidebar-width)) / 2);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: min(48rem, calc(100% - var(--sidebar-width) - 2 * var(--space-lg)));
+  padding: var(--space-md);
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius-lg);
+  background: var(--status-error-bg);
+  color: var(--status-error);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+}
+
+.qmail-dashboard__coin-security-warning > svg {
+  flex: none;
+}
+
+.qmail-dashboard__coin-security-warning p {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.qmail-dashboard__coin-security-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+
+@media (max-width: 900px) {
+  .qmail-dashboard__coin-security-warning {
+    left: 50%;
+    flex-wrap: wrap;
+    width: calc(100% - 2 * var(--space-lg));
+  }
+
+  .qmail-dashboard__coin-security-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
 .qmail-dashboard::before {
   content: "";
   position: absolute;

@@ -2260,6 +2260,230 @@ export const getQMailWalletBalance = async () => {
 };
 
 /**
+ * Reports whether the core currently holds a coin-file encryption key and
+ * whether registered wallets contain encrypted .bin files.
+ */
+export const getCoinEncryptionStatus = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/system/encryption-status`);
+    const data = await handleResponse(response);
+    if (data?.success === false) {
+      throw new Error(
+        extractApiErrorMessage(data, "Could not read coin encryption status."),
+      );
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        keySet: isTruthyApiFlag(data?.key_set),
+        encryptedFilesExist: isTruthyApiFlag(data?.encrypted_files_exist),
+        loginRequired: isTruthyApiFlag(data?.login_required),
+      },
+    };
+  } catch (error) {
+    console.error("Get coin encryption status failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Sends the password in a form-encoded POST body so it never appears in the
+ * request URL or the core's request-line log.
+ */
+export const setCoinEncryptionPassword = async (password) => {
+  try {
+    const passwordText = typeof password === "string" ? password : "";
+    const passwordBytes = new TextEncoder().encode(passwordText);
+    if (passwordBytes.length === 0) {
+      throw new Error("Enter your coin encryption password.");
+    }
+    if (passwordBytes.length > 4096) {
+      throw new Error("The password must be no more than 4,096 UTF-8 bytes.");
+    }
+
+    const body = new URLSearchParams();
+    body.set("password", passwordText);
+    const response = await fetch(`${API_BASE_URL}/system/load-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+      },
+      body,
+    });
+    const data = await handleResponse(response);
+    if (data?.success === false || !isTruthyApiFlag(data?.key_set)) {
+      throw new Error(
+        extractApiErrorMessage(data, "The encryption key was not set."),
+      );
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        keySet: true,
+        passwordVerified: isTruthyApiFlag(data?.password_verified),
+        verifierCreated: isTruthyApiFlag(data?.verifier_created),
+      },
+    };
+  } catch (error) {
+    console.error("Set coin encryption password failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Requests a clean core shutdown. The core sends its response, zeroes the
+ * in-memory encryption key, stops background workers, closes databases, and
+ * exits. This replaces the removed /system/logout endpoint.
+ */
+export const shutdownCore = async ({ timeoutMs = 2000 } = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_BASE_URL}/system/shutdown`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const data = await handleResponse(response);
+    if (data?.success === false) {
+      throw new Error(
+        extractApiErrorMessage(data, "The core did not accept the shutdown request."),
+      );
+    }
+    return { success: true, data };
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    console.error("Core shutdown failed:", error);
+    return {
+      success: false,
+      error: timedOut
+        ? "The core did not respond to the shutdown request in time."
+        : error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+/**
+ * Starts the async plaintext-to-encrypted conversion. Omitting walletPath
+ * uses the core's documented all-registered-wallets scope.
+ */
+export const encryptExistingCoinFiles = async (
+  walletPath = null,
+  folders = ["Bank", "Fracked"],
+) => {
+  try {
+    const resolvedWalletPath = String(walletPath || "").trim();
+    const allowedFolders = (Array.isArray(folders) ? folders : [])
+      .map((folder) => String(folder || "").trim())
+      .filter((folder) => folder === "Bank" || folder === "Fracked");
+    if (allowedFolders.length === 0) {
+      throw new Error("Choose at least one supported wallet folder.");
+    }
+
+    const body = new URLSearchParams();
+    if (resolvedWalletPath) {
+      body.set("wallet_path", resolvedWalletPath);
+    }
+    body.set("folders", [...new Set(allowedFolders)].join(","));
+    const response = await fetch(
+      `${API_BASE_URL}/system/encrypt_existing_files`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        },
+        body,
+      },
+    );
+    const data = await handleResponse(response);
+    const taskId = data?.task_id || data?.taskId;
+    if (data?.success === false || !taskId) {
+      throw new Error(
+        extractApiErrorMessage(data, "Coin encryption did not start."),
+      );
+    }
+
+    return { success: true, data: { ...data, taskId } };
+  } catch (error) {
+    console.error("Encrypt existing coin files failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Starts the forward-compatible encrypted-to-plaintext conversion. The core
+ * implementation is expected to mirror encrypt_existing_files and return a
+ * task_id for /api/system/tasks polling.
+ */
+export const decryptExistingCoinFiles = async (
+  walletPath = null,
+  folders = ["Bank", "Fracked"],
+) => {
+  try {
+    const resolvedWalletPath = String(walletPath || "").trim();
+    const allowedFolders = (Array.isArray(folders) ? folders : [])
+      .map((folder) => String(folder || "").trim())
+      .filter((folder) => folder === "Bank" || folder === "Fracked");
+    if (allowedFolders.length === 0) {
+      throw new Error("Choose at least one supported wallet folder.");
+    }
+
+    const body = new URLSearchParams();
+    if (resolvedWalletPath) {
+      body.set("wallet_path", resolvedWalletPath);
+    }
+    body.set("folders", [...new Set(allowedFolders)].join(","));
+    const response = await fetch(
+      `${API_BASE_URL}/system/decrypt_existing_files`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        },
+        body,
+      },
+    );
+    const data = await handleResponse(response);
+    const taskId = data?.task_id || data?.taskId;
+    if (data?.success === false || !taskId) {
+      throw new Error(
+        extractApiErrorMessage(data, "Coin decryption did not start."),
+      );
+    }
+
+    return { success: true, data: { ...data, taskId } };
+  } catch (error) {
+    console.error("Decrypt existing coin files failed:", error);
+    return {
+      success: false,
+      error:
+        error.httpStatus === 501
+          ? "Coin decryption is not available in this core build yet."
+          : error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
  * Marks an email as read or unread
  * @param {string} emailId - The email ID
  * @param {boolean} isRead - true to mark as read, false for unread

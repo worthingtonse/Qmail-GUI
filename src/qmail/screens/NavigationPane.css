@@ -293,6 +293,23 @@
   color: var(--text-primary);
 }
 
+.navigation-pane__coin-security {
+  font-size: var(--font-size-xs);
+}
+
+.navigation-pane__coin-security--encrypted {
+  color: var(--status-warning);
+}
+
+.navigation-pane__coin-security--decrypted {
+  color: var(--status-success);
+}
+
+.navigation-pane__coin-security--mixed,
+.navigation-pane__coin-security--unknown {
+  color: var(--status-error);
+}
+
 /* The identity ("mailbox key") coin is staked, not spendable — surface it
    under the wallet balance so users don't read the missing value as lost funds. */
 .navigation-pane__staked-row {

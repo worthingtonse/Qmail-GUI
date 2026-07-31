@@ -191,6 +191,17 @@
   color: var(--status-warning);
 }
 
+.wallet-action-modal__storage-warning {
+  margin-top: var(--space-xs);
+  border-color: var(--status-warning);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+}
+
+.wallet-action-modal__storage-warning .compose-modal__status-icon {
+  color: var(--status-warning);
+}
+
 /* Per-issue detail lines, shown beneath the red banner. */
 .wallet-action-modal__deposit-warnings {
   margin-top: var(--space-xs);

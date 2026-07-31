@@ -5,6 +5,7 @@ const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
+const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -16,6 +17,15 @@ let backendPort = 0; // resolved before the backend is spawned
 let activeThemeMenuItem = 'dark';
 let backendDataDir = null;
 let titleBarColor = '#C9CC3F';
+let backgroundColor = null;
+let qmailDetailBackgroundColor = null;
+let attachmentPickerActive = false;
+let coinFileState = {
+  state: 'unknown',
+  encryptedCount: 0,
+  decryptedCount: 0,
+  ignoredCount: 0,
+};
 const selectedAttachmentPaths = new Set();
 
 // R-2 hardening: per-session random token. core.exe requires it as a bearer
@@ -41,6 +51,7 @@ const FALLBACK_ALERT_SOUND_FILES = [
 ];
 const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
+const ZOOM_LEVEL_STEP = 0.5;
 // Single source of truth for the version: version.json at the app root,
 // stamped by scripts/stamp-version.cjs on every build. src/version.js
 // imports the same file for the renderer.
@@ -417,6 +428,8 @@ function readWindowSettings() {
 function loadWindowSettings() {
   const settings = readWindowSettings();
   titleBarColor = normalizeHexColor(settings.titleBarColor) || DEFAULT_TITLE_BAR_COLOR;
+  backgroundColor = normalizeHexColor(settings.backgroundColor);
+  qmailDetailBackgroundColor = normalizeHexColor(settings.qmailDetailBackgroundColor);
 }
 
 function saveWindowSettings(nextSettings) {
@@ -545,6 +558,72 @@ function setTitleBarColor(color, { persist = true } = {}) {
 
 function resetTitleBarColor() {
   return setTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
+}
+
+function getAppearanceColors() {
+  return {
+    success: true,
+    backgroundColor,
+    qmailDetailBackgroundColor,
+  };
+}
+
+function sendAppearanceColorsChanged() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('appearance:colors-changed', getAppearanceColors());
+}
+
+function setAppearanceColor(settingName, color) {
+  const normalized = normalizeHexColor(color);
+  if (!normalized) {
+    return { ...getAppearanceColors(), success: false, error: 'Color must be in #RRGGBB format' };
+  }
+
+  if (settingName === 'backgroundColor') {
+    backgroundColor = normalized;
+  } else if (settingName === 'qmailDetailBackgroundColor') {
+    qmailDetailBackgroundColor = normalized;
+  } else {
+    return { ...getAppearanceColors(), success: false, error: 'Unknown appearance color setting' };
+  }
+
+  if (!saveWindowSettings({ [settingName]: normalized })) {
+    buildApplicationMenu();
+    sendAppearanceColorsChanged();
+    return {
+      ...getAppearanceColors(),
+      success: false,
+      error: 'The color changed, but its setting could not be saved.',
+    };
+  }
+
+  buildApplicationMenu();
+  sendAppearanceColorsChanged();
+  return getAppearanceColors();
+}
+
+function resetAppearanceColor(settingName) {
+  if (settingName === 'backgroundColor') {
+    backgroundColor = null;
+  } else if (settingName === 'qmailDetailBackgroundColor') {
+    qmailDetailBackgroundColor = null;
+  } else {
+    return { ...getAppearanceColors(), success: false, error: 'Unknown appearance color setting' };
+  }
+
+  if (!saveWindowSettings({ [settingName]: null })) {
+    buildApplicationMenu();
+    sendAppearanceColorsChanged();
+    return {
+      ...getAppearanceColors(),
+      success: false,
+      error: 'The default color was restored, but the setting could not be saved.',
+    };
+  }
+
+  buildApplicationMenu();
+  sendAppearanceColorsChanged();
+  return getAppearanceColors();
 }
 
 function showNativeTitleBarColorPicker() {
@@ -1158,6 +1237,60 @@ function readWalletsForMenu() {
   return wallets;
 }
 
+function sendAppearanceColorPickerCommand(target) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('appearance:pick-color', {
+    target,
+    color: target === 'qmail-detail' ? qmailDetailBackgroundColor : backgroundColor,
+  });
+}
+
+// Coin-file state is intentionally derived from the on-disk format instead of
+// the loaded password. Current plaintext .bin files are <450 bytes and current
+// encrypted .bin files are >600 bytes. Sizes in between are ignored so future
+// formats do not get misclassified.
+function detectCoinFileState() {
+  const sizes = [];
+
+  for (const wallet of readWalletsForMenu()) {
+    for (const folderName of ['Bank', 'Fracked']) {
+      const folderPath = path.join(wallet.path, folderName);
+      let entries;
+      try {
+        entries = fs.readdirSync(folderPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.bin') {
+          continue;
+        }
+        try {
+          const size = fs.statSync(path.join(folderPath, entry.name)).size;
+          sizes.push(size);
+        } catch {
+          sizes.push(null);
+        }
+      }
+    }
+  }
+
+  return classifyCoinFileSizes(sizes);
+}
+
+function refreshCoinFileState({ rebuildMenu = false } = {}) {
+  coinFileState = detectCoinFileState();
+  if (rebuildMenu) buildApplicationMenu();
+  return coinFileState;
+}
+
+const getCoinFileStateLabel = (state) => {
+  if (state === 'encrypted') return 'Coin Files: Encrypted';
+  if (state === 'decrypted') return 'Coin Files: Decrypted';
+  return 'Coin Files: Mixed/Unknown';
+};
+
 // Where a picker should open when the caller did not name a location: the
 // most recently used location from the given list that still exists on disk.
 function resolvePickerStartLocation(preferredLocation, recentLocations) {
@@ -1267,9 +1400,9 @@ async function pickWithdrawFolderFromDisk(defaultLocation = null) {
   };
 }
 
-// Menu entry point for Wallet > Add Funds > Entire Folder / Files. Runs the
-// picker (seeded with the chosen recent location, if any) and only then tells
-// the renderer to open the Add Funds modal with the selection filled in.
+// Menu entry point for the folder and individual-file Add Funds actions. Runs
+// the picker (seeded with the chosen recent location, if any) and only then
+// tells the renderer to open the Add Funds modal with the selection filled in.
 async function addFundsFromMenu(method, location = null) {
   if (method === 'files') {
     const files = await pickCoinFilesFromDisk(location);
@@ -1284,9 +1417,9 @@ async function addFundsFromMenu(method, location = null) {
   }
 }
 
-// Submenu shared by "Entire Folder" and "Files": the recent deposit
-// locations (most recent first), then "Choose New Location…" which opens the
-// picker in the last-used folder.
+// Submenu shared by the folder and individual-file actions: the recent
+// deposit locations (most recent first), then "Choose New Location…" which
+// opens the picker in the last-used folder.
 function buildDepositLocationMenuItems(method) {
   const items = readRecentDepositLocations().map((location) => ({
     label: location,
@@ -1405,6 +1538,7 @@ function buildBackupWalletMenuItems() {
 }
 
 function buildApplicationMenu() {
+  coinFileState = detectCoinFileState();
   const template = [
     ...(process.platform === 'darwin' ? [{
       label: app.name,
@@ -1438,11 +1572,11 @@ function buildApplicationMenu() {
           label: 'Add Funds',
           submenu: [
             {
-              label: 'Entire Folder',
+              label: 'Import All Coins from Folder',
               submenu: buildDepositLocationMenuItems('folder'),
             },
             {
-              label: 'Files',
+              label: 'Import Selected Coin Files…',
               submenu: buildDepositLocationMenuItems('files'),
             },
             {
@@ -1467,6 +1601,26 @@ function buildApplicationMenu() {
         {
           label: 'Purchase Coins',
           click: () => shell.openExternal('https://cloudcoin.com/pay/'),
+        },
+      ],
+    },
+    {
+      label: 'Security',
+      submenu: [
+        {
+          label: getCoinFileStateLabel(coinFileState.state),
+          enabled: false,
+        },
+        { type: 'separator' },
+        {
+          label: 'Encrypt Coins',
+          enabled: coinFileState.state !== 'encrypted',
+          click: () => sendQmailMenuCommand('security-encrypt-coins'),
+        },
+        {
+          label: 'Decrypt Coins',
+          enabled: coinFileState.state !== 'decrypted',
+          click: () => sendQmailMenuCommand('security-decrypt-coins'),
         },
       ],
     },
@@ -1558,6 +1712,24 @@ function buildApplicationMenu() {
           label: 'Reset Title Bar Color',
           enabled: titleBarColor !== DEFAULT_TITLE_BAR_COLOR,
           click: () => resetTitleBarColor(),
+        },
+        {
+          label: 'Background Color...',
+          click: () => sendAppearanceColorPickerCommand('background'),
+        },
+        {
+          label: 'Reset Background Color',
+          enabled: Boolean(backgroundColor),
+          click: () => resetAppearanceColor('backgroundColor'),
+        },
+        {
+          label: 'QMail Detail Background Color...',
+          click: () => sendAppearanceColorPickerCommand('qmail-detail'),
+        },
+        {
+          label: 'Reset QMail Detail Background Color',
+          enabled: Boolean(qmailDetailBackgroundColor),
+          click: () => resetAppearanceColor('qmailDetailBackgroundColor'),
         },
         { type: 'separator' },
         { role: 'reload' },
@@ -1684,6 +1856,33 @@ function createMainWindow(port) {
   // window exists; safe to do here.
   mainWindow.webContents.session.setSpellCheckerLanguages(['en-US']);
 
+  // Handle zoom shortcuts explicitly. Electron's menu-role accelerators do
+  // not consistently receive Ctrl+Plus/Ctrl+Minus on every keyboard layout,
+  // particularly when Plus requires Shift or comes from the numeric keypad.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) {
+      return;
+    }
+
+    const isZoomIn =
+      input.key === '+' ||
+      input.key === '=' ||
+      input.code === 'Equal' ||
+      input.code === 'NumpadAdd';
+    const isZoomOut =
+      input.key === '-' ||
+      input.code === 'Minus' ||
+      input.code === 'NumpadSubtract';
+
+    if (!isZoomIn && !isZoomOut) return;
+
+    event.preventDefault();
+    const direction = isZoomIn ? 1 : -1;
+    mainWindow.webContents.setZoomLevel(
+      mainWindow.webContents.getZoomLevel() + direction * ZOOM_LEVEL_STEP
+    );
+  });
+
   // Chromium computes misspelling suggestions but Electron does not render
   // a default context menu — apps must build one. This handler shows up to
   // five suggestions, an Add-to-Dictionary entry, and standard editor
@@ -1792,6 +1991,24 @@ ipcMain.handle('titlebar:reset-color', () => {
   return resetTitleBarColor();
 });
 
+ipcMain.handle('appearance:get-colors', () => getAppearanceColors());
+
+ipcMain.handle('appearance:set-background-color', (_event, color) => {
+  return setAppearanceColor('backgroundColor', color);
+});
+
+ipcMain.handle('appearance:reset-background-color', () => {
+  return resetAppearanceColor('backgroundColor');
+});
+
+ipcMain.handle('appearance:set-qmail-detail-background-color', (_event, color) => {
+  return setAppearanceColor('qmailDetailBackgroundColor', color);
+});
+
+ipcMain.handle('appearance:reset-qmail-detail-background-color', () => {
+  return resetAppearanceColor('qmailDetailBackgroundColor');
+});
+
 ipcMain.on('theme:changed', (_event, themeId) => {
   if (!isStandardTheme(themeId) || activeThemeMenuItem === themeId) return;
   activeThemeMenuItem = themeId;
@@ -1805,6 +2022,10 @@ ipcMain.handle('get-home-dir', () => {
 
 ipcMain.handle('quit-app', () => {
   app.quit();
+});
+
+ipcMain.handle('coin-encryption:get-file-state', () => {
+  return refreshCoinFileState({ rebuildMenu: true });
 });
 
 ipcMain.handle('run-command', async (event, command) => {
@@ -1838,16 +2059,51 @@ ipcMain.handle('read-file', async (event, filename) => {
 //   per-file stat failures (e.g. file deleted between picker and
 //   stat) drop that file from the result and log; the picker as a
 //   whole still resolves so the renderer can use whatever survived.
-ipcMain.handle('compose:pickFiles', async () => {
+ipcMain.handle('compose:pickFiles', async (event) => {
+  if (attachmentPickerActive) {
+    log('compose:pickFiles ignored because an attachment picker is already open');
+    return [];
+  }
+
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!ownerWindow || ownerWindow.isDestroyed()) {
+    log('compose:pickFiles ignored because its owner window is unavailable');
+    return [];
+  }
+
+  attachmentPickerActive = true;
   let result;
   try {
-    result = await dialog.showOpenDialog(mainWindow, {
+    result = await dialog.showOpenDialog(ownerWindow, {
       title: 'Attach files',
       properties: ['openFile', 'multiSelections'],
     });
   } catch (error) {
     log('compose:pickFiles dialog error: ' + error.message);
     return [];
+  } finally {
+    attachmentPickerActive = false;
+
+    // Native file dialogs are window-attached sheets on macOS. Reassert the
+    // owning window and application menu after the sheet closes; this also
+    // recovers the menu bar on Windows/Linux if a platform dialog disturbed
+    // its visibility.
+    if (!ownerWindow.isDestroyed()) {
+      const applicationMenu = Menu.getApplicationMenu();
+      if (applicationMenu) {
+        Menu.setApplicationMenu(applicationMenu);
+      } else {
+        buildApplicationMenu();
+      }
+      if (process.platform === 'darwin') {
+        app.focus();
+      }
+      if (process.platform !== 'darwin' &&
+          typeof ownerWindow.setMenuBarVisibility === 'function') {
+        ownerWindow.setMenuBarVisibility(true);
+      }
+      ownerWindow.focus();
+    }
   }
 
   if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {

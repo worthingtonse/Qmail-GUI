@@ -5,7 +5,7 @@
   flex: 1;
   flex-direction: column;
   overflow: hidden;
-  background-color: var(--primary-bg);
+  background: var(--qmail-detail-background, var(--primary-bg));
 }
 
 /* was: .reading-pane-header */
@@ -355,7 +355,7 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2xl);
-  background-color: var(--primary-bg);
+  background: var(--qmail-detail-background, var(--primary-bg));
 }
 
 /* was: .email-content */

@@ -28,6 +28,10 @@ import {
 } from "../../api/qmailApiServices";
 import { RAIDA_COUNT } from "./serverStatusUi";
 import { parseQmailAddress } from "../address/qmailAddress";
+import {
+  formatMailboxCoinPolicyMessage,
+  getMailboxWalletPolicy,
+} from "../walletStoragePolicy";
 import "./ComposeModal.css";
 import "./WalletActionModal.css";
 
@@ -382,6 +386,7 @@ const WalletActionModal = ({
   onboardingMode = false,
   resumeProvisioning = false,
   walletBalance,
+  qmailAddress = "",
   onClose,
   onWalletUpdated,
   onIdentityReady,
@@ -406,6 +411,7 @@ const WalletActionModal = ({
   const [receiptWalletPath, setReceiptWalletPath] = useState("");
   const [receiptContent, setReceiptContent] = useState(null);
   const [depositWarnings, setDepositWarnings] = useState([]);
+  const [storageWarning, setStorageWarning] = useState("");
   const [isReceiptVisible, setIsReceiptVisible] = useState(false);
   const [isReceiptLoading, setIsReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState("");
@@ -448,6 +454,7 @@ const WalletActionModal = ({
     setReceiptWalletPath("");
     setReceiptContent(null);
     setDepositWarnings([]);
+    setStorageWarning("");
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
@@ -539,6 +546,7 @@ const WalletActionModal = ({
     setReceiptWalletPath("");
     setReceiptContent(null);
     setDepositWarnings([]);
+    setStorageWarning("");
     setIsReceiptVisible(false);
     setIsReceiptLoading(false);
     setReceiptError("");
@@ -688,6 +696,22 @@ const WalletActionModal = ({
 
   const handleAddFunds = async () => {
     resetOperationState();
+
+    if (!onboardingMode) {
+      const storagePolicy = getMailboxWalletPolicy(qmailAddress, walletBalance);
+      const storagePolicyMessage =
+        formatMailboxCoinPolicyMessage(storagePolicy);
+
+      if (storagePolicy.status === "blocked") {
+        setError(storagePolicyMessage);
+        return;
+      }
+
+      if (storagePolicy.status === "warning") {
+        setStorageWarning(storagePolicyMessage);
+      }
+    }
+
     setIsWorking(true);
 
     try {
@@ -1183,6 +1207,16 @@ const WalletActionModal = ({
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {mode === "add" && storageWarning && (
+            <div
+              className="compose-modal__send-progress wallet-action-modal__storage-warning"
+              role="status"
+            >
+              <AlertCircle size={16} className="compose-modal__status-icon" />
+              <span>{storageWarning}</span>
             </div>
           )}
 
