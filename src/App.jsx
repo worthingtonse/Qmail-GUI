@@ -16,6 +16,7 @@ import {
   hasId,
   normalizeIdentityForUi,
   peekBeacon,
+  shutdownCore,
 } from "./api/qmailApiServices";
 import { formatBuildDateForDisplay } from "./version";
 
@@ -23,6 +24,7 @@ import { formatBuildDateForDisplay } from "./version";
 // opens this page in the user's default browser.
 const DOWNLOAD_PAGE_URL = "https://cloudcoinconsortium.com/use.php";
 const DEFAULT_TITLE_BAR_COLOR = "#C9CC3F";
+const DEFAULT_BACKGROUND_COLOR = "#0F1419";
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 const QMAIL_DISCLAIMER_TEXT = `DISCLAIMER:
@@ -117,6 +119,102 @@ function App() {
     document.body.appendChild(input);
     input.click();
   }, []);
+
+  const applyAppearanceColors = useCallback((colors = {}) => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const appColor = colors.backgroundColor;
+    const detailColor = colors.qmailDetailBackgroundColor;
+
+    if (typeof appColor === "string" && HEX_COLOR_PATTERN.test(appColor)) {
+      root.style.setProperty("--primary-bg", appColor);
+    } else {
+      root.style.removeProperty("--primary-bg");
+    }
+
+    if (typeof detailColor === "string" && HEX_COLOR_PATTERN.test(detailColor)) {
+      root.style.setProperty("--qmail-detail-background", detailColor);
+    } else {
+      root.style.removeProperty("--qmail-detail-background");
+    }
+  }, []);
+
+  const openAppearanceColorPicker = useCallback(async (initial = {}) => {
+    if (
+      typeof window === "undefined" ||
+      typeof document === "undefined" ||
+      !window.electronAPI
+    ) {
+      return;
+    }
+
+    const target = initial.target === "qmail-detail" ? "qmail-detail" : "background";
+    const setter =
+      target === "qmail-detail"
+        ? window.electronAPI.setQmailDetailBackgroundColor
+        : window.electronAPI.setBackgroundColor;
+    if (typeof setter !== "function") return;
+
+    let currentColor =
+      typeof initial.color === "string" && HEX_COLOR_PATTERN.test(initial.color)
+        ? initial.color
+        : "";
+
+    if (!currentColor && window.electronAPI.getAppearanceColors) {
+      try {
+        const colors = await window.electronAPI.getAppearanceColors();
+        const savedColor =
+          target === "qmail-detail"
+            ? colors?.qmailDetailBackgroundColor || colors?.backgroundColor
+            : colors?.backgroundColor;
+        if (typeof savedColor === "string" && HEX_COLOR_PATTERN.test(savedColor)) {
+          currentColor = savedColor;
+        }
+      } catch {
+        /* Fall through to the current theme's first background color. */
+      }
+    }
+
+    if (!currentColor) {
+      const themeBackground = getComputedStyle(document.documentElement)
+        .getPropertyValue("--primary-bg");
+      currentColor =
+        themeBackground.match(/#[0-9a-fA-F]{6}/)?.[0] || DEFAULT_BACKGROUND_COLOR;
+    }
+
+    document
+      .querySelectorAll("input[data-qmail-appearance-color-picker]")
+      .forEach((node) => node.remove());
+
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = currentColor;
+    input.setAttribute("data-qmail-appearance-color-picker", target);
+    input.style.position = "fixed";
+    input.style.left = "-1000px";
+    input.style.top = "0";
+    input.style.width = "1px";
+    input.style.height = "1px";
+    input.style.opacity = "0";
+
+    input.addEventListener(
+      "change",
+      async () => {
+        try {
+          const result = await setter(input.value);
+          applyAppearanceColors(result);
+        } catch (error) {
+          console.error(`Failed to set ${target} background color:`, error);
+        } finally {
+          input.remove();
+        }
+      },
+      { once: true },
+    );
+
+    document.body.appendChild(input);
+    input.click();
+  }, [applyAppearanceColors]);
 
   // Wait for the backend to be ready before kicking off identity checks. The Electron splash hides the very first window
   // of "nothing is happening", but the backend itself (core.exe) may
@@ -249,6 +347,25 @@ function App() {
       window.electronAPI?.onTitleBarColorPick?.(openTitleBarColorPicker);
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, [openTitleBarColorPicker]);
+
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return undefined;
+
+    api.getAppearanceColors?.()
+      .then(applyAppearanceColors)
+      .catch((error) => console.error("Failed to load appearance colors:", error));
+
+    const unsubscribePick =
+      api.onAppearanceColorPick?.(openAppearanceColorPicker);
+    const unsubscribeChanged =
+      api.onAppearanceColorsChanged?.(applyAppearanceColors);
+
+    return () => {
+      if (typeof unsubscribePick === "function") unsubscribePick();
+      if (typeof unsubscribeChanged === "function") unsubscribeChanged();
+    };
+  }, [applyAppearanceColors, openAppearanceColorPicker]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -491,7 +608,12 @@ function App() {
     }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    await shutdownCore();
+    if (window.electronAPI?.quitApp) {
+      await window.electronAPI.quitApp();
+      return;
+    }
     setProvisioningData(null);
     setSelectedService(SERVICES.NONE);
   };

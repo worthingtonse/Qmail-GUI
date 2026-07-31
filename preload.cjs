@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Absolute folder the program runs from — shown in the window title.
   getAppDir: () => ipcRenderer.invoke('get-app-dir'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
+  getCoinFileState: () => ipcRenderer.invoke('coin-encryption:get-file-state'),
   // Add CLI command support
   runCommand: (command) => ipcRenderer.invoke('run-command', command),
   // Add file reading support for EFF wordlist
@@ -28,6 +29,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTitleBarColor: () => ipcRenderer.invoke('titlebar:get-color'),
   setTitleBarColor: (color) => ipcRenderer.invoke('titlebar:set-color', color),
   resetTitleBarColor: () => ipcRenderer.invoke('titlebar:reset-color'),
+  getAppearanceColors: () => ipcRenderer.invoke('appearance:get-colors'),
+  setBackgroundColor: (color) =>
+    ipcRenderer.invoke('appearance:set-background-color', color),
+  resetBackgroundColor: () =>
+    ipcRenderer.invoke('appearance:reset-background-color'),
+  setQmailDetailBackgroundColor: (color) =>
+    ipcRenderer.invoke('appearance:set-qmail-detail-background-color', color),
+  resetQmailDetailBackgroundColor: () =>
+    ipcRenderer.invoke('appearance:reset-qmail-detail-background-color'),
   // FIX-02 (Batch 5): open a multi-select file picker for ComposeModal
   // attachments. Resolves to an Array<{path, name, size}>, or [] if
   // the user cancels. ComposeModal checks for window.electronAPI
@@ -49,8 +59,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       emailId,
       attachmentId,
     ),
-  pickWalletCoinFiles: () => ipcRenderer.invoke('wallet:pickCoinFiles'),
-  pickWalletCoinFolder: () => ipcRenderer.invoke('wallet:pickCoinFolder'),
+  pickWalletCoinFiles: (options = null) => ipcRenderer.invoke('wallet:pickCoinFiles', options),
+  pickWalletCoinFolder: (options = null) => ipcRenderer.invoke('wallet:pickCoinFolder', options),
+  pickWalletWithdrawFolder: (options = null) =>
+    ipcRenderer.invoke('wallet:pickWithdrawFolder', options),
+  revealWithdrawnFile: (payload) => ipcRenderer.invoke('wallet:revealWithdrawnFile', payload),
+  revealBackupZip: (payload) => ipcRenderer.invoke('wallet:revealBackupZip', payload),
   onThemeSelect: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = (_event, themeId) => callback(themeId);
@@ -74,6 +88,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('titlebar:pick-color', handler);
     return () => ipcRenderer.removeListener('titlebar:pick-color', handler);
+  },
+  onAppearanceColorPick: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('appearance:pick-color', handler);
+    return () => ipcRenderer.removeListener('appearance:pick-color', handler);
+  },
+  onAppearanceColorsChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('appearance:colors-changed', handler);
+    return () => ipcRenderer.removeListener('appearance:colors-changed', handler);
   },
   onAlertSoundCommand: (callback) => {
     if (typeof callback !== 'function') return () => {};

@@ -5,6 +5,7 @@ const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
+const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -16,6 +17,15 @@ let backendPort = 0; // resolved before the backend is spawned
 let activeThemeMenuItem = 'dark';
 let backendDataDir = null;
 let titleBarColor = '#C9CC3F';
+let backgroundColor = null;
+let qmailDetailBackgroundColor = null;
+let attachmentPickerActive = false;
+let coinFileState = {
+  state: 'unknown',
+  encryptedCount: 0,
+  decryptedCount: 0,
+  ignoredCount: 0,
+};
 const selectedAttachmentPaths = new Set();
 
 // R-2 hardening: per-session random token. core.exe requires it as a bearer
@@ -41,15 +51,18 @@ const FALLBACK_ALERT_SOUND_FILES = [
 ];
 const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
+const ZOOM_LEVEL_STEP = 0.5;
 // Single source of truth for the version: version.json at the app root,
 // stamped by scripts/stamp-version.cjs on every build. src/version.js
 // imports the same file for the renderer.
 const { buildDate: QMAIL_BUILD_DATE, buildNumber: QMAIL_BUILD_NUMBER } = require('./version.json');
 const CHANGE_PASSWORDS_NEXT_BOOT_FILE = 'change_passwords_next_boot.txt';
+// Keep in sync with src/qmail/supportConstants.js (renderer cannot require this file).
+const SUPPORT_QMAIL_ADDRESS = '20.123@giga';
 const QMAIL_HELP_MESSAGE =
 `Contact
 Telegram group: t.me/distributedmailsystem
-QMail: 20.123@giga
+QMail: ${SUPPORT_QMAIL_ADDRESS}
 Email: CloudCoin@Protonmail.com`;
 const CHANGE_PASSWORDS_NEXT_BOOT_TEXT =
 `# QMail mailbox authenticity-number rotation
@@ -415,6 +428,8 @@ function readWindowSettings() {
 function loadWindowSettings() {
   const settings = readWindowSettings();
   titleBarColor = normalizeHexColor(settings.titleBarColor) || DEFAULT_TITLE_BAR_COLOR;
+  backgroundColor = normalizeHexColor(settings.backgroundColor);
+  qmailDetailBackgroundColor = normalizeHexColor(settings.qmailDetailBackgroundColor);
 }
 
 function saveWindowSettings(nextSettings) {
@@ -543,6 +558,72 @@ function setTitleBarColor(color, { persist = true } = {}) {
 
 function resetTitleBarColor() {
   return setTitleBarColor(DEFAULT_TITLE_BAR_COLOR);
+}
+
+function getAppearanceColors() {
+  return {
+    success: true,
+    backgroundColor,
+    qmailDetailBackgroundColor,
+  };
+}
+
+function sendAppearanceColorsChanged() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('appearance:colors-changed', getAppearanceColors());
+}
+
+function setAppearanceColor(settingName, color) {
+  const normalized = normalizeHexColor(color);
+  if (!normalized) {
+    return { ...getAppearanceColors(), success: false, error: 'Color must be in #RRGGBB format' };
+  }
+
+  if (settingName === 'backgroundColor') {
+    backgroundColor = normalized;
+  } else if (settingName === 'qmailDetailBackgroundColor') {
+    qmailDetailBackgroundColor = normalized;
+  } else {
+    return { ...getAppearanceColors(), success: false, error: 'Unknown appearance color setting' };
+  }
+
+  if (!saveWindowSettings({ [settingName]: normalized })) {
+    buildApplicationMenu();
+    sendAppearanceColorsChanged();
+    return {
+      ...getAppearanceColors(),
+      success: false,
+      error: 'The color changed, but its setting could not be saved.',
+    };
+  }
+
+  buildApplicationMenu();
+  sendAppearanceColorsChanged();
+  return getAppearanceColors();
+}
+
+function resetAppearanceColor(settingName) {
+  if (settingName === 'backgroundColor') {
+    backgroundColor = null;
+  } else if (settingName === 'qmailDetailBackgroundColor') {
+    qmailDetailBackgroundColor = null;
+  } else {
+    return { ...getAppearanceColors(), success: false, error: 'Unknown appearance color setting' };
+  }
+
+  if (!saveWindowSettings({ [settingName]: null })) {
+    buildApplicationMenu();
+    sendAppearanceColorsChanged();
+    return {
+      ...getAppearanceColors(),
+      success: false,
+      error: 'The default color was restored, but the setting could not be saved.',
+    };
+  }
+
+  buildApplicationMenu();
+  sendAppearanceColorsChanged();
+  return getAppearanceColors();
 }
 
 function showNativeTitleBarColorPicker() {
@@ -1036,7 +1117,440 @@ function setThemeFromMenu(themeId) {
   sendThemeToRenderer(themeId);
 }
 
+// ---------------------------------------------------------------------------
+// Recent coin locations ("Add Funds" sources and "Withdraw" destinations).
+//
+// Each list is stored one path per line, most recent first, in a file under
+// Client_Data/ so the backend's GET /api/system/dropdown?file=<name> can
+// serve the same list. The Electron main process owns the writes (core.exe
+// has no write endpoint for dropdown files) — it spawns core.exe, so it
+// knows where Client_Data is.
+// ---------------------------------------------------------------------------
+const DEPOSIT_LOCATIONS_FILE = 'deposit-locations.txt';
+const WITHDRAW_LOCATIONS_FILE = 'withdraw-locations.txt';
+// Backup destinations use the file name the public dropdown API documents
+// (GET /api/system/dropdown?file=BackupPlaces.txt) — core auto-creates it.
+const BACKUP_LOCATIONS_FILE = 'BackupPlaces.txt';
+const MAX_RECENT_LOCATIONS = 15;
+
+function getRecentLocationsPath(fileName) {
+  if (!backendDataDir) return null;
+  return path.join(backendDataDir, 'Client_Data', fileName);
+}
+
+// Windows paths are case-insensitive; compare accordingly so the same folder
+// picked with different casing does not appear twice in the list.
+const recentLocationKey = (value) =>
+  process.platform === 'win32' ? String(value).toLowerCase() : String(value);
+
+function readRecentLocations(fileName) {
+  const filePath = getRecentLocationsPath(fileName);
+  if (!filePath) return [];
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const seen = new Set();
+    const locations = [];
+    for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+      const location = line.trim();
+      if (!location) continue;
+      const key = recentLocationKey(location);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      locations.push(location);
+      if (locations.length >= MAX_RECENT_LOCATIONS) break;
+    }
+    return locations;
+  } catch (error) {
+    log('Could not read ' + fileName + ': ' + error.message);
+    return [];
+  }
+}
+
+function rememberRecentLocation(fileName, location) {
+  const trimmed = String(location || '').trim();
+  const filePath = getRecentLocationsPath(fileName);
+  if (!trimmed || !filePath) return;
+
+  const key = recentLocationKey(trimmed);
+  const next = [
+    trimmed,
+    ...readRecentLocations(fileName).filter((entry) => recentLocationKey(entry) !== key),
+  ].slice(0, MAX_RECENT_LOCATIONS);
+
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, next.join('\n') + '\n', 'utf8');
+  } catch (error) {
+    log('Could not write ' + fileName + ': ' + error.message);
+    return;
+  }
+  // Keep the Wallet menu's location submenus in sync with the new list.
+  buildApplicationMenu();
+}
+
+const readRecentDepositLocations = () => readRecentLocations(DEPOSIT_LOCATIONS_FILE);
+const rememberDepositLocation = (location) =>
+  rememberRecentLocation(DEPOSIT_LOCATIONS_FILE, location);
+const readRecentWithdrawLocations = () => readRecentLocations(WITHDRAW_LOCATIONS_FILE);
+const rememberWithdrawLocation = (location) =>
+  rememberRecentLocation(WITHDRAW_LOCATIONS_FILE, location);
+const readRecentBackupLocations = () => readRecentLocations(BACKUP_LOCATIONS_FILE);
+const rememberBackupLocation = (location) =>
+  rememberRecentLocation(BACKUP_LOCATIONS_FILE, location);
+
+// Wallets for the File > Backup Wallet menu. wallet_paths.txt is the
+// backend's wallet registry (one absolute path per line — it can include
+// wallets outside Client_Data). Fall back to scanning Client_Data/Wallets
+// when the registry is missing or empty.
+function readWalletsForMenu() {
+  if (!backendDataDir) return [];
+  const clientData = path.join(backendDataDir, 'Client_Data');
+
+  const seen = new Set();
+  const wallets = [];
+  const addWallet = (walletPath) => {
+    const trimmed = String(walletPath || '').trim();
+    if (!trimmed) return;
+    const key = recentLocationKey(trimmed);
+    if (seen.has(key)) return;
+    try {
+      if (!fs.statSync(trimmed).isDirectory()) return;
+    } catch {
+      return;
+    }
+    seen.add(key);
+    wallets.push({ name: path.basename(trimmed) || trimmed, path: trimmed });
+  };
+
+  try {
+    const registryPath = path.join(clientData, 'wallet_paths.txt');
+    if (fs.existsSync(registryPath)) {
+      for (const line of fs.readFileSync(registryPath, 'utf8').split(/\r?\n/)) {
+        addWallet(line);
+      }
+    }
+  } catch (error) {
+    log('Could not read wallet_paths.txt: ' + error.message);
+  }
+
+  if (wallets.length === 0) {
+    try {
+      const walletsDir = path.join(clientData, 'Wallets');
+      if (fs.existsSync(walletsDir)) {
+        for (const entry of fs.readdirSync(walletsDir, { withFileTypes: true })) {
+          if (entry.isDirectory()) addWallet(path.join(walletsDir, entry.name));
+        }
+      }
+    } catch (error) {
+      log('Could not scan Wallets directory: ' + error.message);
+    }
+  }
+
+  return wallets;
+}
+
+function sendAppearanceColorPickerCommand(target) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('appearance:pick-color', {
+    target,
+    color: target === 'qmail-detail' ? qmailDetailBackgroundColor : backgroundColor,
+  });
+}
+
+// Coin-file state is intentionally derived from the on-disk format instead of
+// the loaded password. Current plaintext .bin files are <450 bytes and current
+// encrypted .bin files are >600 bytes. Sizes in between are ignored so future
+// formats do not get misclassified.
+function detectCoinFileState() {
+  const sizes = [];
+
+  for (const wallet of readWalletsForMenu()) {
+    for (const folderName of ['Bank', 'Fracked']) {
+      const folderPath = path.join(wallet.path, folderName);
+      let entries;
+      try {
+        entries = fs.readdirSync(folderPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.bin') {
+          continue;
+        }
+        try {
+          const size = fs.statSync(path.join(folderPath, entry.name)).size;
+          sizes.push(size);
+        } catch {
+          sizes.push(null);
+        }
+      }
+    }
+  }
+
+  return classifyCoinFileSizes(sizes);
+}
+
+function refreshCoinFileState({ rebuildMenu = false } = {}) {
+  coinFileState = detectCoinFileState();
+  if (rebuildMenu) buildApplicationMenu();
+  return coinFileState;
+}
+
+const getCoinFileStateLabel = (state) => {
+  if (state === 'encrypted') return 'Coin Files: Encrypted';
+  if (state === 'decrypted') return 'Coin Files: Decrypted';
+  return 'Coin Files: Mixed/Unknown';
+};
+
+// Where a picker should open when the caller did not name a location: the
+// most recently used location from the given list that still exists on disk.
+function resolvePickerStartLocation(preferredLocation, recentLocations) {
+  const candidates = [preferredLocation, ...recentLocations];
+  for (const candidate of candidates) {
+    const location = String(candidate || '').trim();
+    if (location && fs.existsSync(location)) return location;
+  }
+  return null;
+}
+
+async function pickCoinFilesFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose CloudCoin files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack'] }],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentDepositLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickCoinFiles dialog error: ' + error.message);
+    return [];
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return [];
+  }
+
+  rememberDepositLocation(path.dirname(result.filePaths[0]));
+
+  const enriched = await Promise.all(
+    result.filePaths.map(async (filePath) => {
+      try {
+        const stat = await fs.promises.stat(filePath);
+        return {
+          path: filePath,
+          name: path.basename(filePath),
+          size: stat.size,
+        };
+      } catch (error) {
+        log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
+        return null;
+      }
+    }),
+  );
+
+  return enriched.filter((entry) => entry !== null);
+}
+
+async function pickCoinFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose CloudCoin folder',
+    properties: ['openDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentDepositLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickCoinFolder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberDepositLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+async function pickWithdrawFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose withdraw destination folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentWithdrawLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('wallet:pickWithdrawFolder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberWithdrawLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+// Menu entry point for the folder and individual-file Add Funds actions. Runs
+// the picker (seeded with the chosen recent location, if any) and only then
+// tells the renderer to open the Add Funds modal with the selection filled in.
+async function addFundsFromMenu(method, location = null) {
+  if (method === 'files') {
+    const files = await pickCoinFilesFromDisk(location);
+    if (files.length > 0) {
+      sendQmailMenuCommand({ command: 'add-funds', method: 'files', files });
+    }
+    return;
+  }
+  const folder = await pickCoinFolderFromDisk(location);
+  if (folder) {
+    sendQmailMenuCommand({ command: 'add-funds', method: 'folder', folder });
+  }
+}
+
+// Submenu shared by the folder and individual-file actions: the recent
+// deposit locations (most recent first), then "Choose New Location…" which
+// opens the picker in the last-used folder.
+function buildDepositLocationMenuItems(method) {
+  const items = readRecentDepositLocations().map((location) => ({
+    label: location,
+    click: () => addFundsFromMenu(method, location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => addFundsFromMenu(method, null),
+  });
+  return items;
+}
+
+// Menu entry point for Wallet > Withdraw Funds > .bin File. A location
+// chosen from the recent list goes straight to the Withdraw modal (which
+// prompts for amount and memo); "Choose New Location…" runs the folder
+// picker first, seeded with the last-used destination.
+async function withdrawToBinFromMenu(location = null) {
+  let destination = null;
+  if (location) {
+    rememberWithdrawLocation(location); // bump to most-recent
+    destination = { path: location, name: path.basename(location) || location };
+  } else {
+    destination = await pickWithdrawFolderFromDisk(null);
+  }
+  if (destination) {
+    sendQmailMenuCommand({ command: 'withdraw-funds', method: 'file', destination });
+  }
+}
+
+// Submenu for ".bin File": recent withdraw destinations (most recent first),
+// then "Choose New Location…" which opens the picker in the last-used folder.
+function buildWithdrawLocationMenuItems() {
+  const items = readRecentWithdrawLocations().map((location) => ({
+    label: location,
+    click: () => withdrawToBinFromMenu(location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => withdrawToBinFromMenu(null),
+  });
+  return items;
+}
+
+async function pickBackupFolderFromDisk(defaultLocation = null) {
+  const dialogOptions = {
+    title: 'Choose backup destination folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const startLocation = resolvePickerStartLocation(defaultLocation, readRecentBackupLocations());
+  if (startLocation) dialogOptions.defaultPath = startLocation;
+
+  let result;
+  try {
+    result = await dialog.showOpenDialog(mainWindow, dialogOptions);
+  } catch (error) {
+    log('backup folder dialog error: ' + error.message);
+    return null;
+  }
+
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+
+  const folderPath = result.filePaths[0];
+  rememberBackupLocation(folderPath);
+  return {
+    path: folderPath,
+    name: path.basename(folderPath) || folderPath,
+  };
+}
+
+// Menu entry point for File > Backup Wallet > <wallet> > <location>. A
+// location chosen from the recent list starts the backup right away;
+// "Choose New Location…" runs the folder picker first. The renderer calls
+// POST /api/wallets/backup and reveals the finished ZIP.
+async function backupWalletFromMenu(wallet, location = null) {
+  let destination = null;
+  if (location) {
+    rememberBackupLocation(location); // bump to most-recent
+    destination = { path: location, name: path.basename(location) || location };
+  } else {
+    destination = await pickBackupFolderFromDisk(null);
+  }
+  if (destination) {
+    sendQmailMenuCommand({ command: 'backup-wallet', wallet, destination });
+  }
+}
+
+// Per-wallet submenu of recent backup destinations, then "Choose New
+// Location…". Note: core rejects destinations inside Client_Data.
+function buildBackupLocationMenuItems(wallet) {
+  const items = readRecentBackupLocations().map((location) => ({
+    label: location,
+    click: () => backupWalletFromMenu(wallet, location),
+  }));
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push({
+    label: 'Choose New Location…',
+    click: () => backupWalletFromMenu(wallet, null),
+  });
+  return items;
+}
+
+// File > Backup Wallet: one submenu per known wallet.
+function buildBackupWalletMenuItems() {
+  const wallets = readWalletsForMenu();
+  if (wallets.length === 0) {
+    return [{ label: 'No wallets found', enabled: false }];
+  }
+  return wallets.map((wallet) => ({
+    label: wallet.name,
+    submenu: buildBackupLocationMenuItems(wallet),
+  }));
+}
+
 function buildApplicationMenu() {
+  coinFileState = detectCoinFileState();
   const template = [
     ...(process.platform === 'darwin' ? [{
       label: app.name,
@@ -1055,6 +1569,11 @@ function buildApplicationMenu() {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'Backup Wallet',
+          submenu: buildBackupWalletMenuItems(),
+        },
+        { type: 'separator' },
         { role: process.platform === 'darwin' ? 'close' : 'quit' },
       ],
     },
@@ -1063,15 +1582,57 @@ function buildApplicationMenu() {
       submenu: [
         {
           label: 'Add Funds',
-          click: () => sendQmailMenuCommand('add-funds'),
+          submenu: [
+            {
+              label: 'Import All Coins from Folder',
+              submenu: buildDepositLocationMenuItems('folder'),
+            },
+            {
+              label: 'Import Selected Coin Files…',
+              submenu: buildDepositLocationMenuItems('files'),
+            },
+            {
+              label: 'From Locker…',
+              click: () => sendQmailMenuCommand({ command: 'add-funds', method: 'locker' }),
+            },
+          ],
         },
         {
           label: 'Withdraw Funds',
-          click: () => sendQmailMenuCommand('withdraw-funds'),
+          submenu: [
+            {
+              label: 'Locker Key…',
+              click: () => sendQmailMenuCommand({ command: 'withdraw-funds', method: 'locker' }),
+            },
+            {
+              label: '.bin File',
+              submenu: buildWithdrawLocationMenuItems(),
+            },
+          ],
         },
         {
           label: 'Purchase Coins',
           click: () => shell.openExternal('https://cloudcoin.com/pay/'),
+        },
+      ],
+    },
+    {
+      label: 'Security',
+      submenu: [
+        {
+          label: getCoinFileStateLabel(coinFileState.state),
+          enabled: false,
+        },
+        { type: 'separator' },
+        {
+          label: 'Encrypt Coins',
+          enabled: coinFileState.state !== 'encrypted',
+          click: () => sendQmailMenuCommand('security-encrypt-coins'),
+        },
+        {
+          label: 'Decrypt Coins',
+          enabled: coinFileState.state !== 'decrypted',
+          click: () => sendQmailMenuCommand('security-decrypt-coins'),
         },
       ],
     },
@@ -1164,6 +1725,24 @@ function buildApplicationMenu() {
           enabled: titleBarColor !== DEFAULT_TITLE_BAR_COLOR,
           click: () => resetTitleBarColor(),
         },
+        {
+          label: 'Background Color...',
+          click: () => sendAppearanceColorPickerCommand('background'),
+        },
+        {
+          label: 'Reset Background Color',
+          enabled: Boolean(backgroundColor),
+          click: () => resetAppearanceColor('backgroundColor'),
+        },
+        {
+          label: 'QMail Detail Background Color...',
+          click: () => sendAppearanceColorPickerCommand('qmail-detail'),
+        },
+        {
+          label: 'Reset QMail Detail Background Color',
+          enabled: Boolean(qmailDetailBackgroundColor),
+          click: () => resetAppearanceColor('qmailDetailBackgroundColor'),
+        },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
@@ -1225,6 +1804,28 @@ function buildApplicationMenu() {
           }),
         },
         {
+          label: 'Send Logs To Support',
+          click: async () => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            const { response } = await dialog.showMessageBox(mainWindow, {
+              type: 'question',
+              title: 'Send Logs To Support',
+              message: 'Send diagnostic logs to support?',
+              detail:
+                `This creates a support archive (main.log, recent receipts, ` +
+                `transaction logs) and sends it by QMail to ${SUPPORT_QMAIL_ADDRESS}.\n\n` +
+                `Do not send if you do not want that data shared with support.`,
+              buttons: ['Cancel', 'Send Logs'],
+              defaultId: 1,
+              cancelId: 0,
+              noLink: true,
+            });
+            if (response === 1) {
+              sendQmailMenuCommand('send-logs-to-support');
+            }
+          },
+        },
+        {
           label: 'Upgrade',
           click: () => sendUpgradeRequested(),
         },
@@ -1266,6 +1867,33 @@ function createMainWindow(port) {
   // setSpellCheckerLanguages must be called on the session AFTER the
   // window exists; safe to do here.
   mainWindow.webContents.session.setSpellCheckerLanguages(['en-US']);
+
+  // Handle zoom shortcuts explicitly. Electron's menu-role accelerators do
+  // not consistently receive Ctrl+Plus/Ctrl+Minus on every keyboard layout,
+  // particularly when Plus requires Shift or comes from the numeric keypad.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) {
+      return;
+    }
+
+    const isZoomIn =
+      input.key === '+' ||
+      input.key === '=' ||
+      input.code === 'Equal' ||
+      input.code === 'NumpadAdd';
+    const isZoomOut =
+      input.key === '-' ||
+      input.code === 'Minus' ||
+      input.code === 'NumpadSubtract';
+
+    if (!isZoomIn && !isZoomOut) return;
+
+    event.preventDefault();
+    const direction = isZoomIn ? 1 : -1;
+    mainWindow.webContents.setZoomLevel(
+      mainWindow.webContents.getZoomLevel() + direction * ZOOM_LEVEL_STEP
+    );
+  });
 
   // Chromium computes misspelling suggestions but Electron does not render
   // a default context menu — apps must build one. This handler shows up to
@@ -1375,6 +2003,24 @@ ipcMain.handle('titlebar:reset-color', () => {
   return resetTitleBarColor();
 });
 
+ipcMain.handle('appearance:get-colors', () => getAppearanceColors());
+
+ipcMain.handle('appearance:set-background-color', (_event, color) => {
+  return setAppearanceColor('backgroundColor', color);
+});
+
+ipcMain.handle('appearance:reset-background-color', () => {
+  return resetAppearanceColor('backgroundColor');
+});
+
+ipcMain.handle('appearance:set-qmail-detail-background-color', (_event, color) => {
+  return setAppearanceColor('qmailDetailBackgroundColor', color);
+});
+
+ipcMain.handle('appearance:reset-qmail-detail-background-color', () => {
+  return resetAppearanceColor('qmailDetailBackgroundColor');
+});
+
 ipcMain.on('theme:changed', (_event, themeId) => {
   if (!isStandardTheme(themeId) || activeThemeMenuItem === themeId) return;
   activeThemeMenuItem = themeId;
@@ -1388,6 +2034,10 @@ ipcMain.handle('get-home-dir', () => {
 
 ipcMain.handle('quit-app', () => {
   app.quit();
+});
+
+ipcMain.handle('coin-encryption:get-file-state', () => {
+  return refreshCoinFileState({ rebuildMenu: true });
 });
 
 ipcMain.handle('run-command', async (event, command) => {
@@ -1421,16 +2071,51 @@ ipcMain.handle('read-file', async (event, filename) => {
 //   per-file stat failures (e.g. file deleted between picker and
 //   stat) drop that file from the result and log; the picker as a
 //   whole still resolves so the renderer can use whatever survived.
-ipcMain.handle('compose:pickFiles', async () => {
+ipcMain.handle('compose:pickFiles', async (event) => {
+  if (attachmentPickerActive) {
+    log('compose:pickFiles ignored because an attachment picker is already open');
+    return [];
+  }
+
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!ownerWindow || ownerWindow.isDestroyed()) {
+    log('compose:pickFiles ignored because its owner window is unavailable');
+    return [];
+  }
+
+  attachmentPickerActive = true;
   let result;
   try {
-    result = await dialog.showOpenDialog(mainWindow, {
+    result = await dialog.showOpenDialog(ownerWindow, {
       title: 'Attach files',
       properties: ['openFile', 'multiSelections'],
     });
   } catch (error) {
     log('compose:pickFiles dialog error: ' + error.message);
     return [];
+  } finally {
+    attachmentPickerActive = false;
+
+    // Native file dialogs are window-attached sheets on macOS. Reassert the
+    // owning window and application menu after the sheet closes; this also
+    // recovers the menu bar on Windows/Linux if a platform dialog disturbed
+    // its visibility.
+    if (!ownerWindow.isDestroyed()) {
+      const applicationMenu = Menu.getApplicationMenu();
+      if (applicationMenu) {
+        Menu.setApplicationMenu(applicationMenu);
+      } else {
+        buildApplicationMenu();
+      }
+      if (process.platform === 'darwin') {
+        app.focus();
+      }
+      if (process.platform !== 'darwin' &&
+          typeof ownerWindow.setMenuBarVisibility === 'function') {
+        ownerWindow.setMenuBarVisibility(true);
+      }
+      ownerWindow.focus();
+    }
   }
 
   if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
@@ -1685,63 +2370,60 @@ ipcMain.handle('qmail:reveal-sent-attachment', async (
   }
 });
 
-ipcMain.handle('wallet:pickCoinFiles', async () => {
-  let result;
-  try {
-    result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose CloudCoin files',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'CloudCoin files', extensions: ['bin', 'stack'] }],
-    });
-  } catch (error) {
-    log('wallet:pickCoinFiles dialog error: ' + error.message);
-    return [];
-  }
-
-  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
-    return [];
-  }
-
-  const enriched = await Promise.all(
-    result.filePaths.map(async (filePath) => {
-      try {
-        const stat = await fs.promises.stat(filePath);
-        return {
-          path: filePath,
-          name: path.basename(filePath),
-          size: stat.size,
-        };
-      } catch (error) {
-        log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
-        return null;
-      }
-    }),
-  );
-
-  return enriched.filter((entry) => entry !== null);
+ipcMain.handle('wallet:pickCoinFiles', async (_event, options) => {
+  return pickCoinFilesFromDisk(options?.defaultPath || null);
 });
 
-ipcMain.handle('wallet:pickCoinFolder', async () => {
-  let result;
+ipcMain.handle('wallet:pickCoinFolder', async (_event, options) => {
+  return pickCoinFolderFromDisk(options?.defaultPath || null);
+});
+
+ipcMain.handle('wallet:pickWithdrawFolder', async (_event, options) => {
+  return pickWithdrawFolderFromDisk(options?.defaultPath || null);
+});
+
+// Open Explorer/Finder on a file the backend just wrote (a .bin withdrawal
+// or a wallet-backup ZIP). Only destinations the user actually picked — they
+// are recorded in the given recent-locations list at pick time — can be
+// revealed, so the renderer cannot use this to open arbitrary paths.
+async function revealFileInKnownLocation(payload, knownLocations) {
   try {
-    result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose CloudCoin folder',
-      properties: ['openDirectory'],
-    });
+    const destination = String(payload?.destination || '').trim();
+    if (!destination) return { success: false, error: 'Destination is empty.' };
+
+    const destinationKey = recentLocationKey(path.resolve(destination));
+    const isKnown = knownLocations.some(
+      (location) => recentLocationKey(path.resolve(location)) === destinationKey,
+    );
+    if (!isKnown) {
+      return { success: false, error: 'Opening this folder is not permitted.' };
+    }
+
+    // Highlight the file when we know its name and it exists; otherwise
+    // just open the destination folder.
+    const filename = String(payload?.filename || '').trim();
+    if (filename && path.basename(filename) === filename) {
+      const filePath = path.join(destination, filename);
+      if (fs.existsSync(filePath)) {
+        shell.showItemInFolder(filePath);
+        return { success: true };
+      }
+    }
+
+    const openError = await shell.openPath(destination);
+    if (openError) return { success: false, error: openError };
+    return { success: true };
   } catch (error) {
-    log('wallet:pickCoinFolder dialog error: ' + error.message);
-    return null;
+    return { success: false, error: error.message };
   }
+}
 
-  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
-    return null;
-  }
+ipcMain.handle('wallet:revealWithdrawnFile', async (_event, payload) => {
+  return revealFileInKnownLocation(payload, readRecentWithdrawLocations());
+});
 
-  const folderPath = result.filePaths[0];
-  return {
-    path: folderPath,
-    name: path.basename(folderPath) || folderPath,
-  };
+ipcMain.handle('wallet:revealBackupZip', async (_event, payload) => {
+  return revealFileInKnownLocation(payload, readRecentBackupLocations());
 });
 
 ipcMain.handle('get-downloads-dir', async () => app.getPath('downloads'));

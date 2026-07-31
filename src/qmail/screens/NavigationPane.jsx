@@ -15,6 +15,8 @@ import {
   Key,
   Archive,
   AlertTriangle,
+  LockKeyhole,
+  LockOpen,
 } from "lucide-react";
 import { echoRaida, getServers } from "../../api/qmailApiServices";
 import {
@@ -142,6 +144,7 @@ const NavigationPane = ({
   folders,
   raidaEchoSnapshot,
   qmailAddress = "",
+  coinFileState = null,
   onWalletAction,
 }) => {
   const [raidaHealth, setRaidaHealth] = useState(null);
@@ -490,6 +493,19 @@ const NavigationPane = ({
     () => parseQmailAddress(trimmedQmailAddress),
     [trimmedQmailAddress],
   );
+  const coinSecurityState = coinFileState?.state || "unknown";
+  const coinSecurityLabel =
+    coinSecurityState === "encrypted"
+      ? "Coin Files: Encrypted"
+      : coinSecurityState === "decrypted"
+        ? "Coin Files: Decrypted"
+        : "Coin Files: Mixed/Unknown";
+  const CoinSecurityIcon =
+    coinSecurityState === "encrypted"
+      ? LockKeyhole
+      : coinSecurityState === "decrypted"
+        ? LockOpen
+        : AlertTriangle;
   const ownDrdSymbols = useDrdSymbols(
     parsedQmailAddress.ok ? parsedQmailAddress.denominationCode : null,
     parsedQmailAddress.ok ? parsedQmailAddress.serialNumber : null,
@@ -692,6 +708,15 @@ const NavigationPane = ({
               </button>
             </div>
           )}
+        </div>
+        <div
+          className={`navigation-pane__link navigation-pane__link--static navigation-pane__coin-security navigation-pane__coin-security--${coinSecurityState}`}
+          title={coinSecurityLabel}
+        >
+          <CoinSecurityIcon size={18} />
+          <span className="navigation-pane__link-label">
+            {coinSecurityLabel}
+          </span>
         </div>
         {parsedQmailAddress.ok && (
           <div

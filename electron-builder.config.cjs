@@ -23,6 +23,7 @@ const config = {
     "dist/**/*",
     "electron.cjs",
     "preload.cjs",
+    "coin-file-state.cjs",
     "version.json",
   ],
 

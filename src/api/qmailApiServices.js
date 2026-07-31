@@ -5,8 +5,16 @@ import {
   formatQmailAddress,
   parseQmailAddress,
 } from "../qmail/address/qmailAddress";
+import {
+  SUPPORT_LOGS_SUBJECT,
+  SUPPORT_QMAIL_ADDRESS,
+} from "../qmail/supportConstants";
+import {
+  buildSupportMessageBody,
+  normalizeSupportZipResponse,
+} from "../qmail/supportLogsFlow";
 import { normalizeTransferError } from "../qmail/transferErrors";
-import { BUILD_DATE } from "../version";
+import { BUILD_DATE, BUILD_NUMBER } from "../version";
 
 // Port resolution priority:
 //   1. ?backendPort=N in the URL — set by Electron at boot to support
@@ -20,7 +28,7 @@ const readPortFromQuery = () => {
   const fromUrl = params.get("backendPort");
   return fromUrl && /^\d+$/.test(fromUrl) ? fromUrl : null;
 };
-const API_PORT =
+export const API_PORT =
   readPortFromQuery() ||
   import.meta.env.VITE_API_PORT ||
   "8080";
@@ -722,16 +730,23 @@ export const checkMailNow = async ({ timeoutMs = BEACON_CHECK_TIMEOUT_MS } = {})
 /**
  * Gets the status of a background task by task ID.
  * @param {string} taskId - The unique task ID to check status for
+ * @param {{signal?: AbortSignal}} options - Optional renderer cancellation
  * @returns {Promise<{success: boolean, data?: any, error?: string}>}
  */
-export const getTaskStatus = async (taskId) => {
+export const getTaskStatus = async (taskId, options = {}) => {
   try {
     if (!taskId) {
       throw new Error("Task ID is required");
     }
 
+    const signal = options?.signal;
+    const taskStatusUrl =
+      `${API_BASE_URL}/system/tasks?task_id=${encodeURIComponent(taskId)}`;
     // API-FIX: Changed /api/task/status/{id} → /api/system/tasks?task_id={id} to match rest_core
-    const response = await fetch(`${API_BASE_URL}/system/tasks?task_id=${encodeURIComponent(taskId)}`);
+    // Preserve the original one-argument fetch call for every existing caller.
+    const response = signal
+      ? await fetch(taskStatusUrl, { signal })
+      : await fetch(taskStatusUrl);
     const data = await handleResponse(response);
 
     console.log("Data received from /system/tasks:", data);
@@ -776,7 +791,17 @@ export const getTaskStatus = async (taskId) => {
   } catch (error) {
     console.error("Get task status failed:", error);
     const errorMessage = `Error: ${error.message}\n\nFailed to fetch task status.`;
-    return { success: false, error: errorMessage };
+    return {
+      success: false,
+      error: errorMessage,
+      httpStatus: error.httpStatus ?? null,
+      errorCode:
+        error.name === "AbortError"
+          ? "aborted"
+          : error.httpStatus === 404
+            ? "task_not_found"
+            : "status_unavailable",
+    };
   }
 };
 
@@ -2235,6 +2260,230 @@ export const getQMailWalletBalance = async () => {
 };
 
 /**
+ * Reports whether the core currently holds a coin-file encryption key and
+ * whether registered wallets contain encrypted .bin files.
+ */
+export const getCoinEncryptionStatus = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/system/encryption-status`);
+    const data = await handleResponse(response);
+    if (data?.success === false) {
+      throw new Error(
+        extractApiErrorMessage(data, "Could not read coin encryption status."),
+      );
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        keySet: isTruthyApiFlag(data?.key_set),
+        encryptedFilesExist: isTruthyApiFlag(data?.encrypted_files_exist),
+        loginRequired: isTruthyApiFlag(data?.login_required),
+      },
+    };
+  } catch (error) {
+    console.error("Get coin encryption status failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Sends the password in a form-encoded POST body so it never appears in the
+ * request URL or the core's request-line log.
+ */
+export const setCoinEncryptionPassword = async (password) => {
+  try {
+    const passwordText = typeof password === "string" ? password : "";
+    const passwordBytes = new TextEncoder().encode(passwordText);
+    if (passwordBytes.length === 0) {
+      throw new Error("Enter your coin encryption password.");
+    }
+    if (passwordBytes.length > 4096) {
+      throw new Error("The password must be no more than 4,096 UTF-8 bytes.");
+    }
+
+    const body = new URLSearchParams();
+    body.set("password", passwordText);
+    const response = await fetch(`${API_BASE_URL}/system/load-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+      },
+      body,
+    });
+    const data = await handleResponse(response);
+    if (data?.success === false || !isTruthyApiFlag(data?.key_set)) {
+      throw new Error(
+        extractApiErrorMessage(data, "The encryption key was not set."),
+      );
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        keySet: true,
+        passwordVerified: isTruthyApiFlag(data?.password_verified),
+        verifierCreated: isTruthyApiFlag(data?.verifier_created),
+      },
+    };
+  } catch (error) {
+    console.error("Set coin encryption password failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Requests a clean core shutdown. The core sends its response, zeroes the
+ * in-memory encryption key, stops background workers, closes databases, and
+ * exits. This replaces the removed /system/logout endpoint.
+ */
+export const shutdownCore = async ({ timeoutMs = 2000 } = {}) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${API_BASE_URL}/system/shutdown`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const data = await handleResponse(response);
+    if (data?.success === false) {
+      throw new Error(
+        extractApiErrorMessage(data, "The core did not accept the shutdown request."),
+      );
+    }
+    return { success: true, data };
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    console.error("Core shutdown failed:", error);
+    return {
+      success: false,
+      error: timedOut
+        ? "The core did not respond to the shutdown request in time."
+        : error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+/**
+ * Starts the async plaintext-to-encrypted conversion. Omitting walletPath
+ * uses the core's documented all-registered-wallets scope.
+ */
+export const encryptExistingCoinFiles = async (
+  walletPath = null,
+  folders = ["Bank", "Fracked"],
+) => {
+  try {
+    const resolvedWalletPath = String(walletPath || "").trim();
+    const allowedFolders = (Array.isArray(folders) ? folders : [])
+      .map((folder) => String(folder || "").trim())
+      .filter((folder) => folder === "Bank" || folder === "Fracked");
+    if (allowedFolders.length === 0) {
+      throw new Error("Choose at least one supported wallet folder.");
+    }
+
+    const body = new URLSearchParams();
+    if (resolvedWalletPath) {
+      body.set("wallet_path", resolvedWalletPath);
+    }
+    body.set("folders", [...new Set(allowedFolders)].join(","));
+    const response = await fetch(
+      `${API_BASE_URL}/system/encrypt_existing_files`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        },
+        body,
+      },
+    );
+    const data = await handleResponse(response);
+    const taskId = data?.task_id || data?.taskId;
+    if (data?.success === false || !taskId) {
+      throw new Error(
+        extractApiErrorMessage(data, "Coin encryption did not start."),
+      );
+    }
+
+    return { success: true, data: { ...data, taskId } };
+  } catch (error) {
+    console.error("Encrypt existing coin files failed:", error);
+    return {
+      success: false,
+      error: error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
+ * Starts the forward-compatible encrypted-to-plaintext conversion. The core
+ * implementation is expected to mirror encrypt_existing_files and return a
+ * task_id for /api/system/tasks polling.
+ */
+export const decryptExistingCoinFiles = async (
+  walletPath = null,
+  folders = ["Bank", "Fracked"],
+) => {
+  try {
+    const resolvedWalletPath = String(walletPath || "").trim();
+    const allowedFolders = (Array.isArray(folders) ? folders : [])
+      .map((folder) => String(folder || "").trim())
+      .filter((folder) => folder === "Bank" || folder === "Fracked");
+    if (allowedFolders.length === 0) {
+      throw new Error("Choose at least one supported wallet folder.");
+    }
+
+    const body = new URLSearchParams();
+    if (resolvedWalletPath) {
+      body.set("wallet_path", resolvedWalletPath);
+    }
+    body.set("folders", [...new Set(allowedFolders)].join(","));
+    const response = await fetch(
+      `${API_BASE_URL}/system/decrypt_existing_files`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        },
+        body,
+      },
+    );
+    const data = await handleResponse(response);
+    const taskId = data?.task_id || data?.taskId;
+    if (data?.success === false || !taskId) {
+      throw new Error(
+        extractApiErrorMessage(data, "Coin decryption did not start."),
+      );
+    }
+
+    return { success: true, data: { ...data, taskId } };
+  } catch (error) {
+    console.error("Decrypt existing coin files failed:", error);
+    return {
+      success: false,
+      error:
+        error.httpStatus === 501
+          ? "Coin decryption is not available in this core build yet."
+          : error.message,
+      httpStatus: error.httpStatus ?? null,
+    };
+  }
+};
+
+/**
  * Marks an email as read or unread
  * @param {string} emailId - The email ID
  * @param {boolean} isRead - true to mark as read, false for unread
@@ -2473,6 +2722,202 @@ export const sendEmail = async (emailData) => {
       userMessage = `Cannot reach the mail server. Please make sure the backend is running on port ${API_PORT}.`;
     }
     return { success: false, error: userMessage };
+  }
+};
+
+/**
+ * Build a support diagnostics ZIP via core on this instance's backend port
+ * (same API_BASE_URL / ?backendPort= resolution as every other QMail API).
+ * GET /api/tools/support-zip → absolute full_path under Client_Data/Zipped Logs.
+ *
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+export const createSupportZip = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/tools/support-zip`);
+    const data = await handleResponse(response);
+    return normalizeSupportZipResponse(data);
+  } catch (error) {
+    console.error("createSupportZip failed:", error);
+    let userMessage = error.message;
+    if (error.message === "Failed to fetch") {
+      userMessage = `Cannot reach the mail server. Please make sure the backend is running on port ${API_PORT}.`;
+    }
+    return { success: false, error: userMessage };
+  }
+};
+
+/**
+ * Send a support diagnostic ZIP to the fixed support QMail address.
+ * Uses upload_and_tell (same pipeline as compose). Does not alter sendEmail.
+ *
+ * @param {{ zipPath: string, subject?: string, body?: string, walletPath?: string, filename?: string }} options
+ */
+export const sendSupportLogs = async ({
+  zipPath,
+  subject,
+  body,
+  walletPath,
+  filename,
+} = {}) => {
+  if (!zipPath || typeof zipPath !== "string" || !zipPath.trim()) {
+    return { success: false, error: "Support ZIP path is required." };
+  }
+
+  const path = zipPath.trim();
+  const baseName =
+    (typeof filename === "string" && filename.trim()) ||
+    path.replace(/^.*[/\\]/, "") ||
+    path;
+  const resolvedSubject =
+    (typeof subject === "string" && subject.trim()) || SUPPORT_LOGS_SUBJECT;
+  const resolvedBody =
+    (typeof body === "string" && body.trim()) ||
+    buildSupportMessageBody({
+      filename: baseName,
+      buildDate: BUILD_DATE,
+      buildNumber: BUILD_NUMBER,
+    });
+
+  return sendEmail({
+    to: [SUPPORT_QMAIL_ADDRESS],
+    subject: resolvedSubject,
+    body: resolvedBody,
+    attachments: [path],
+    walletPath: walletPath || null,
+  });
+};
+
+const waitForSupportPollDelay = (delayMs, signal) =>
+  new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
+
+    let timerId;
+    const finish = (completed) => {
+      if (timerId) clearTimeout(timerId);
+      signal?.removeEventListener("abort", handleAbort);
+      resolve(completed);
+    };
+    const handleAbort = () => finish(false);
+
+    timerId = setTimeout(() => finish(true), delayMs);
+    signal?.addEventListener("abort", handleAbort, { once: true });
+  });
+
+/**
+ * Poll a support send task until the core reports a terminal status.
+ *
+ * - Soft timeout only notifies the UI; polling continues.
+ * - Loss of status connectivity is NOT terminal: keep polling with backoff
+ *   and surface connectivityLost via onUpdate. Never unlock a "failed" exit
+ *   solely because status fetches failed — the core task may still be running.
+ *
+ * Uses getTaskStatus (same port resolution as other QMail APIs).
+ */
+export const pollSupportSendUntilTerminal = async (
+  taskId,
+  {
+    intervalMs = 1500,
+    softTimeoutMs = 600000,
+    onUpdate,
+    signal,
+  } = {},
+) => {
+  if (!taskId) {
+    return { success: false, error: "Task ID is required.", status: "invalid" };
+  }
+
+  const startedAt = Date.now();
+  let softWarned = false;
+  let consecutiveStatusErrors = 0;
+  let consecutiveNotFound = 0;
+  let connectivityLostNotified = false;
+
+  for (;;) {
+    if (signal?.aborted) {
+      return { success: false, status: "aborted" };
+    }
+
+    const result = await getTaskStatus(taskId, { signal });
+    if (signal?.aborted) {
+      return { success: false, status: "aborted" };
+    }
+    if (!result.success) {
+      if (result.errorCode === "aborted") {
+        return { success: false, status: "aborted" };
+      }
+
+      if (result.errorCode === "task_not_found") {
+        consecutiveNotFound += 1;
+        if (consecutiveNotFound >= 3) {
+          return {
+            success: false,
+            status: "not_found",
+            error:
+              "The previous support task no longer exists. " +
+              "The core may have restarted.",
+          };
+        }
+        await waitForSupportPollDelay(intervalMs, signal);
+        continue;
+      }
+
+      consecutiveNotFound = 0;
+      consecutiveStatusErrors += 1;
+      // Never treat status fetch failure as task failure — indeterminate.
+      if (
+        consecutiveStatusErrors >= 5 &&
+        (!connectivityLostNotified || consecutiveStatusErrors % 20 === 0)
+      ) {
+        connectivityLostNotified = true;
+        if (typeof onUpdate === "function") {
+          onUpdate({
+            taskId,
+            connectivityLost: true,
+            message:
+              result.error ||
+              "Lost contact with the backend while sending.",
+          });
+        }
+      }
+      const backoff = Math.min(
+        intervalMs * Math.min(consecutiveStatusErrors, 10),
+        15000,
+      );
+      await waitForSupportPollDelay(backoff, signal);
+      continue;
+    }
+    consecutiveNotFound = 0;
+    consecutiveStatusErrors = 0;
+    connectivityLostNotified = false;
+
+    const taskData = { ...result.data };
+    if (
+      !softWarned &&
+      softTimeoutMs > 0 &&
+      Date.now() - startedAt >= softTimeoutMs
+    ) {
+      softWarned = true;
+      taskData.softTimeout = true;
+    }
+
+    if (typeof onUpdate === "function") {
+      onUpdate(taskData);
+    }
+
+    if (taskData.isFinished) {
+      // Terminal from core — caller interprets delivery fields strictly.
+      return {
+        success: true,
+        data: taskData,
+        status: "terminal",
+      };
+    }
+
+    await waitForSupportPollDelay(intervalMs, signal);
   }
 };
 
@@ -2782,7 +3227,7 @@ export const depositCloudCoinFolder = async (folderPath, memo = "QMail folder de
   }
 };
 
-export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null) => {
+export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = null, memo = "") => {
   try {
     const lockerKey = String(lockerCode || "").trim();
     if (!lockerKey) {
@@ -2791,6 +3236,9 @@ export const downloadLockerToDefaultWallet = async (lockerCode, walletPath = nul
 
     const url = new URL(`${API_BASE_URL}/locker/download`);
     url.searchParams.set("locker_key", lockerKey);
+    // Forward-compatible: current core builds label the transaction
+    // "From Locker" and ignore this param; newer builds can honor it.
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
     const resolvedWalletPath = await addWalletPathParam(url, walletPath);
 
     const response = await fetch(url.toString());
@@ -2848,7 +3296,7 @@ export const getQMailIdentityProvisionStatus = async () => {
   }
 };
 
-export const withdrawToLockerCode = async (amount, walletPath = null) => {
+export const withdrawToLockerCode = async (amount, walletPath = null, memo = "") => {
   try {
     const numericAmount = Number(amount);
     if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
@@ -2859,6 +3307,9 @@ export const withdrawToLockerCode = async (amount, walletPath = null) => {
     const url = new URL(`${API_BASE_URL}/locker/upload`);
     url.searchParams.set("locker_key", lockerKey);
     url.searchParams.set("amount", String(numericAmount));
+    // Forward-compatible: current core builds ignore this param on
+    // /locker/upload; newer builds can honor it in the transaction log.
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
     const resolvedWalletPath = await addWalletPathParam(url, walletPath);
 
     const response = await fetch(url.toString());
@@ -2870,6 +3321,86 @@ export const withdrawToLockerCode = async (amount, walletPath = null) => {
     return { success: true, data: { ...data, locker_key: data?.locker_key || lockerKey, wallet_path: data?.wallet_path || resolvedWalletPath } };
   } catch (error) {
     console.error("Withdraw to locker failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Create a ZIP backup of a wallet via POST /api/wallets/backup. The backend
+ * writes {destination}/{wallet_name}_backup.zip; destinations inside
+ * Client_Data are rejected by the server.
+ * @returns On success: { success: true, data: { wallet_name, zip_path, destination, files_added, ... } }
+ */
+export const backupWallet = async (walletPath, destination) => {
+  try {
+    const wallet = String(walletPath || "").trim();
+    if (!wallet) {
+      throw new Error("Choose a wallet to back up.");
+    }
+    const destinationPath = String(destination || "").trim();
+    if (!destinationPath) {
+      throw new Error("Choose a destination folder for the backup.");
+    }
+
+    const url = new URL(`${API_BASE_URL}/wallets/backup`);
+    url.searchParams.set("wallet_path", wallet);
+    url.searchParams.set("destination", destinationPath);
+
+    const response = await fetch(url.toString(), { method: "POST" });
+    const data = await handleResponse(response);
+    if (data?.success !== true) {
+      throw new Error(extractApiErrorMessage(data, "Wallet backup failed."));
+    }
+
+    return { success: true, data: { ...data, destination: data?.destination || destinationPath } };
+  } catch (error) {
+    console.error("Wallet backup failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Withdraw coins into a single .bin file at a destination folder via
+ * GET /api/transactions/export. Coins are moved out of Bank/Fracked into the
+ * wallet's Exported folder; the backend records the destination in its own
+ * export-locations.csv as well.
+ * @returns On success: { success: true, data: { files, coins_exported, value_exported, destination } }
+ */
+export const withdrawToBinFile = async (amount, destination, memo = "", walletPath = null) => {
+  try {
+    const numericAmount = Number(amount);
+    if (!Number.isInteger(numericAmount) || numericAmount <= 0) {
+      throw new Error("Enter a positive whole-number CloudCoin amount.");
+    }
+
+    const destinationPath = String(destination || "").trim();
+    if (!destinationPath) {
+      throw new Error("Choose a destination folder for the .bin file.");
+    }
+
+    const url = new URL(`${API_BASE_URL}/transactions/export`);
+    url.searchParams.set("amount", String(numericAmount));
+    url.searchParams.set("destination", destinationPath);
+    if (memo && memo.trim()) url.searchParams.set("memo", memo.trim());
+    const resolvedWalletPath = await addWalletPathParam(url, walletPath);
+
+    const response = await fetch(url.toString());
+    const data = await handleResponse(response);
+    if (data?.status !== "success") {
+      throw new Error(extractApiErrorMessage(data, "The .bin withdrawal failed."));
+    }
+
+    return {
+      success: true,
+      data: {
+        ...data,
+        files: Array.isArray(data?.files) ? data.files : [],
+        destination: destinationPath,
+        wallet_path: data?.wallet_path || resolvedWalletPath,
+      },
+    };
+  } catch (error) {
+    console.error("Withdraw to .bin file failed:", error);
     return { success: false, error: error.message };
   }
 };

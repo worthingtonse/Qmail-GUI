@@ -45,3 +45,21 @@ docs/css-audit/cache/
 
 # Python bytecode from the avatar-sheet vectorizer scripts.
 __pycache__/
+
+# Design drafts / screenshots parked in public/ — not referenced by the app,
+# and Vite copies all of public/ into the packaged build.
+public/Q.pdn
+public/Q.png
+public/Q2.png
+public/Q3.png
+public/Q4.png
+public/qA.png
+public/qA.jpg
+public/djfkd.png
+public/inboxfee.png
+public/screenhotbig.png
+public/Screenshot *.png
+public/a-close-up-studio-photograph-*.png
+public/a-macro-photograph-*.png
+public/a-striking-close-up-*.png
+public/elegant-logo-design-*.png
