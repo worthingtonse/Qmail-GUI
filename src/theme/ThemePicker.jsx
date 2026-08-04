@@ -1,5 +1,15 @@
 import { useState } from "react";
-import { Moon, Sun, Contrast, Sparkles, Edit3 } from "lucide-react";
+import {
+  Moon,
+  Sun,
+  Contrast,
+  Sparkles,
+  Edit3,
+  Palette,
+  Snowflake,
+  Ghost,
+  BookOpen,
+} from "lucide-react";
 import { useTheme } from "./useTheme";
 import { ThemeEditorModal } from "./ThemeEditorModal";
 import "./ThemePicker.css";
@@ -22,6 +32,30 @@ const OPTIONS = [
     label: "High Contrast",
     description: "Yellow on black, larger text, no motion.",
     Icon: Contrast,
+  },
+  {
+    id: "solarized",
+    label: "Solarized Dark",
+    description: "The classic low-glare teal palette.",
+    Icon: Palette,
+  },
+  {
+    id: "nord",
+    label: "Nord",
+    description: "Cool arctic blues, easy on the eyes.",
+    Icon: Snowflake,
+  },
+  {
+    id: "dracula",
+    label: "Dracula",
+    description: "Vivid purple and pink on deep gray.",
+    Icon: Ghost,
+  },
+  {
+    id: "sepia",
+    label: "Sepia (Reading)",
+    description: "Warm paper tones for long reading.",
+    Icon: BookOpen,
   },
   {
     id: "custom",

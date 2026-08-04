@@ -1,7 +1,7 @@
 {
   "name": "q-mail",
   "private": true,
-  "version": "1.0.36",
+  "version": "1.0.48",
   "type": "module",
   "main": "electron.cjs",
   "description": "QMail-Decentralized.Quantum-Safe.Unsurveillable.",

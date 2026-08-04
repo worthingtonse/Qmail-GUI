@@ -249,3 +249,215 @@
   /* Intentionally empty — overrides come from the user-theme
      style tag at runtime. */
 }
+
+/* ============================================================
+ * SOLARIZED DARK — Ethan Schoonover's classic low-glare
+ * palette (base03/base02 backgrounds, blue/violet accents).
+ * Widely used in editors and terminals; low blue-light glare.
+ * ============================================================ */
+[data-theme="solarized"] {
+  /* Backgrounds */
+  --primary-bg:   linear-gradient(135deg, #001f27 0%, #002b36 55%, #073642 100%);
+  --secondary-bg: #073642;
+  --tertiary-bg:  rgba(0, 43, 54, 0.6);
+  --card-bg:      rgba(253, 246, 227, 0.03);
+  --card-hover:   rgba(253, 246, 227, 0.06);
+
+  /* Accents */
+  --accent-primary:   #6c71c4; /* violet */
+  --accent-secondary: #2aa198; /* cyan */
+  --accent-tertiary:  #b58900; /* yellow */
+  --accent-success:   #859900; /* green */
+  --accent-error:     #dc322f; /* red */
+  --accent-warning:   #b58900; /* yellow */
+
+  /* Text */
+  --text-primary:   #fdf6e3; /* base3 */
+  --text-secondary: #93a1a1; /* base1 */
+  --text-tertiary:  #839496; /* base0 */
+  --text-muted:     rgba(131, 148, 150, 0.6);
+
+  /* Borders */
+  --border-subtle: rgba(253, 246, 227, 0.06);
+  --border-medium: rgba(253, 246, 227, 0.1);
+  --border-strong: rgba(253, 246, 227, 0.16);
+
+  /* Glass */
+  --glass-blur-amount: 16px;
+  --glass-bg:          rgba(0, 43, 54, 0.45);
+  --glass-bg-strong:   rgba(0, 43, 54, 0.65);
+  --glass-border:      1px solid rgba(253, 246, 227, 0.08);
+
+  /* Glow */
+  --glow-primary:   0 0 20px rgba(108, 113, 196, 0.3);
+  --glow-secondary: 0 0 20px rgba(42, 161, 152, 0.3);
+  --glow-success:   0 0 20px rgba(133, 153, 0, 0.3);
+
+  /* Decorative particles */
+  --particle-1: rgba(108, 113, 196, 0.08);
+  --particle-2: rgba(42, 161, 152, 0.08);
+  --particle-3: rgba(181, 137, 0, 0.05);
+
+  /* Motion */
+  --motion-scale: 1;
+}
+
+/* ============================================================
+ * NORD — arctic, bluish palette (nord0..nord15). Popular for
+ * its restrained contrast and cool hue family.
+ * ============================================================ */
+[data-theme="nord"] {
+  /* Backgrounds */
+  --primary-bg:   linear-gradient(135deg, #242933 0%, #2e3440 55%, #3b4252 100%);
+  --secondary-bg: #2e3440;
+  --tertiary-bg:  rgba(59, 66, 82, 0.6);
+  --card-bg:      rgba(236, 239, 244, 0.03);
+  --card-hover:   rgba(236, 239, 244, 0.06);
+
+  /* Accents */
+  --accent-primary:   #88c0d0; /* nord8 frost */
+  --accent-secondary: #81a1c1; /* nord9 */
+  --accent-tertiary:  #ebcb8b; /* nord13 */
+  --accent-success:   #a3be8c; /* nord14 */
+  --accent-error:     #bf616a; /* nord11 */
+  --accent-warning:   #ebcb8b; /* nord13 */
+
+  /* Text */
+  --text-primary:   #eceff4; /* nord6 */
+  --text-secondary: #d8dee9; /* nord4 */
+  --text-tertiary:  #aeb8c9;
+  --text-muted:     rgba(216, 222, 233, 0.55);
+
+  /* Borders */
+  --border-subtle: rgba(236, 239, 244, 0.06);
+  --border-medium: rgba(236, 239, 244, 0.1);
+  --border-strong: rgba(236, 239, 244, 0.16);
+
+  /* Glass */
+  --glass-blur-amount: 16px;
+  --glass-bg:          rgba(46, 52, 64, 0.45);
+  --glass-bg-strong:   rgba(46, 52, 64, 0.65);
+  --glass-border:      1px solid rgba(236, 239, 244, 0.08);
+
+  /* Glow */
+  --glow-primary:   0 0 20px rgba(136, 192, 208, 0.3);
+  --glow-secondary: 0 0 20px rgba(129, 161, 193, 0.3);
+  --glow-success:   0 0 20px rgba(163, 190, 140, 0.3);
+
+  /* Decorative particles */
+  --particle-1: rgba(136, 192, 208, 0.08);
+  --particle-2: rgba(129, 161, 193, 0.08);
+  --particle-3: rgba(235, 203, 139, 0.05);
+
+  /* Motion */
+  --motion-scale: 1;
+}
+
+/* ============================================================
+ * DRACULA — the most-starred dark editor theme: deep gray
+ * background with vivid purple/pink/cyan accents.
+ * ============================================================ */
+[data-theme="dracula"] {
+  /* Backgrounds */
+  --primary-bg:   linear-gradient(135deg, #1e2029 0%, #282a36 55%, #343746 100%);
+  --secondary-bg: #282a36;
+  --tertiary-bg:  rgba(68, 71, 90, 0.5);
+  --card-bg:      rgba(248, 248, 242, 0.03);
+  --card-hover:   rgba(248, 248, 242, 0.06);
+
+  /* Accents */
+  --accent-primary:   #bd93f9; /* purple */
+  --accent-secondary: #8be9fd; /* cyan */
+  --accent-tertiary:  #ffb86c; /* orange */
+  --accent-success:   #50fa7b; /* green */
+  --accent-error:     #ff5555; /* red */
+  --accent-warning:   #f1fa8c; /* yellow */
+
+  /* Text */
+  --text-primary:   #f8f8f2;
+  --text-secondary: #d6d6d0;
+  --text-tertiary:  #9ea0ad;
+  --text-muted:     rgba(214, 214, 208, 0.55);
+
+  /* Borders */
+  --border-subtle: rgba(248, 248, 242, 0.06);
+  --border-medium: rgba(248, 248, 242, 0.1);
+  --border-strong: rgba(248, 248, 242, 0.16);
+
+  /* Glass */
+  --glass-blur-amount: 16px;
+  --glass-bg:          rgba(40, 42, 54, 0.45);
+  --glass-bg-strong:   rgba(40, 42, 54, 0.65);
+  --glass-border:      1px solid rgba(248, 248, 242, 0.08);
+
+  /* Glow */
+  --glow-primary:   0 0 20px rgba(189, 147, 249, 0.3);
+  --glow-secondary: 0 0 20px rgba(139, 233, 253, 0.3);
+  --glow-success:   0 0 20px rgba(80, 250, 123, 0.3);
+
+  /* Decorative particles */
+  --particle-1: rgba(189, 147, 249, 0.08);
+  --particle-2: rgba(139, 233, 253, 0.08);
+  --particle-3: rgba(255, 184, 108, 0.05);
+
+  /* Motion */
+  --motion-scale: 1;
+}
+
+/* ============================================================
+ * SEPIA (READING) — warm paper tones, the "reading mode" most
+ * e-readers converge on. Light-family theme: dark accents are
+ * picked for contrast on the cream background.
+ * ============================================================ */
+[data-theme="sepia"] {
+  /* Backgrounds */
+  --primary-bg:   linear-gradient(135deg, #f6eeda 0%, #f1e7cf 55%, #eadfc3 100%);
+  --secondary-bg: #f8f1e0;
+  --tertiary-bg:  rgba(91, 70, 54, 0.06);
+  --card-bg:      #fbf6e9;
+  --card-hover:   #f1e7cf;
+
+  /* Accents — dark enough for AA+ on cream */
+  --accent-primary:   #7c2d12; /* deep rust */
+  --accent-secondary: #1e4d5c; /* dark teal */
+  --accent-tertiary:  #92400e; /* amber-brown */
+  --accent-success:   #3f6212; /* olive green */
+  --accent-error:     #991b1b; /* dark red */
+  --accent-warning:   #92400e;
+
+  /* Text — warm dark browns instead of black */
+  --text-primary:   #3b2f23;
+  --text-secondary: #5b4636;
+  --text-tertiary:  #74604e;
+  --text-muted:     rgba(91, 70, 54, 0.65);
+
+  /* Borders */
+  --border-subtle: rgba(91, 70, 54, 0.1);
+  --border-medium: rgba(91, 70, 54, 0.16);
+  --border-strong: rgba(91, 70, 54, 0.26);
+
+  /* Glass — warm and nearly opaque */
+  --glass-blur-amount: 16px;
+  --glass-bg:          rgba(248, 241, 224, 0.7);
+  --glass-bg-strong:   rgba(248, 241, 224, 0.85);
+  --glass-border:      1px solid rgba(91, 70, 54, 0.12);
+
+  /* Glow — soft warm shadows rather than neon */
+  --glow-primary:   0 0 20px rgba(124, 45, 18, 0.18);
+  --glow-secondary: 0 0 20px rgba(30, 77, 92, 0.18);
+  --glow-success:   0 0 20px rgba(63, 98, 18, 0.18);
+
+  /* Decorative particles — barely-there warm tints */
+  --particle-1: rgba(124, 45, 18, 0.04);
+  --particle-2: rgba(30, 77, 92, 0.04);
+  --particle-3: rgba(146, 64, 14, 0.03);
+
+  /* Paper-on-paper shadows (like light theme) */
+  --shadow-sm: 0 1px 3px rgba(59, 47, 35, 0.06), 0 1px 2px rgba(59, 47, 35, 0.08);
+  --shadow-md: 0 4px 12px rgba(59, 47, 35, 0.08), 0 2px 6px rgba(59, 47, 35, 0.06);
+  --shadow-lg: 0 12px 40px rgba(59, 47, 35, 0.12), 0 6px 16px rgba(59, 47, 35, 0.08);
+  --shadow-xl: 0 20px 60px rgba(59, 47, 35, 0.14), 0 10px 24px rgba(59, 47, 35, 0.1);
+
+  /* Motion */
+  --motion-scale: 1;
+}

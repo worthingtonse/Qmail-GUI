@@ -315,130 +315,24 @@ const EmailListItem = ({
       }}
     >
       <div className="email-list-pane__item-header">
-        <div className="email-list-pane__header-leading">
+        <div
+          className={`email-list-pane__subject ${
+            email.isPlaceholderSubject ? "email-list-pane__subject--placeholder" : ""
+          }`}
+          title={email.subject}
+        >
+          {email.subject}
+        </div>
+        <div className="email-list-pane__header-trailing">
           {isLoadingDraft ? (
             <Loader2 size={16} className="spinning" title="Loading draft..." />
           ) : (
             actionMenu
           )}
         </div>
-        <div className="email-list-pane__sender-left">
-          <span
-            className="email-list-pane__sender"
-            title={hasDistinctAddress ? senderAddress : undefined}
-          >
-            {senderLabel}
-          </span>
-          {senderAddress && (
-            <button
-              type="button"
-              className={`email-list-pane__address-copy ${
-                addressCopied ? "email-list-pane__address-copy--copied" : ""
-              }`}
-              onClick={handleCopyAddress}
-              title={addressCopied ? "Address copied" : `Copy ${senderAddress}`}
-              aria-label={
-                addressCopied
-                  ? "Address copied"
-                  : `Copy address ${senderAddress}`
-              }
-            >
-              {addressCopied ? <Check size={12} /> : <Copy size={12} />}
-            </button>
-          )}
-          {email.annoyanceReported && (
-            <ShieldAlert
-              size={14}
-              className="email-list-pane__annoyance-icon"
-              title="Reported as annoying"
-            />
-          )}
-        </div>
-        <div className="email-list-pane__sender-right">
-          <span className="email-list-pane__timestamp">{email.timestamp}</span>
-          {!email.isPending && (
-            <Star
-              size={16}
-              className={`email-list-pane__star-icon ${
-                email.starred ? "email-list-pane__star-icon--starred" : ""
-              }`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleStar && onToggleStar(email.id);
-              }}
-            />
-          )}
-        </div>
       </div>
 
       <div className="email-list-pane__item-body">
-        <div className="email-list-pane__action-column">
-          {email.isPending ? (
-            <>
-              {email.isDecrypting ? (
-                <Loader2
-                  size={16}
-                  className="email-list-pane__pending-icon email-list-pane__pending-icon--decrypting spinning"
-                  title="Decrypting message"
-                />
-              ) : (
-                <Mail
-                  size={16}
-                  className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
-                  title="Unread message queued for background decryption"
-                />
-              )}
-              <div
-                className="email-list-pane__list-trash-indicator"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteEmail && onDeleteEmail(email, false);
-                }}
-                title={deleteTitle}
-              >
-                <Trash2 size={14} className="email-list-pane__list-trash-icon" />
-              </div>
-              {attachmentIndicator}
-            </>
-          ) : (
-            <>
-              {!email.isDraft && (
-                <div
-                  className="email-list-pane__read-indicator"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onMarkAsRead && onMarkAsRead(email.id, !email.isRead);
-                  }}
-                  title={email.isRead ? "Mark as unread" : "Mark as read"}
-                >
-                  {email.isRead ? (
-                    <MailOpen
-                      size={16}
-                      className="email-list-pane__envelope-icon email-list-pane__envelope-icon--read"
-                    />
-                  ) : (
-                    <Mail
-                      size={16}
-                      className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
-                    />
-                  )}
-                </div>
-              )}
-              <div
-                className="email-list-pane__list-trash-indicator"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteEmail && onDeleteEmail(email.id, isTrashItem);
-                }}
-                title={deleteTitle}
-              >
-                <Trash2 size={14} className="email-list-pane__list-trash-icon" />
-              </div>
-              {attachmentIndicator}
-            </>
-          )}
-        </div>
-
         <SenderAvatar
           sender={email.sender}
           email={email.senderEmail || email.from}
@@ -448,12 +342,115 @@ const EmailListItem = ({
         />
 
         <div className="email-list-pane__details">
-          <div
-            className={`email-list-pane__subject ${
-              email.isPlaceholderSubject ? "email-list-pane__subject--placeholder" : ""
-            }`}
-          >
-            {email.subject}
+          {/* Meta line: time · sender address · action icons */}
+          <div className="email-list-pane__meta-row">
+            <span className="email-list-pane__timestamp">{email.timestamp}</span>
+            <span
+              className="email-list-pane__sender"
+              title={hasDistinctAddress ? senderAddress : undefined}
+            >
+              {senderLabel}
+            </span>
+            {senderAddress && (
+              <button
+                type="button"
+                className={`email-list-pane__address-copy ${
+                  addressCopied ? "email-list-pane__address-copy--copied" : ""
+                }`}
+                onClick={handleCopyAddress}
+                title={addressCopied ? "Address copied" : `Copy ${senderAddress}`}
+                aria-label={
+                  addressCopied
+                    ? "Address copied"
+                    : `Copy address ${senderAddress}`
+                }
+              >
+                {addressCopied ? <Check size={12} /> : <Copy size={12} />}
+              </button>
+            )}
+            {email.annoyanceReported && (
+              <ShieldAlert
+                size={14}
+                className="email-list-pane__annoyance-icon"
+                title="Reported as annoying"
+              />
+            )}
+            <div className="email-list-pane__meta-actions">
+              {email.isPending ? (
+                <>
+                  {attachmentIndicator}
+                  <div
+                    className="email-list-pane__list-trash-indicator"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteEmail && onDeleteEmail(email, false);
+                    }}
+                    title={deleteTitle}
+                  >
+                    <Trash2 size={14} className="email-list-pane__list-trash-icon" />
+                  </div>
+                  {email.isDecrypting ? (
+                    <Loader2
+                      size={16}
+                      className="email-list-pane__pending-icon email-list-pane__pending-icon--decrypting spinning"
+                      title="Decrypting message"
+                    />
+                  ) : (
+                    <Mail
+                      size={16}
+                      className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
+                      title="Unread message queued for background decryption"
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  {attachmentIndicator}
+                  <div
+                    className="email-list-pane__list-trash-indicator"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteEmail && onDeleteEmail(email.id, isTrashItem);
+                    }}
+                    title={deleteTitle}
+                  >
+                    <Trash2 size={14} className="email-list-pane__list-trash-icon" />
+                  </div>
+                  {!email.isDraft && (
+                    <div
+                      className="email-list-pane__read-indicator"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMarkAsRead && onMarkAsRead(email.id, !email.isRead);
+                      }}
+                      title={email.isRead ? "Mark as unread" : "Mark as read"}
+                    >
+                      {email.isRead ? (
+                        <MailOpen
+                          size={16}
+                          className="email-list-pane__envelope-icon email-list-pane__envelope-icon--read"
+                        />
+                      ) : (
+                        <Mail
+                          size={16}
+                          className="email-list-pane__envelope-icon email-list-pane__envelope-icon--unread"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <Star
+                    size={16}
+                    className={`email-list-pane__star-icon ${
+                      email.starred ? "email-list-pane__star-icon--starred" : ""
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleStar && onToggleStar(email.id);
+                    }}
+                  />
+                </>
+              )}
+            </div>
           </div>
           <div
             className={`email-list-pane__preview ${

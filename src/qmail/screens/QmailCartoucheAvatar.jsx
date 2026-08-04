@@ -3,19 +3,29 @@ import { useId } from "react";
 import { getQmailAvatarAssetHref, getQmailAvatarTierName } from "../avatar/qmailAvatar";
 import { serialSymbolColors } from "../avatar/serialColor";
 
-// Inner content area of the 100x100 frame: the frames/*.svg draw an
-// upright chamfered placard (plate x=24..76, y=10..86 with a ~3px metal
-// edge and a status strip below y=80). Stay inside it.
-const CONTENT_X = 27;
-const CONTENT_WIDTH = 46;
-const CONTENT_Y = 14;
-const CONTENT_HEIGHT = 64;
+import { TIER_BOX_COLORS } from "../avatar/tierColors";
+
+// Box face is drawn dark regardless of app theme (like the frame art was);
+// the tier tint and symbols read against it in both themes.
+const BOX_BASE_FILL = "#141821";
+
+// Rounded box inside the 100x100 viewBox, and the content area where the
+// user's two chosen DRD symbols stack top to bottom.
+const BOX_X = 5;
+const BOX_Y = 5;
+const BOX_SIZE = 90;
+const BOX_RADIUS = 16;
+const BOX_STROKE = 2.5;
+const CONTENT_X = 25;
+const CONTENT_WIDTH = 50;
+const CONTENT_Y = 12;
+const CONTENT_HEIGHT = 76;
 
 /**
- * Cartouche avatar for a QMail user: the frame encodes the denomination
- * tier (bit/byte/kilo/mega/giga/epic), and the user's two CHOSEN DRD
- * symbols stack top to bottom (firstSymbol above secondSymbol) inside the
- * placard.
+ * Cartouche avatar for a QMail user: a rounded box whose border color
+ * encodes the denomination tier (bit/byte/kilo/mega/giga/epic), holding the
+ * user's two CHOSEN DRD symbols stacked top to bottom (firstSymbol above
+ * secondSymbol).
  *
  * Symbol COLORS come from the user's serial number: its last two bytes are
  * a 2-byte color space, read BIG-ENDIAN for the top symbol and
@@ -38,12 +48,15 @@ const QmailCartoucheAvatar = ({
   className = "email-list-pane__avatar-cartouche",
 }) => {
   // React 18 useId contains ':' which is invalid inside url(#...) refs.
-  const maskIdBase = useId().replace(/:/g, "");
+  const idBase = useId().replace(/:/g, "");
 
   if (firstSymbol == null || secondSymbol == null) return null;
 
   const tierName = getQmailAvatarTierName(denominationCode);
   if (!tierName) return null;
+
+  const tierColor = TIER_BOX_COLORS[tierName];
+  const faceGradientId = `${idBase}-face`;
 
   const colors = serialSymbolColors(serialNumber);
   const symbolIndices = [firstSymbol, secondSymbol];
@@ -56,12 +69,30 @@ const QmailCartoucheAvatar = ({
       aria-hidden="true"
       focusable="false"
     >
-      <image
-        href={getQmailAvatarAssetHref("frame", tierName)}
-        x="0"
-        y="0"
-        width="100"
-        height="100"
+      <defs>
+        <linearGradient id={faceGradientId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={tierColor} stopOpacity="0.34" />
+          <stop offset="100%" stopColor={tierColor} stopOpacity="0.1" />
+        </linearGradient>
+      </defs>
+      <rect
+        x={BOX_X}
+        y={BOX_Y}
+        width={BOX_SIZE}
+        height={BOX_SIZE}
+        rx={BOX_RADIUS}
+        fill={BOX_BASE_FILL}
+      />
+      <rect
+        x={BOX_X}
+        y={BOX_Y}
+        width={BOX_SIZE}
+        height={BOX_SIZE}
+        rx={BOX_RADIUS}
+        fill={`url(#${faceGradientId})`}
+        stroke={tierColor}
+        strokeOpacity="0.65"
+        strokeWidth={BOX_STROKE}
       />
       {symbolIndices.map((symbolIndex, position) => {
         const href = getQmailAvatarAssetHref("symbol", symbolIndex);
@@ -87,7 +118,7 @@ const QmailCartoucheAvatar = ({
         }
 
         const color = position === 0 ? colors.top : colors.bottom;
-        const maskId = `${maskIdBase}-s${position}`;
+        const maskId = `${idBase}-s${position}`;
         return (
           <g key={key}>
             <mask

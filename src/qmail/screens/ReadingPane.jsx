@@ -21,10 +21,14 @@ import {
   ChevronDown,
   Copy,
   Check,
+  Clock,
+  Send,
 } from "lucide-react";
 import SenderAvatar from "./SenderAvatar";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
+import { getQmailAvatarTierName } from "../avatar/qmailAvatar";
+import { TIER_BOX_COLORS } from "../avatar/tierColors";
 import {
   formatByteProgress,
   formatProgressPercentage,
@@ -58,6 +62,8 @@ const RaidaHeroAnimation = ({ active }) => (
 
 const ReadingPane = ({
   email,
+  currentUserAddress = "",
+  repliedAt = null,
   isDecrypting = false,
   onReply,
   onReplyAll,
@@ -78,6 +84,8 @@ const ReadingPane = ({
   hasNextEmail = false,
 }) => {
   const [recipientsCopied, setRecipientsCopied] = useState(false);
+  // To/Cc/Bcc rows collapse past a few chips; tracks which rows are expanded.
+  const [expandedRecipientRows, setExpandedRecipientRows] = useState({});
   const copyRecipientsResetRef = useRef(null);
   // The clipboard write resolves asynchronously and can land after this
   // pane unmounts; the guard keeps the late resolve from touching state.
@@ -110,6 +118,7 @@ const ReadingPane = ({
       copyRecipientsResetRef.current = null;
     }
     setRecipientsCopied(false);
+    setExpandedRecipientRows({});
   }, [emailId]);
   const headerSenderSn = email?.senderSn ?? email?.sender_sn ?? null;
   const headerSenderDenominationCode =
@@ -262,6 +271,90 @@ const ReadingPane = ({
   const showCopyRecipients =
     allRecipientsList.length > 0 &&
     (currentFolder === "sent" || multiRecipient);
+
+  // ---- Header metadata: tier colors, recipient chips, reply status ----
+
+  const headerTierName = getQmailAvatarTierName(headerSenderDenominationCode);
+  const headerTierColor = headerTierName
+    ? TIER_BOX_COLORS[headerTierName]
+    : null;
+
+  const tierColorForAddress = (address) => {
+    const tier = String(address).split("@")[1]?.trim().toLowerCase();
+    return TIER_BOX_COLORS[tier] || null;
+  };
+
+  const isOwnAddress = (address) =>
+    Boolean(currentUserAddress) &&
+    String(address).trim().toLowerCase() ===
+      String(currentUserAddress).trim().toLowerCase();
+
+  const CHIP_COLLAPSE = 4;
+  const renderRecipientRow = (label, rowKey, addresses) => {
+    if (addresses.length === 0) return null;
+    const expanded = Boolean(expandedRecipientRows[rowKey]);
+    const shown = expanded ? addresses : addresses.slice(0, CHIP_COLLAPSE);
+    const hiddenCount = addresses.length - shown.length;
+    return (
+      <>
+        <span className="reading-pane__recip-label">{label}</span>
+        <span className="reading-pane__chips">
+          {shown.map((address, index) => {
+            const own = isOwnAddress(address);
+            const color = tierColorForAddress(address);
+            return (
+              <span
+                key={`${address}-${index}`}
+                className={`reading-pane__chip${own ? " reading-pane__chip--you" : ""}`}
+                title={address}
+              >
+                {color && (
+                  <span
+                    className="reading-pane__chip-dot"
+                    style={{ "--rp-tier": color }}
+                  />
+                )}
+                {own ? `You · ${address}` : address}
+              </span>
+            );
+          })}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              className="reading-pane__chip reading-pane__chip--more"
+              onClick={() =>
+                setExpandedRecipientRows((rows) => ({ ...rows, [rowKey]: true }))
+              }
+            >
+              +{hiddenCount} more
+            </button>
+          )}
+        </span>
+      </>
+    );
+  };
+
+  const formatRepliedAt = (isoString) => {
+    const parsed = new Date(isoString);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  // Reply status: "replied" comes from the local replied store (recorded
+  // when a reply compose is actually sent). "Awaiting" is inbox-only —
+  // other folders have no reply expectation.
+  const repliedAtLabel = repliedAt ? formatRepliedAt(repliedAt) : null;
+  const showRepliedStatus = Boolean(repliedAt) && !email.isDraft;
+  const showAwaitingStatus =
+    !repliedAt && !email.isDraft && currentFolder === "inbox";
+  const sentRecipientCount =
+    toAddresses.length + ccAddresses.length + bccAddresses.length;
+  const showSentStatus = currentFolder === "sent" && !email.isDraft;
 
   const handleCopyRecipients = (event) => {
     event.stopPropagation();
@@ -433,136 +526,161 @@ const ReadingPane = ({
   return (
     <section className="reading-pane">
       <header className="reading-pane__header">
-        <div className="reading-pane__header-avatar">
-          {hasHeaderCartouche ? (
-            <QmailCartoucheAvatar
-              firstSymbol={headerSymbols.firstSymbol}
-              secondSymbol={headerSymbols.secondSymbol}
-              denominationCode={headerSenderDenominationCode}
-              serialNumber={headerSenderSn}
-              className="reading-pane__header-cartouche"
-            />
-          ) : (
-            <SenderAvatar
-              sender={email.sender}
-              email={email.senderEmail || email.from}
-              status={email.senderStatus}
-              senderSn={email.senderSn ?? email.sender_sn}
-              senderDenominationCode={
-                email.senderDenominationCode ?? email.sender_denomination_code
-              }
-            />
+        <div className="reading-pane__hero">
+          <div
+            className="reading-pane__hero-box"
+            style={headerTierColor ? { "--rp-tier": headerTierColor } : undefined}
+          >
+            {hasHeaderCartouche ? (
+              <QmailCartoucheAvatar
+                firstSymbol={headerSymbols.firstSymbol}
+                secondSymbol={headerSymbols.secondSymbol}
+                denominationCode={headerSenderDenominationCode}
+                serialNumber={headerSenderSn}
+                className="reading-pane__header-cartouche"
+              />
+            ) : (
+              <SenderAvatar
+                sender={email.sender}
+                email={email.senderEmail || email.from}
+                status={email.senderStatus}
+                senderSn={email.senderSn ?? email.sender_sn}
+                senderDenominationCode={
+                  email.senderDenominationCode ?? email.sender_denomination_code
+                }
+              />
+            )}
+            {showRepliedStatus && (
+              <span
+                className="reading-pane__replied-badge"
+                title="You replied to this message"
+              >
+                <Reply size={14} aria-hidden="true" />
+              </span>
+            )}
+            {showAwaitingStatus && (
+              <span
+                className="reading-pane__replied-badge reading-pane__replied-badge--pending"
+                title="No reply recorded yet"
+              >
+                <Clock size={14} aria-hidden="true" />
+              </span>
+            )}
+          </div>
+          {headerTierName && (
+            <span
+              className="reading-pane__tier-tag"
+              style={{ "--rp-tier": headerTierColor }}
+            >
+              {headerTierName} class
+            </span>
           )}
         </div>
-        <div className="reading-pane__header-text">
+        <div className="reading-pane__meta">
         {email.isDraft ? (
-          <div className="reading-pane__top-row">
-            <div className="reading-pane__sender">
-              <div className="reading-pane__sender-details">
-                <span className="reading-pane__sender-name">Draft</span>
-              </div>
-            </div>
-            <div className="reading-pane__actions">
-              <div className="reading-pane__draft-note">
-                <FileEdit size={16} />
-                <span>Click on the draft to edit</span>
-              </div>
-
+          <div className="reading-pane__from-row">
+            <span className="reading-pane__from-name">Draft</span>
+            <div className="reading-pane__draft-note">
+              <FileEdit size={16} />
+              <span>Click on the draft to edit</span>
             </div>
           </div>
         ) : (
-          <div className="reading-pane__top-row">
-            <div className="reading-pane__sender">
-              <div className="reading-pane__sender-details">
-                {(() => {
-                  // For Sent, header identity is the primary recipient; full
-                  // To/Cc/Bcc lists are shown below so multi-recipient mail is
-                  // not reduced to "first@addr +N".
-                  const address =
-                    email.senderDisplayAddress ||
-                    email.from ||
-                    email.senderEmail ||
-                    email.sender ||
-                    "";
-                  const name = email.senderDisplayName || "";
-                  // Prefer full recipient list on the subtitle when present.
-                  const subtitleAddresses =
-                    currentFolder === "sent" && allRecipientsList
-                      ? allRecipientsList
-                      : address;
-                  return (
-                    <>
-                      <div className="reading-pane__sender-name-row">
-                        <span className="reading-pane__sender-name">
-                          {name || address}
-                        </span>
-                        {showCopyRecipients && (
-                          <button
-                            type="button"
-                            className="reading-pane__copy-recipients"
-                            onClick={handleCopyRecipients}
-                            title="Copy all recipient addresses"
-                            aria-label="Copy all recipient addresses"
-                          >
-                            {recipientsCopied ? (
-                              <Check size={14} />
-                            ) : (
-                              <Copy size={14} />
-                            )}
-                          </button>
+          <>
+            <div className="reading-pane__from-row">
+              {(() => {
+                // For Sent, header identity is the primary recipient; the
+                // full To/Cc/Bcc breakdown renders as chips below.
+                const address =
+                  email.senderDisplayAddress ||
+                  email.from ||
+                  email.senderEmail ||
+                  email.sender ||
+                  "";
+                const name = email.senderDisplayName || "";
+                return (
+                  <>
+                    <span className="reading-pane__from-name">
+                      {name || address}
+                    </span>
+                    {name && address && address !== name && (
+                      <span
+                        className="reading-pane__from-address"
+                        title={address}
+                      >
+                        {address}
+                      </span>
+                    )}
+                    {showCopyRecipients && (
+                      <button
+                        type="button"
+                        className="reading-pane__copy-recipients"
+                        onClick={handleCopyRecipients}
+                        title="Copy all recipient addresses"
+                        aria-label="Copy all recipient addresses"
+                      >
+                        {recipientsCopied ? (
+                          <Check size={14} />
+                        ) : (
+                          <Copy size={14} />
                         )}
-                      </div>
-                      {subtitleAddresses &&
-                        subtitleAddresses !== name && (
-                        <span
-                          className="reading-pane__sender-address"
-                          title={subtitleAddresses}
-                        >
-                          {subtitleAddresses}
-                        </span>
-                      )}
-                      {(toAddresses.length > 0 ||
-                        ccAddresses.length > 0 ||
-                        bccAddresses.length > 0) && (
-                        <div className="reading-pane__recipient-lists">
-                          {toAddresses.length > 0 && (
-                            <div className="reading-pane__recipient-line">
-                              <span className="reading-pane__recipient-label">
-                                To
-                              </span>
-                              <span className="reading-pane__recipient-values">
-                                {toAddresses.join(", ")}
-                              </span>
-                            </div>
-                          )}
-                          {ccAddresses.length > 0 && (
-                            <div className="reading-pane__recipient-line">
-                              <span className="reading-pane__recipient-label">
-                                Cc
-                              </span>
-                              <span className="reading-pane__recipient-values">
-                                {ccAddresses.join(", ")}
-                              </span>
-                            </div>
-                          )}
-                          {bccAddresses.length > 0 &&
-                            currentFolder === "sent" && (
-                            <div className="reading-pane__recipient-line">
-                              <span className="reading-pane__recipient-label">
-                                Bcc
-                              </span>
-                              <span className="reading-pane__recipient-values">
-                                {bccAddresses.join(", ")}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
+                      </button>
+                    )}
+                    {email.timestamp && (
+                      <span className="reading-pane__date">
+                        {email.timestamp}
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
+            {(toAddresses.length > 0 ||
+              ccAddresses.length > 0 ||
+              bccAddresses.length > 0) && (
+              <div className="reading-pane__recips">
+                {renderRecipientRow("To", "to", toAddresses)}
+                {renderRecipientRow("Cc", "cc", ccAddresses)}
+                {currentFolder === "sent" &&
+                  renderRecipientRow("Bcc", "bcc", bccAddresses)}
+              </div>
+            )}
+            {(showSentStatus || showRepliedStatus || showAwaitingStatus) && (
+              <div className="reading-pane__status-row">
+                {showSentStatus ? (
+                  <span className="reading-pane__status-chip reading-pane__status-chip--sent">
+                    <Send size={12} aria-hidden="true" />
+                    <span>
+                      Sent
+                      {sentRecipientCount > 0
+                        ? ` · ${sentRecipientCount} recipient${
+                            sentRecipientCount === 1 ? "" : "s"
+                          }`
+                        : ""}
+                    </span>
+                  </span>
+                ) : showRepliedStatus ? (
+                  <span className="reading-pane__status-chip reading-pane__status-chip--replied">
+                    <Reply size={12} aria-hidden="true" />
+                    <span>
+                      You replied
+                      {repliedAtLabel ? ` · ${repliedAtLabel}` : ""}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="reading-pane__status-chip reading-pane__status-chip--awaiting">
+                    <Clock size={12} aria-hidden="true" />
+                    <span>Awaiting your reply</span>
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        </div>
+
+        <div className="reading-pane__rail">
+          {!email.isDraft && (
             <div className="reading-pane__actions">
               {onReply && (
                 <button
@@ -627,38 +745,38 @@ const ReadingPane = ({
                 </button>
               )}
             </div>
-          </div>
-        )}
-
-        <h2 className="reading-pane__subject">{email.subject}</h2>
+          )}
+          {showMessageNav && (
+            <div className="reading-pane__nav">
+              <button
+                type="button"
+                className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
+                onClick={onPreviousEmail}
+                disabled={!hasPreviousEmail}
+                title="Previous message"
+              >
+                <ChevronUp size={14} aria-hidden="true" />
+                <span>Previous</span>
+              </button>
+              <button
+                type="button"
+                className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
+                onClick={onNextEmail}
+                disabled={!hasNextEmail}
+                title="Next message"
+              >
+                <span>Next</span>
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
+            </div>
+          )}
         </div>
-        {showMessageNav && (
-          <div className="reading-pane__nav">
-            <button
-              type="button"
-              className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
-              onClick={onPreviousEmail}
-              disabled={!hasPreviousEmail}
-              title="Previous message"
-            >
-              <ChevronUp size={14} aria-hidden="true" />
-              <span>Previous</span>
-            </button>
-            <button
-              type="button"
-              className="reading-pane__action-button reading-pane__action-button--secondary reading-pane__nav-button"
-              onClick={onNextEmail}
-              disabled={!hasNextEmail}
-              title="Next message"
-            >
-              <span>Next</span>
-              <ChevronDown size={14} aria-hidden="true" />
-            </button>
-          </div>
-        )}
       </header>
 
       <div className="reading-pane__body">
+        <div className="reading-pane__subject-band">
+          <h2 className="reading-pane__subject">{email.subject}</h2>
+        </div>
         <article className="reading-pane__content">
           <p className="reading-pane__content-text">
             {email.body || email.preview || "No content available."}

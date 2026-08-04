@@ -126,16 +126,29 @@ function App() {
     const appColor = colors.backgroundColor;
     const detailColor = colors.qmailDetailBackgroundColor;
 
+    // --primary-bg drives the QMail dashboard and the gradient-backed entry
+    // screens; --app-background covers roots that default to --secondary-bg
+    // (wallet main dashboard, app shell) so View → Background Color visibly
+    // applies across every service.
     if (typeof appColor === "string" && HEX_COLOR_PATTERN.test(appColor)) {
       root.style.setProperty("--primary-bg", appColor);
+      root.style.setProperty("--app-background", appColor);
     } else {
       root.style.removeProperty("--primary-bg");
+      root.style.removeProperty("--app-background");
     }
 
     if (typeof detailColor === "string" && HEX_COLOR_PATTERN.test(detailColor)) {
       root.style.setProperty("--qmail-detail-background", detailColor);
     } else {
       root.style.removeProperty("--qmail-detail-background");
+    }
+
+    // Detail-pane pattern: mirrored as a data attribute; ReadingPane.css
+    // defines one background treatment per id. Unknown ids simply match
+    // no CSS rule, which renders the same as "none".
+    if (typeof colors.qmailDetailPattern === "string") {
+      root.setAttribute("data-qmail-detail-pattern", colors.qmailDetailPattern);
     }
   }, []);
 

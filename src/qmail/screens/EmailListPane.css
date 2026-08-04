@@ -17,14 +17,22 @@
   background: var(--glass-bg);
 }
 
+/* Search field styled as a card face from the deck below: opaque top-lit
+   gradient, lit top edge, soft drop shadow. */
 .email-list-pane__search {
   position: relative;
   display: flex;
   align-items: center;
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  background: var(--card-bg);
+  border-top-color: color-mix(in srgb, white 14%, var(--border-medium));
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 6%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, black 12%, var(--secondary-bg)) 100%
+  );
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
   transition:
     border-color calc(250ms * var(--motion-scale)) ease,
     background-color calc(250ms * var(--motion-scale)) ease,
@@ -33,8 +41,14 @@
 
 .email-list-pane__search:focus-within {
   border-color: var(--accent-primary);
-  background: var(--card-hover);
-  box-shadow: 0 0 0 var(--space-xs) var(--status-info-bg);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 9%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, black 8%, var(--secondary-bg)) 100%
+  );
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.4),
+    0 0 0 var(--space-xs) var(--status-info-bg);
 }
 
 /* was: .search-icon */
@@ -274,9 +288,13 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  /* Top padding leaves room for the hover lift of the first card. */
+  padding: var(--space-md) var(--space-sm) var(--space-lg);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
+  /* Contain the card z-index ladder so it never fights dashboard chrome. */
+  isolation: isolate;
 }
 
 /* was: .email-list .loading-state */
@@ -315,17 +333,32 @@
   line-height: 1.7;
 }
 
-/* was: .email-list-item */
+/* was: .email-list-item — now a card in a fanned deck.
+   flex-shrink: 0 is load-bearing: rows are flex children of a column flex
+   container, and the explicit min-height would otherwise let flexbox
+   compress them below their content height, spilling cards over each
+   other (the accidental-stacking bug). */
 .email-list-pane__item {
   position: relative;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: var(--space-xs);
   min-height: 4.5rem;
   padding: var(--space-sm) var(--space-md) calc(var(--space-xs) + 2px);
-  border-bottom: 1px solid var(--border-subtle);
+  border-top: 1px solid color-mix(in srgb, white 10%, transparent);
   border-inline-start: 3px solid transparent;
-  background: var(--secondary-bg);
+  border-radius: var(--radius-md);
+  /* Opaque top-lit card face: lighter top edge fading to a shadowed foot
+     gives the deck its stacked-paper depth. Never mix these tints over
+     `transparent` — cards below would ghost through. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 7%, var(--secondary-bg)) 0%,
+    var(--secondary-bg) 42%,
+    color-mix(in srgb, black 18%, var(--secondary-bg)) 100%
+  );
+  box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   transition:
     background-color calc(200ms * var(--motion-scale)) ease,
@@ -333,6 +366,15 @@
     box-shadow calc(200ms * var(--motion-scale)) ease,
     transform calc(200ms * var(--motion-scale)) ease,
     opacity calc(200ms * var(--motion-scale)) ease;
+}
+
+/* Fanned deck: each card tucks UNDER the one below it (older mail on top),
+   so every card keeps its sender + subject spine visible. Natural DOM
+   paint order already stacks later (older) siblings above earlier ones —
+   no per-index z-index needed. Hit-testing follows paint order, so the
+   visible slice of a card is exactly its clickable slice. */
+.email-list-pane__item + .email-list-pane__item {
+  margin-top: calc(-1 * var(--card-stack-overlap, 3rem));
 }
 
 /* Elevate the open-menu row above siblings so the popover is not covered.
@@ -343,21 +385,30 @@
   z-index: 30;
 }
 
-.email-list-pane__item:hover {
-  background: var(--card-hover);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
-  transform: translateY(calc(-1 * var(--space-xs)));
-}
-
-/* was: .email-list-item.selected */
-.email-list-pane__item--selected {
-  border-inline-start-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+/* Hover: the card lifts ("pops up") but stays in its place in the deck —
+   no z-index raise, so cards after it still overlap it. Only selection
+   (click) brings a card to the front. Same cue for keyboard. */
+.email-list-pane__item:hover,
+.email-list-pane__item:focus-visible {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 10%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, var(--accent-primary) 6%, var(--secondary-bg)) 100%
+  );
+  transform: translateY(calc(-1 * var(--space-md))) scale(1.008);
+  box-shadow:
+    0 -8px 16px rgba(0, 0, 0, 0.5),
+    0 14px 26px rgba(0, 0, 0, 0.6);
 }
 
 /* was: .email-list-item.unread */
 .email-list-pane__item--unread {
-  background: color-mix(in srgb, var(--status-info) 8%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--status-info) 13%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, var(--status-info) 6%, var(--secondary-bg)) 42%,
+    color-mix(in srgb, black 16%, var(--secondary-bg)) 100%
+  );
 }
 
 .email-list-pane__item--unread .email-list-pane__subject,
@@ -366,16 +417,39 @@
 }
 
 .email-list-pane__item--pending {
-  background: color-mix(in srgb, var(--accent-warning) 8%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-warning) 13%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, var(--accent-warning) 6%, var(--secondary-bg)) 42%,
+    color-mix(in srgb, black 16%, var(--secondary-bg)) 100%
+  );
 }
 
+/* was: .email-list-item.selected — declared AFTER the unread/pending
+   washes so selection deterministically wins the cascade, and the surface
+   is opaque so selecting never reads as the card vanishing. */
+.email-list-pane__item--selected {
+  z-index: 3;
+  border-inline-start-color: var(--accent-primary);
+  transform: translateY(calc(-1 * var(--space-sm)));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-primary) 24%, var(--secondary-bg)) 0%,
+    color-mix(in srgb, var(--accent-primary) 12%, var(--secondary-bg)) 100%
+  );
+  box-shadow:
+    0 -8px 16px rgba(0, 0, 0, 0.5),
+    0 10px 20px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--accent-primary) 45%, transparent);
+}
+
+/* Keep loading rows opaque (dim via filter, not opacity) so overlapped
+   cards never show through them. */
 .email-list-pane__item--loading {
-  opacity: 0.7;
+  filter: saturate(0.6) brightness(0.8);
 }
 
-/* Header: hamburger + sender address + date/star, rule underneath.
-   header-leading and action-column share the same fixed icon-column width so
-   the ☰ sits directly above the envelope/trash stack. */
+/* Header: SUBJECT (bold, the card's title) + ☰ row menu, rule underneath. */
 .email-list-pane__item-header {
   display: flex;
   align-items: center;
@@ -385,7 +459,13 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.email-list-pane__header-leading {
+.email-list-pane__item-header .email-list-pane__subject {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.email-list-pane__header-trailing {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -393,6 +473,7 @@
   width: 1.5rem;
   min-width: 1.5rem;
   min-height: 1.5rem;
+  margin-inline-start: auto;
 }
 
 /* Body: icon stack + large cartouche + subject/preview */
@@ -670,29 +751,35 @@
   color: var(--text-primary);
 }
 
-/* was: .email-details */
+/* was: .email-details — top-aligned (not centered) so the subject line
+   sits inside the exposed card spine when the deck is fanned. */
 .email-list-pane__details {
   display: flex;
   flex: 1;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: calc(var(--space-xs) / 2);
   min-width: 0;
 }
 
-.email-list-pane__sender-left,
-.email-list-pane__sender-right {
+/* Meta line: time · sender address · action icons (📎 🗑 ✉ ★). */
+.email-list-pane__meta-row {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   min-width: 0;
 }
 
-.email-list-pane__sender-left {
-  flex: 1;
+.email-list-pane__meta-row .email-list-pane__sender {
+  flex-shrink: 1;
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
-.email-list-pane__sender-right {
+.email-list-pane__meta-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-xs) / 2);
   flex-shrink: 0;
   margin-inline-start: auto;
 }

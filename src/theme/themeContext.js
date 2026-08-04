@@ -11,7 +11,15 @@ import { createContext } from "react";
 export const THEME_STORAGE_KEY = "qmail.theme";
 export const THEME_BASE_STORAGE_KEY = "qmail.theme.base";
 
-export const STANDARD_THEMES = ["dark", "light", "high-contrast"];
+export const STANDARD_THEMES = [
+  "dark",
+  "light",
+  "high-contrast",
+  "solarized",
+  "nord",
+  "dracula",
+  "sepia",
+];
 
 export const ThemeContext = createContext({
   themeId: "dark",

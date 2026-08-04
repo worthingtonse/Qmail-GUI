@@ -24,6 +24,7 @@ const config = {
     "electron.cjs",
     "preload.cjs",
     "coin-file-state.cjs",
+    "transaction-log.cjs",
     "version.json",
   ],
 

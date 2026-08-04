@@ -11,9 +11,11 @@ import {
   Check,
   AlertTriangle,
   Star,
+  Pencil,
 } from "lucide-react";
 import "./ContactsPane.css";
 import AddContactModal from "./AddContactModal";
+import EditContactModal from "./EditContactModal";
 import {
   getPopularContacts,
   getContacts,
@@ -107,6 +109,7 @@ const ContactsPane = () => {
   const [userContacts, setUserContacts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddContactOpen, setIsAddContactOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentMode, setCurrentMode] = useState("contacts"); // "contacts" or "popular"
@@ -176,6 +179,10 @@ useEffect(() => {
           status: "none",
           description: contact.description,
           isFavorite: Boolean(contact.isFavorite),
+          denomination: contact.denomination,
+          className: contact.className,
+          trustLevel: contact.trustLevel,
+          userNotes: contact.userNotes,
           source: "user",
         }));
         setUserContacts(transformedContacts);
@@ -442,6 +449,62 @@ useEffect(() => {
     }
   };
 
+  const handleEditContact = async (updates) => {
+    if (!editingContact) {
+      return { success: false, error: "No contact is selected." };
+    }
+
+    const name = updates.name.trim();
+    const description = updates.description.trim();
+    if (
+      name === editingContact.name.trim() &&
+      description === String(editingContact.description || "").trim()
+    ) {
+      setEditingContact(null);
+      return { success: true };
+    }
+
+    const nameParts = name.split(/\s+/);
+    const parsedAddress = parseQmailAddress(editingContact.email);
+    const payload = {
+      serial_number: editingContact.id,
+      denomination: parsedAddress.ok
+        ? parsedAddress.denominationCode
+        : editingContact.denomination,
+      first_name: nameParts[0],
+      last_name: nameParts.slice(1).join(" "),
+      description,
+      class_name: editingContact.className,
+      trust_level: editingContact.trustLevel,
+      user_notes: editingContact.userNotes,
+    };
+
+    try {
+      const result = await addContact(payload);
+      if (!result.success) {
+        return {
+          success: false,
+          error: `Failed to update contact: ${result.error}`,
+        };
+      }
+
+      if (editingContact.isFavorite) {
+        const favoriteResult = await setContactFavorite(editingContact.id, true);
+        if (!favoriteResult.success) {
+          showError("Contact updated, but its favorite status could not be restored.");
+        }
+      }
+
+      const updatedName = name;
+      setEditingContact(null);
+      await loadContacts();
+      showSuccess(`${updatedName} updated.`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: `Error updating contact: ${err.message}` };
+    }
+  };
+
   const handleAddPopularContact = async (contact) => {
     const contactKey = getContactKey(contact);
     setSavingDrdContactId(contactKey);
@@ -631,6 +694,11 @@ useEffect(() => {
         isOpen={isAddContactOpen}
         onClose={() => setIsAddContactOpen(false)}
         onAddContact={handleAddContact}
+      />
+      <EditContactModal
+        contact={editingContact}
+        onClose={() => setEditingContact(null)}
+        onSaveContact={handleEditContact}
       />
       {pendingDeleteContact && (
         <div
@@ -936,6 +1004,15 @@ useEffect(() => {
                           </span>
                           {contact.source === "user" && (
                             <span className="contacts-pane__inline-actions">
+                              <button
+                                type="button"
+                                className="contacts-pane__action-button"
+                                onClick={() => setEditingContact(contact)}
+                                title="Edit contact"
+                                aria-label={`Edit ${contact.name}`}
+                              >
+                                <Pencil size={16} />
+                              </button>
                               <button
                                 type="button"
                                 className={`contacts-pane__action-button contacts-pane__action-button--favorite${

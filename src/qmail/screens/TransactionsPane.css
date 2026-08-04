@@ -1,0 +1,276 @@
+.transactions-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-xl);
+  background: color-mix(in srgb, var(--primary-bg) 88%, transparent);
+}
+
+.transactions-pane__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-lg);
+}
+
+.transactions-pane__header h2,
+.transactions-pane__header p {
+  margin: 0;
+}
+
+.transactions-pane__header h2 {
+  color: var(--text-primary);
+  font-size: var(--font-size-xl);
+}
+
+.transactions-pane__header p {
+  margin-top: var(--space-xs);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.transactions-pane__refresh {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.transactions-pane__warning {
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-md);
+  background: var(--status-warning-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.transactions-pane__table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-md);
+}
+
+.transactions-pane__table {
+  width: 100%;
+  min-width: 58rem;
+  border-collapse: collapse;
+}
+
+.transactions-pane__table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--secondary-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.transactions-pane__table td {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  vertical-align: middle;
+}
+
+.transactions-pane__table tbody tr:hover {
+  background: var(--card-hover);
+}
+
+.transactions-pane__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.transactions-pane__date-cell {
+  width: 12.5rem;
+  white-space: nowrap;
+}
+
+.transactions-pane__receipt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid color-mix(in srgb, var(--accent-secondary) 55%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-secondary) 10%, transparent);
+  color: var(--accent-secondary);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.transactions-pane__receipt-link:hover {
+  border-color: var(--accent-secondary);
+  background: color-mix(in srgb, var(--accent-secondary) 18%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--glow-secondary);
+}
+
+.transactions-pane__receipt-link:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+}
+
+.transactions-pane__type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-weight: 600;
+}
+
+.transactions-pane__type--in,
+.transactions-pane__amount--positive {
+  color: var(--status-success);
+}
+
+.transactions-pane__type--out,
+.transactions-pane__amount--negative {
+  color: var(--status-error);
+}
+
+.transactions-pane__type--other,
+.transactions-pane__amount--neutral {
+  color: var(--text-tertiary);
+}
+
+.transactions-pane__description {
+  min-width: 14rem;
+  max-width: 30rem;
+  overflow-wrap: anywhere;
+}
+
+.transactions-pane__numeric {
+  text-align: right !important;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.transactions-pane__state {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-md);
+  min-height: 14rem;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.transactions-pane__state p {
+  margin: 0;
+}
+
+.transactions-pane__state--error {
+  color: var(--status-error);
+}
+
+.transactions-pane__receipt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: color-mix(in srgb, var(--secondary-bg) 78%, transparent);
+  backdrop-filter: var(--glass-blur);
+}
+
+.transactions-pane__receipt-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(56rem, 100%);
+  max-height: 82vh;
+  overflow: hidden;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  background: var(--secondary-bg);
+  box-shadow: var(--shadow-xl);
+}
+
+.transactions-pane__receipt-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border-bottom: 1px solid var(--border-medium);
+  background: var(--card-bg);
+}
+
+.transactions-pane__receipt-dialog h3,
+.transactions-pane__receipt-dialog header p {
+  margin: 0;
+}
+
+.transactions-pane__receipt-dialog header p {
+  margin-top: var(--space-xs);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.transactions-pane__receipt-dialog header button {
+  display: inline-flex;
+  padding: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.transactions-pane__receipt-dialog header button:hover {
+  border-color: var(--border-medium);
+  background: var(--card-hover);
+  color: var(--text-primary);
+}
+
+.transactions-pane__receipt-body {
+  min-height: 18rem;
+  overflow: auto;
+  padding: var(--space-lg);
+}
+
+.transactions-pane__receipt-body pre {
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .transactions-pane {
+    padding: var(--space-md);
+  }
+
+  .transactions-pane__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .transactions-pane__refresh {
+    justify-content: center;
+  }
+}

@@ -5,6 +5,7 @@ import ComposeModal from "./ComposeModal";
 import WalletActionModal from "./WalletActionModal";
 import CoinEncryptionModal from "./CoinEncryptionModal";
 import ContactsPane from "./ContactsPane";
+import TransactionsPane from "./TransactionsPane";
 import AccountPane from "./AccountPane";
 import NavigationPane from "./NavigationPane";
 import EmailListPane from "./EmailListPane";
@@ -98,6 +99,7 @@ import {
 import { useNotification } from "../../components/common/notifications/NotificationContext";
 import { buildWindowTitle } from "./windowTitle";
 import { ensureProtectedWhitelist } from "../ensureProtectedWhitelist";
+import { getRepliedAt, markReplied } from "../repliedStore";
 import {
   formatMailboxCoinPolicyMessage,
   getMailboxWalletPolicy,
@@ -2231,6 +2233,14 @@ const QMailDashboard = ({
   };
 
   const handleSendEmail = async () => {
+    // Record the reply relationship locally so the reading pane can show
+    // "You replied" — the backend does not track this.
+    if (
+      (composeContext?.mode === "reply" || composeContext?.mode === "replyAll") &&
+      composeContext.sourceEmail
+    ) {
+      markReplied(getEmailId(composeContext.sourceEmail));
+    }
     setIsComposeOpen(false);
     setComposeContext(null);
     showDashboardNotification("Qmail Sent!", "success");
@@ -3480,6 +3490,10 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               : null,
           );
           break;
+        case "wallet-see-transactions":
+          setSelectedEmail(null);
+          setActiveView("transactions");
+          break;
         case "profile-whitelist":
           setProfileEditor("whitelist");
           break;
@@ -4476,6 +4490,10 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
           {!isComposeOpen && (
             <ReadingPane
               email={selectedEmail}
+              currentUserAddress={qmailAddress}
+              repliedAt={
+                selectedEmail ? getRepliedAt(getEmailId(selectedEmail)) : null
+              }
               isDecrypting={
                 !!selectedEmail &&
                 (decryptingMailIds.has(getEmailDownloadIdentifier(selectedEmail)) ||
@@ -4509,6 +4527,7 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
       )}
 
       {activeView === "contacts" && <ContactsPane />}
+      {activeView === "transactions" && <TransactionsPane />}
       {activeView === "account" && (
         <AccountPane
           userAccount={userAccount}

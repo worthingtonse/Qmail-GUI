@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppDir: () => ipcRenderer.invoke('get-app-dir'),
   quitApp: () => ipcRenderer.invoke('quit-app'),
   getCoinFileState: () => ipcRenderer.invoke('coin-encryption:get-file-state'),
+  getAllWalletTransactions: () => ipcRenderer.invoke('wallet:getAllTransactions'),
   // Add CLI command support
   runCommand: (command) => ipcRenderer.invoke('run-command', command),
   // Add file reading support for EFF wordlist
@@ -115,3 +116,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   notifyThemeChanged: (themeId) => ipcRenderer.send('theme:changed', themeId)
 });
+
+// Ctrl/Cmd + mouse wheel → page zoom (matches browser behavior and the
+// Ctrl+/- shortcuts handled in the main process). Capture + non-passive so
+// we can preventDefault before a nested scrollable pane consumes the wheel.
+window.addEventListener(
+  'wheel',
+  (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    if (event.deltaY === 0) return;
+    event.preventDefault();
+    // Wheel up / trackpad pinch-out → zoom in; wheel down → zoom out.
+    ipcRenderer.send('zoom:adjust', event.deltaY < 0 ? 1 : -1);
+  },
+  { passive: false, capture: true }
+);

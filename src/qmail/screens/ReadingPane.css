@@ -8,6 +8,51 @@
   background: var(--qmail-detail-background, var(--primary-bg));
 }
 
+/* ---- Detail-pane patterns (View → Detail Pane Pattern) ----------------
+   The chosen pattern id is mirrored onto <html data-qmail-detail-pattern>
+   by App.jsx. Each pattern is drawn as extra background layers above the
+   user's detail color (or the theme background) so it works with every
+   theme and custom color. The SVG tiles stroke/fill in mid-gray at low
+   alpha, which stays subtle on both dark and light surfaces. */
+
+:root[data-qmail-detail-pattern="crosshatch"] .reading-pane {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0 2.75rem,
+      color-mix(in srgb, var(--border-medium) 70%, transparent) 2.75rem calc(2.75rem + 1px)
+    ),
+    repeating-linear-gradient(
+      -135deg,
+      transparent 0 3.5rem,
+      color-mix(in srgb, var(--border-subtle) 90%, transparent) 3.5rem calc(3.5rem + 1px)
+    ),
+    var(--qmail-detail-background, var(--primary-bg));
+}
+
+/* Four-petal rosette with a center dot, tiled on a 56px grid. */
+:root[data-qmail-detail-pattern="floral"] .reading-pane {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Cg fill='none' stroke='rgb(148,163,184)' stroke-opacity='0.16'%3E%3Cellipse cx='28' cy='16' rx='5' ry='10'/%3E%3Cellipse cx='28' cy='40' rx='5' ry='10'/%3E%3Cellipse cx='16' cy='28' rx='10' ry='5'/%3E%3Cellipse cx='40' cy='28' rx='10' ry='5'/%3E%3Ccircle cx='28' cy='28' r='3.5'/%3E%3Ccircle cx='0' cy='0' r='2'/%3E%3Ccircle cx='56' cy='0' r='2'/%3E%3Ccircle cx='0' cy='56' r='2'/%3E%3Ccircle cx='56' cy='56' r='2'/%3E%3C/g%3E%3C/svg%3E"),
+    var(--qmail-detail-background, var(--primary-bg));
+}
+
+/* Large circles centered on tile corners + center: neighbors overlap into
+   an interlinked-rings lattice. */
+:root[data-qmail-detail-pattern="rings"] .reading-pane {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Cg fill='none' stroke='rgb(148,163,184)' stroke-opacity='0.14'%3E%3Ccircle cx='0' cy='0' r='34'/%3E%3Ccircle cx='96' cy='0' r='34'/%3E%3Ccircle cx='0' cy='96' r='34'/%3E%3Ccircle cx='96' cy='96' r='34'/%3E%3Ccircle cx='48' cy='48' r='34'/%3E%3C/g%3E%3C/svg%3E"),
+    var(--qmail-detail-background, var(--primary-bg));
+}
+
+/* Pointy-top hexagon lattice: one hex outline per 56x97 tile plus the
+   half-hexes that complete the honeycomb when tiled. */
+:root[data-qmail-detail-pattern="honeycomb"] .reading-pane {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97'%3E%3Cg fill='none' stroke='rgb(148,163,184)' stroke-opacity='0.15'%3E%3Cpath d='M28 0 L56 16 L56 48 L28 64 L0 48 L0 16 Z'/%3E%3Cpath d='M28 64 L56 80 L56 97 M0 97 L0 80 L28 64'/%3E%3C/g%3E%3C/svg%3E"),
+    var(--qmail-detail-background, var(--primary-bg));
+}
+
 /* was: .reading-pane-header */
 .reading-pane__header {
   display: flex;
@@ -18,40 +63,218 @@
   background-color: var(--secondary-bg);
 }
 
-/* Full-height avatar column: cartouche or letter fallback (~96–110px). */
-.reading-pane__header-avatar {
+/* ---- Hero cartouche column: the sender's identity mark gets the visual
+   weight. --rp-tier (set inline from the denomination) drives the glow and
+   the tier tag; without it the box renders glow-free. ---- */
+.reading-pane__hero {
   display: flex;
   flex: none;
-  align-items: stretch;
-  align-self: stretch;
-  width: 6.5rem;
-  min-width: 6.5rem;
-  min-height: 6.5rem;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs);
 }
 
-.reading-pane__header-avatar .email-list-pane__avatar {
+.reading-pane__hero-box {
+  position: relative;
+  width: 7rem;
+  height: 7rem;
+}
+
+.reading-pane__hero-box .email-list-pane__avatar {
   width: 100%;
   height: 100%;
   align-self: stretch;
   margin: 0;
 }
 
-.reading-pane__header-avatar .email-list-pane__avatar-circle,
-.reading-pane__header-avatar .email-list-pane__avatar-cartouche,
+.reading-pane__hero-box .email-list-pane__avatar-circle,
+.reading-pane__hero-box .email-list-pane__avatar-cartouche,
 .reading-pane__header-cartouche {
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 6.5rem;
+  min-height: 7rem;
   font-size: var(--font-size-2xl, 1.75rem);
 }
 
-.reading-pane__header-text {
+.reading-pane__header-cartouche {
+  filter: drop-shadow(
+    0 0 14px color-mix(in srgb, var(--rp-tier, transparent) 42%, transparent)
+  );
+}
+
+/* Reply-state badge riding the cartouche corner. */
+.reading-pane__replied-badge {
+  position: absolute;
+  right: calc(var(--space-xs) * -1.5);
+  bottom: calc(var(--space-xs) * -1.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 3px solid var(--secondary-bg);
+  border-radius: 999px;
+  background: var(--accent-success);
+  color: var(--secondary-bg);
+}
+
+.reading-pane__replied-badge--pending {
+  background: var(--text-muted);
+}
+
+.reading-pane__tier-tag {
+  color: var(--rp-tier, var(--text-tertiary));
+  font-size: var(--font-size-2xs);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ---- Metadata column: from-row, recipient chips, status. ---- */
+.reading-pane__meta {
   display: flex;
   flex: 1;
   min-width: 0;
   flex-direction: column;
   justify-content: center;
+  gap: var(--space-sm);
+}
+
+.reading-pane__from-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.reading-pane__from-name {
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+
+.reading-pane__from-address {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  word-break: break-word;
+}
+
+.reading-pane__date {
+  margin-inline-start: auto;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+/* Label/chips grid: To / Cc / Bcc rows. */
+.reading-pane__recips {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-xs) var(--space-md);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.reading-pane__recip-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-2xs);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reading-pane__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.reading-pane__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm) 2px var(--space-xs);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--tertiary-bg);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.reading-pane__chip--you {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  color: var(--text-primary);
+}
+
+.reading-pane__chip--more {
+  cursor: pointer;
+  padding-inline-start: var(--space-sm);
+  color: var(--text-muted);
+}
+
+.reading-pane__chip--more:hover,
+.reading-pane__chip--more:focus-visible {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+  outline: none;
+}
+
+/* Tier-colored recipient dot: the danger→safe class spectrum at a glance. */
+.reading-pane__chip-dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--rp-tier);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--rp-tier) 60%, transparent);
+}
+
+.reading-pane__status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.reading-pane__status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 3px var(--space-sm);
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.reading-pane__status-chip--replied {
+  border: 1px solid color-mix(in srgb, var(--accent-success) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-success) 14%, transparent);
+  color: var(--accent-success);
+}
+
+.reading-pane__status-chip--awaiting {
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--accent-warning) 12%, transparent);
+  color: var(--accent-warning);
+}
+
+.reading-pane__status-chip--sent {
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: color-mix(in srgb, var(--accent-primary) 70%, white);
+}
+
+/* ---- Action rail: reply cluster on top, Prev/Next below. ---- */
+.reading-pane__rail {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
   gap: var(--space-sm);
 }
 
@@ -351,11 +574,35 @@
 }
 
 /* was: .reading-pane-body */
+/* Transparent: the pane root paints the detail background AND the chosen
+   View → Detail Pane Pattern; an opaque body here would cover the pattern. */
 .reading-pane__body {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2xl);
-  background: var(--qmail-detail-background, var(--primary-bg));
+  background: transparent;
+}
+
+/* Subject band: the message title opens the reading surface, styled like a
+   document heading. Negative margins stretch it across the body padding. */
+.reading-pane__subject-band {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin: calc(-1 * var(--space-2xl)) calc(-1 * var(--space-2xl)) var(--space-xl);
+  padding: var(--space-lg) var(--space-2xl) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 3%, transparent) 0%,
+    transparent 100%
+  );
+}
+
+.reading-pane__subject-band .reading-pane__subject {
+  font-size: var(--font-size-2xl, 1.75rem);
+  letter-spacing: -0.01em;
 }
 
 /* was: .email-content */
@@ -888,16 +1135,20 @@
     font-size: var(--font-size-xl);
   }
 
-  .reading-pane__header-avatar {
+  .reading-pane__hero-box {
     width: 5rem;
-    min-width: 5rem;
+    height: 5rem;
+  }
+
+  .reading-pane__hero-box .email-list-pane__avatar-circle,
+  .reading-pane__hero-box .email-list-pane__avatar-cartouche,
+  .reading-pane__header-cartouche {
     min-height: 5rem;
   }
 
-  .reading-pane__header-avatar .email-list-pane__avatar-circle,
-  .reading-pane__header-avatar .email-list-pane__avatar-cartouche,
-  .reading-pane__header-cartouche {
-    min-height: 5rem;
+  .reading-pane__subject-band {
+    margin: calc(-1 * var(--space-md)) calc(-1 * var(--space-md)) var(--space-lg);
+    padding: var(--space-md);
   }
 
   .reading-pane__actions {
@@ -906,8 +1157,14 @@
     align-items: center;
   }
 
-  .reading-pane__nav {
+  .reading-pane__rail {
     width: 100%;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .reading-pane__nav {
     flex-direction: row;
     justify-content: flex-end;
   }

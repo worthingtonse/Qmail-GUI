@@ -1,4 +1,30 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+
+// Registered before any require() that can throw: an uncaught exception in
+// the main process (e.g. a module missing from the asar) must EXIT, not
+// linger. Electron's default handler shows the error dialog and then leaves
+// a headless zombie process tree behind — no window ever opened, so
+// window-all-closed/before-quit never fire, and the portable exe stays
+// locked on disk. app.quit() runs the normal shutdown (incl. backend kill
+// when those handlers are registered); the timer is the hard stop if quit
+// itself is wedged.
+process.on('uncaughtException', (err) => {
+  try {
+    dialog.showErrorBox(
+      'QMail — fatal error',
+      String((err && err.stack) || err)
+    );
+  } catch {
+    /* dialog unavailable — still exit below */
+  }
+  try {
+    app.quit();
+  } catch {
+    /* fall through to hard exit */
+  }
+  setTimeout(() => process.exit(1), 5000).unref();
+});
+
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
@@ -6,6 +32,7 @@ const fs = require('fs');
 const net = require('net');
 const crypto = require('crypto');
 const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
+const { parseTransactionCsv } = require('./transaction-log.cjs');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -19,6 +46,9 @@ let backendDataDir = null;
 let titleBarColor = '#C9CC3F';
 let backgroundColor = null;
 let qmailDetailBackgroundColor = null;
+// 'crosshatch' literal here (not DEFAULT_DETAIL_PATTERN): that const is
+// declared further down and would be in its temporal dead zone.
+let qmailDetailPattern = 'crosshatch';
 let attachmentPickerActive = false;
 let coinFileState = {
   state: 'unknown',
@@ -39,7 +69,27 @@ const THEME_MENU_ITEMS = [
   { id: 'dark', label: 'Dark' },
   { id: 'light', label: 'Light' },
   { id: 'high-contrast', label: 'High Contrast' },
+  { id: 'solarized', label: 'Solarized Dark' },
+  { id: 'nord', label: 'Nord' },
+  { id: 'dracula', label: 'Dracula' },
+  { id: 'sepia', label: 'Sepia (Reading)' },
 ];
+
+// Subtle background patterns for the QMail detail (reading) pane. The id is
+// mirrored to the renderer as data-qmail-detail-pattern on <html>; the CSS
+// in ReadingPane.css defines one background treatment per id.
+const DETAIL_PATTERN_MENU_ITEMS = [
+  { id: 'none', label: 'None' },
+  { id: 'crosshatch', label: 'Diagonal Crosshatch' },
+  { id: 'floral', label: 'Floral' },
+  { id: 'rings', label: 'Interlinked Rings' },
+  { id: 'honeycomb', label: 'Honeycomb' },
+];
+const DEFAULT_DETAIL_PATTERN = 'crosshatch';
+
+function isDetailPattern(patternId) {
+  return DETAIL_PATTERN_MENU_ITEMS.some((item) => item.id === patternId);
+}
 
 const SOUND_FILE_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac']);
 const FALLBACK_ALERT_SOUND_FILES = [
@@ -52,6 +102,16 @@ const FALLBACK_ALERT_SOUND_FILES = [
 const DEFAULT_TITLE_BAR_COLOR = '#C9CC3F';
 const WINDOW_SETTINGS_FILE = 'qmail-window-settings.json';
 const ZOOM_LEVEL_STEP = 0.5;
+
+/** @param {number} direction +1 zoom in, -1 zoom out */
+function adjustMainWindowZoom(direction) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const contents = mainWindow.webContents;
+  if (!contents || contents.isDestroyed()) return;
+  const step = direction > 0 ? ZOOM_LEVEL_STEP : -ZOOM_LEVEL_STEP;
+  contents.setZoomLevel(contents.getZoomLevel() + step);
+}
+
 // Single source of truth for the version: version.json at the app root,
 // stamped by scripts/stamp-version.cjs on every build. src/version.js
 // imports the same file for the renderer.
@@ -430,6 +490,9 @@ function loadWindowSettings() {
   titleBarColor = normalizeHexColor(settings.titleBarColor) || DEFAULT_TITLE_BAR_COLOR;
   backgroundColor = normalizeHexColor(settings.backgroundColor);
   qmailDetailBackgroundColor = normalizeHexColor(settings.qmailDetailBackgroundColor);
+  qmailDetailPattern = isDetailPattern(settings.qmailDetailPattern)
+    ? settings.qmailDetailPattern
+    : DEFAULT_DETAIL_PATTERN;
 }
 
 function saveWindowSettings(nextSettings) {
@@ -565,7 +628,19 @@ function getAppearanceColors() {
     success: true,
     backgroundColor,
     qmailDetailBackgroundColor,
+    qmailDetailPattern,
   };
+}
+
+function setQmailDetailPattern(patternId) {
+  if (!isDetailPattern(patternId)) {
+    return { ...getAppearanceColors(), success: false, error: 'Unknown detail pane pattern' };
+  }
+  qmailDetailPattern = patternId;
+  saveWindowSettings({ qmailDetailPattern: patternId });
+  buildApplicationMenu();
+  sendAppearanceColorsChanged();
+  return getAppearanceColors();
 }
 
 function sendAppearanceColorsChanged() {
@@ -626,12 +701,11 @@ function resetAppearanceColor(settingName) {
   return getAppearanceColors();
 }
 
-function showNativeTitleBarColorPicker() {
-  if (process.platform !== 'win32') {
-    sendTitleBarColorPickerCommand();
-    return;
-  }
-
+// Native Windows color dialog (WinForms via PowerShell). Blocks until the
+// user picks or cancels; returns a normalized #RRGGBB string or null.
+// Shared by the title-bar, background, and detail-background pickers so all
+// three color menus behave identically.
+function pickNativeColor(initialColor, label) {
   const script = [
     "Add-Type -AssemblyName System.Windows.Forms",
     "Add-Type -AssemblyName System.Drawing",
@@ -657,25 +731,61 @@ function showNativeTitleBarColorPicker() {
     script,
   ], {
     encoding: 'utf8',
-    env: { ...process.env, QMAIL_INITIAL_COLOR: titleBarColor },
+    env: { ...process.env, QMAIL_INITIAL_COLOR: initialColor || '' },
     windowsHide: true,
   });
 
   const output = `${result.stdout || ''}`.trim().split(/\r?\n/).pop();
   if (result.error) {
-    log('Title bar color picker failed: ' + result.error.message);
-    return;
+    log(`${label} color picker failed: ` + result.error.message);
+    return null;
   }
-  if (!output || output === 'CANCEL') return;
+  if (!output || output === 'CANCEL') return null;
 
   const normalized = normalizeHexColor(output);
   if (!normalized) {
-    log('Title bar color picker returned invalid color: ' + output);
+    log(`${label} color picker returned invalid color: ` + output);
+    return null;
+  }
+  return normalized;
+}
+
+function showNativeTitleBarColorPicker() {
+  if (process.platform !== 'win32') {
+    sendTitleBarColorPickerCommand();
     return;
   }
+
+  const normalized = pickNativeColor(titleBarColor, 'Title bar');
+  if (!normalized) return;
   const setResult = setTitleBarColor(normalized);
   if (!setResult.success) {
     log('Title bar color selection failed: ' + setResult.error);
+  }
+}
+
+// View menu → "Background Color…" / "QMail Detail Background Color…".
+// Same native dialog as the title bar. (The old path sent an IPC message
+// asking the renderer to click a hidden <input type="color">, but Chromium
+// requires transient user activation to open that picker and a native menu
+// click is not one — so nothing ever happened.)
+function showAppearanceColorPicker(settingName) {
+  if (process.platform !== 'win32') {
+    sendAppearanceColorPickerCommand(
+      settingName === 'qmailDetailBackgroundColor' ? 'qmail-detail' : 'background'
+    );
+    return;
+  }
+
+  const initial =
+    (settingName === 'qmailDetailBackgroundColor'
+      ? qmailDetailBackgroundColor || backgroundColor
+      : backgroundColor) || '#0F1419';
+  const normalized = pickNativeColor(initial, 'Appearance');
+  if (!normalized) return;
+  const setResult = setAppearanceColor(settingName, normalized);
+  if (!setResult.success) {
+    log('Appearance color selection failed: ' + setResult.error);
   }
 }
 
@@ -1237,6 +1347,46 @@ function readWalletsForMenu() {
   return wallets;
 }
 
+function readAllWalletTransactions() {
+  const transactions = [];
+  const errors = [];
+
+  for (const wallet of readWalletsForMenu()) {
+    const transactionPath = path.join(wallet.path, 'transactions.csv');
+    if (!fs.existsSync(transactionPath)) continue;
+
+    try {
+      const receiptsPath = path.join(wallet.path, 'Receipts');
+      let receiptFilenames = [];
+      try {
+        receiptFilenames = fs.readdirSync(receiptsPath, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
+      } catch {
+        // A wallet is allowed to have a log without a Receipts directory.
+      }
+
+      const content = fs.readFileSync(transactionPath, 'utf8');
+      transactions.push(...parseTransactionCsv(content, wallet, receiptFilenames));
+    } catch (error) {
+      errors.push(`${wallet.name}: ${error.message}`);
+    }
+  }
+
+  transactions.sort((left, right) => {
+    const rightTime = Date.parse(right.datetime) || 0;
+    const leftTime = Date.parse(left.datetime) || 0;
+    return rightTime - leftTime;
+  });
+
+  return {
+    success: true,
+    transactions,
+    count: transactions.length,
+    errors,
+  };
+}
+
 function sendAppearanceColorPickerCommand(target) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('appearance:pick-color', {
@@ -1569,6 +1719,11 @@ function buildApplicationMenu() {
       label: 'Wallet',
       submenu: [
         {
+          label: 'See Transactions',
+          click: () => sendQmailMenuCommand('wallet-see-transactions'),
+        },
+        { type: 'separator' },
+        {
           label: 'Add Funds',
           submenu: [
             {
@@ -1695,7 +1850,7 @@ function buildApplicationMenu() {
       label: 'View',
       submenu: [
         {
-          label: 'Appearance',
+          label: 'Theme',
           submenu: THEME_MENU_ITEMS.map(({ id, label }) => ({
             label,
             type: 'radio',
@@ -1703,32 +1858,41 @@ function buildApplicationMenu() {
             click: () => setThemeFromMenu(id),
           })),
         },
+        {
+          label: 'Detail Pane Pattern',
+          submenu: DETAIL_PATTERN_MENU_ITEMS.map(({ id, label }) => ({
+            label,
+            type: 'radio',
+            checked: qmailDetailPattern === id,
+            click: () => setQmailDetailPattern(id),
+          })),
+        },
         { type: 'separator' },
         {
           label: 'Title Bar Color...',
           click: () => showNativeTitleBarColorPicker(),
         },
+        /* Reset items stay enabled even when nothing is set: resetting an
+           unset color is a harmless no-op, and a permanently-gray item
+           reads as broken. */
         {
           label: 'Reset Title Bar Color',
-          enabled: titleBarColor !== DEFAULT_TITLE_BAR_COLOR,
           click: () => resetTitleBarColor(),
         },
         {
           label: 'Background Color...',
-          click: () => sendAppearanceColorPickerCommand('background'),
+          click: () => showAppearanceColorPicker('backgroundColor'),
         },
         {
           label: 'Reset Background Color',
-          enabled: Boolean(backgroundColor),
           click: () => resetAppearanceColor('backgroundColor'),
         },
         {
           label: 'QMail Detail Background Color...',
-          click: () => sendAppearanceColorPickerCommand('qmail-detail'),
+          click: () => showAppearanceColorPicker('qmailDetailBackgroundColor'),
         },
         {
           label: 'Reset QMail Detail Background Color',
-          enabled: Boolean(qmailDetailBackgroundColor),
           click: () => resetAppearanceColor('qmailDetailBackgroundColor'),
         },
         { type: 'separator' },
@@ -1859,6 +2023,8 @@ function createMainWindow(port) {
   // Handle zoom shortcuts explicitly. Electron's menu-role accelerators do
   // not consistently receive Ctrl+Plus/Ctrl+Minus on every keyboard layout,
   // particularly when Plus requires Shift or comes from the numeric keypad.
+  // Ctrl/Cmd + mouse wheel is handled in preload.cjs (wheel is not an input
+  // event here) and routed through the zoom:adjust IPC channel.
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) {
       return;
@@ -1877,10 +2043,7 @@ function createMainWindow(port) {
     if (!isZoomIn && !isZoomOut) return;
 
     event.preventDefault();
-    const direction = isZoomIn ? 1 : -1;
-    mainWindow.webContents.setZoomLevel(
-      mainWindow.webContents.getZoomLevel() + direction * ZOOM_LEVEL_STEP
-    );
+    adjustMainWindowZoom(isZoomIn ? 1 : -1);
   });
 
   // Chromium computes misspelling suggestions but Electron does not render
@@ -2026,6 +2189,15 @@ ipcMain.handle('quit-app', () => {
 
 ipcMain.handle('coin-encryption:get-file-state', () => {
   return refreshCoinFileState({ rebuildMenu: true });
+});
+
+ipcMain.handle('wallet:getAllTransactions', () => readAllWalletTransactions());
+
+// Ctrl/Cmd + mouse wheel from preload → same step as keyboard zoom.
+ipcMain.on('zoom:adjust', (event, direction) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (event.sender !== mainWindow.webContents) return;
+  adjustMainWindowZoom(direction);
 });
 
 ipcMain.handle('run-command', async (event, command) => {
