@@ -18,52 +18,16 @@ import {
   shutdownCore,
   waitForTaskCompletion,
 } from "../../api/qmailApiServices";
+import {
+  addCounts,
+  buildCompletionSummary,
+  canProceedAfterLogin,
+  dedupeWallets,
+  emptyAggregateCounts,
+  getEncryptionCounts,
+  needsPasswordForAction,
+} from "./coinEncryptionLogic";
 import "./CoinEncryptionModal.css";
-
-const getEncryptionCounts = (taskResult) => {
-  const counts =
-    taskResult?.data?.result?.counts ||
-    taskResult?.data?.result?.data?.counts ||
-    taskResult?.data?.counts ||
-    null;
-
-  if (!counts || typeof counts !== "object") return null;
-  return {
-    processed: Number(counts.processed) || 0,
-    encrypted: Number(counts.encrypted) || 0,
-    decrypted: Number(counts.decrypted) || 0,
-    skipped: Number(counts.skipped) || 0,
-    errors: Number(counts.errors) || 0,
-    alreadyTarget: Number(counts.already_target) || 0,
-    skippedMulti: Number(counts.skipped_multi) || 0,
-    conflict: Number(counts.conflict) || 0,
-  };
-};
-
-const emptyAggregateCounts = () => ({
-  processed: 0,
-  encrypted: 0,
-  decrypted: 0,
-  skipped: 0,
-  errors: 0,
-  alreadyTarget: 0,
-  skippedMulti: 0,
-  conflict: 0,
-});
-
-const addCounts = (aggregate, counts) => {
-  if (!counts) return aggregate;
-  return {
-    processed: aggregate.processed + counts.processed,
-    encrypted: aggregate.encrypted + counts.encrypted,
-    decrypted: aggregate.decrypted + counts.decrypted,
-    skipped: aggregate.skipped + counts.skipped,
-    errors: aggregate.errors + counts.errors,
-    alreadyTarget: aggregate.alreadyTarget + counts.alreadyTarget,
-    skippedMulti: aggregate.skippedMulti + counts.skippedMulti,
-    conflict: aggregate.conflict + counts.conflict,
-  };
-};
 
 const CoinEncryptionModal = ({
   action,
@@ -143,10 +107,7 @@ const CoinEncryptionModal = ({
   if (!isOpen) return null;
 
   const keyState = encryptionStatus?.keyState || "none";
-  const needsPassword = !(
-    keyState === "confirmed" ||
-    (isEncrypting && keyState === "establishing_ready")
-  );
+  const needsPassword = needsPasswordForAction(action, keyState);
   const isMixedState = encryptionStatus?.state === "mixed";
   const corruptType10 = Number(encryptionStatus?.corruptType10) || 0;
   const saltDomains = Number(encryptionStatus?.saltDomains) || 0;
@@ -207,10 +168,7 @@ const CoinEncryptionModal = ({
           return;
         }
 
-        const canProceed =
-          loadedKeyState === "confirmed" ||
-          (isEncrypting && loadedKeyState === "establishing_ready");
-        if (!canProceed) {
+        if (!canProceedAfterLogin(action, loadedKeyState)) {
           setError(
             loginResult.error ||
               "The encryption key was not confirmed. Please try again.",
@@ -250,16 +208,7 @@ const CoinEncryptionModal = ({
           : [{ name: null, path: null }];
 
       // Windows paths are case-insensitive; keep first occurrence per path.
-      const seenPaths = new Set();
-      const wallets = [];
-      for (const wallet of rawWallets) {
-        const normalizedPath = String(wallet.path || "")
-          .trim()
-          .toLowerCase();
-        if (seenPaths.has(normalizedPath)) continue;
-        seenPaths.add(normalizedPath);
-        wallets.push(wallet);
-      }
+      const wallets = dedupeWallets(rawWallets);
 
       let aggregateCounts = emptyAggregateCounts();
       let sawCounts = false;
@@ -330,20 +279,7 @@ const CoinEncryptionModal = ({
       }
 
       if (sawCounts) {
-        const changedCount = isEncrypting
-          ? aggregateCounts.encrypted
-          : aggregateCounts.decrypted;
-        let summary =
-          `${changedCount.toLocaleString()} ${isEncrypting ? "encrypted" : "decrypted"}, ` +
-          `${aggregateCounts.skipped.toLocaleString()} skipped, ` +
-          `${aggregateCounts.errors.toLocaleString()} errors`;
-        if (aggregateCounts.alreadyTarget > 0) {
-          summary += `, ${aggregateCounts.alreadyTarget.toLocaleString()} already done`;
-        }
-        if (aggregateCounts.conflict > 0) {
-          summary += `, ${aggregateCounts.conflict.toLocaleString()} conflicts`;
-        }
-        summary += ".";
+        const summary = buildCompletionSummary(isEncrypting, aggregateCounts);
         if (aggregateCounts.errors > 0 || aggregateCounts.conflict > 0) {
           setError(
             `${isEncrypting ? "Encryption" : "Decryption"} completed with file errors: ${summary}`,

@@ -296,6 +296,69 @@ describe("coin-file encryption APIs", () => {
     });
   });
 
+  it("returns success:false when wallets list fetch rejects", async () => {
+    globalThis.fetch.mockRejectedValue(new Error("network down"));
+
+    const result = await listRegisteredWalletPaths();
+
+    expect(result).toEqual({
+      success: false,
+      error: "network down",
+    });
+  });
+
+  it("returns success:false when the wallets payload has no wallets array", async () => {
+    globalThis.fetch.mockResolvedValue(jsonResponse({}));
+
+    const result = await listRegisteredWalletPaths();
+
+    expect(result).toEqual({
+      success: false,
+      error: "Invalid response from wallets list.",
+    });
+  });
+
+  it("returns an empty wallets array when the core lists none", async () => {
+    globalThis.fetch.mockResolvedValue(jsonResponse({ wallets: [] }));
+
+    const result = await listRegisteredWalletPaths();
+
+    expect(result).toEqual({
+      success: true,
+      data: { wallets: [] },
+    });
+  });
+
+  it("drops malformed wallet entries without a non-empty path", async () => {
+    globalThis.fetch.mockResolvedValue(jsonResponse({
+      wallets: [
+        { wallet_name: "A" },
+        { name: "B", path: "  " },
+        { wallet_path: "C:/w" },
+      ],
+    }));
+
+    const result = await listRegisteredWalletPaths();
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        wallets: [{ name: "", path: "C:/w" }],
+      },
+    });
+  });
+
+  it("returns success:false for a non-ok wallets list response", async () => {
+    globalThis.fetch.mockResolvedValue(
+      jsonResponse({ error: true }, { ok: false, status: 500 }),
+    );
+
+    const result = await listRegisteredWalletPaths();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/500/);
+  });
+
   it("posts a clean core shutdown request", async () => {
     globalThis.fetch.mockResolvedValue(jsonResponse({
       success: true,
