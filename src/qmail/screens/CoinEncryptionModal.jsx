@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -13,6 +13,7 @@ import {
   decryptExistingCoinFiles,
   encryptExistingCoinFiles,
   getCoinEncryptionStatus,
+  listRegisteredWalletPaths,
   setCoinEncryptionPassword,
   shutdownCore,
   waitForTaskCompletion,
@@ -33,6 +34,34 @@ const getEncryptionCounts = (taskResult) => {
     decrypted: Number(counts.decrypted) || 0,
     skipped: Number(counts.skipped) || 0,
     errors: Number(counts.errors) || 0,
+    alreadyTarget: Number(counts.already_target) || 0,
+    skippedMulti: Number(counts.skipped_multi) || 0,
+    conflict: Number(counts.conflict) || 0,
+  };
+};
+
+const emptyAggregateCounts = () => ({
+  processed: 0,
+  encrypted: 0,
+  decrypted: 0,
+  skipped: 0,
+  errors: 0,
+  alreadyTarget: 0,
+  skippedMulti: 0,
+  conflict: 0,
+});
+
+const addCounts = (aggregate, counts) => {
+  if (!counts) return aggregate;
+  return {
+    processed: aggregate.processed + counts.processed,
+    encrypted: aggregate.encrypted + counts.encrypted,
+    decrypted: aggregate.decrypted + counts.decrypted,
+    skipped: aggregate.skipped + counts.skipped,
+    errors: aggregate.errors + counts.errors,
+    alreadyTarget: aggregate.alreadyTarget + counts.alreadyTarget,
+    skippedMulti: aggregate.skippedMulti + counts.skippedMulti,
+    conflict: aggregate.conflict + counts.conflict,
   };
 };
 
@@ -57,8 +86,10 @@ const CoinEncryptionModal = ({
   const [progressMessage, setProgressMessage] = useState("");
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const operationRef = useRef(0);
 
   useEffect(() => {
+    operationRef.current += 1;
     if (!isOpen) return undefined;
 
     setPassword("");
@@ -92,6 +123,8 @@ const CoinEncryptionModal = ({
 
     return () => {
       cancelled = true;
+      // Unmount/close must also invalidate any in-flight wallet loop.
+      operationRef.current += 1;
     };
   }, [action, isOpen]);
 
@@ -109,11 +142,19 @@ const CoinEncryptionModal = ({
 
   if (!isOpen) return null;
 
-  const keyAlreadySet = encryptionStatus?.keySet === true;
-  const needsPassword = !keyAlreadySet;
+  const keyState = encryptionStatus?.keyState || "none";
+  const needsPassword = !(
+    keyState === "confirmed" ||
+    (isEncrypting && keyState === "establishing_ready")
+  );
+  const isMixedState = encryptionStatus?.state === "mixed";
+  const corruptType10 = Number(encryptionStatus?.corruptType10) || 0;
+  const saltDomains = Number(encryptionStatus?.saltDomains) || 0;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    const operation = ++operationRef.current;
+    const isStale = () => operationRef.current !== operation;
     setError("");
     setSuccessMessage("");
     setProgressMessage("");
@@ -140,8 +181,40 @@ const CoinEncryptionModal = ({
     try {
       if (needsPassword) {
         const loginResult = await setCoinEncryptionPassword(password);
+        if (isStale()) return;
         if (!loginResult.success) {
-          setError(loginResult.error || "The password was not accepted.");
+          if (loginResult.badPassword) {
+            setError(loginResult.error);
+          } else if (loginResult.inconclusive) {
+            setError(loginResult.error);
+          } else {
+            setError(loginResult.error || "The password was not accepted.");
+          }
+          return;
+        }
+
+        const loadedKeyState = loginResult.data?.keyState || "none";
+        if (loadedKeyState === "candidate") {
+          setError(
+            "The RAIDA could not fully verify the password. The wallet stays read-only. Check your connection and try again.",
+          );
+          setEncryptionStatus((current) => ({
+            ...(current || {}),
+            keySet: true,
+            keyState: "candidate",
+            loginRequired: true,
+          }));
+          return;
+        }
+
+        const canProceed =
+          loadedKeyState === "confirmed" ||
+          (isEncrypting && loadedKeyState === "establishing_ready");
+        if (!canProceed) {
+          setError(
+            loginResult.error ||
+              "The encryption key was not confirmed. Please try again.",
+          );
           return;
         }
 
@@ -150,6 +223,7 @@ const CoinEncryptionModal = ({
         setEncryptionStatus((current) => ({
           ...(current || {}),
           keySet: true,
+          keyState: loadedKeyState,
           loginRequired: false,
         }));
       }
@@ -167,57 +241,110 @@ const CoinEncryptionModal = ({
           ? "Starting coin-file encryption..."
           : "Starting coin-file decryption...",
       );
-      const startResult = isEncrypting
-        ? await encryptExistingCoinFiles()
-        : await decryptExistingCoinFiles();
-      if (!startResult.success) {
-        setError(
-          startResult.error ||
-            `Coin ${isEncrypting ? "encryption" : "decryption"} did not start.`,
-        );
-        return;
+
+      const walletsResult = await listRegisteredWalletPaths();
+      if (isStale()) return;
+      const rawWallets =
+        walletsResult.success && walletsResult.data?.wallets?.length > 0
+          ? walletsResult.data.wallets
+          : [{ name: null, path: null }];
+
+      // Windows paths are case-insensitive; keep first occurrence per path.
+      const seenPaths = new Set();
+      const wallets = [];
+      for (const wallet of rawWallets) {
+        const normalizedPath = String(wallet.path || "")
+          .trim()
+          .toLowerCase();
+        if (seenPaths.has(normalizedPath)) continue;
+        seenPaths.add(normalizedPath);
+        wallets.push(wallet);
       }
 
-      const taskResult = await waitForTaskCompletion(startResult.data.taskId, {
-        timeoutMs: 300000,
-        intervalMs: 1000,
-        onUpdate: (task) => {
-          const progress = Number(task?.progress);
-          setProgressMessage(
-            Number.isFinite(progress)
-              ? `${isEncrypting ? "Encrypting" : "Decrypting"} coin files... ${Math.min(100, Math.max(0, Math.round(progress)))}%`
-              : task?.message ||
-                `${isEncrypting ? "Encrypting" : "Decrypting"} coin files...`,
+      let aggregateCounts = emptyAggregateCounts();
+      let sawCounts = false;
+
+      for (const wallet of wallets) {
+        const walletName = wallet.name || "Default";
+        const walletPath = wallet.path || null;
+
+        setProgressMessage(
+          isEncrypting
+            ? `Encrypting coin files (${walletName})...`
+            : `Decrypting coin files (${walletName})...`,
+        );
+
+        const startResult = isEncrypting
+          ? await encryptExistingCoinFiles(walletPath)
+          : await decryptExistingCoinFiles(walletPath);
+        if (isStale()) return;
+        if (!startResult.success) {
+          setError(
+            startResult.error ||
+              `Coin ${isEncrypting ? "encryption" : "decryption"} did not start for wallet "${walletName}".`,
           );
-        },
-      });
-      if (!taskResult.success) {
-        setError(
-          taskResult.error ||
-            `Coin-file ${isEncrypting ? "encryption" : "decryption"} failed.`,
-        );
-        return;
-      }
-
-      const counts = getEncryptionCounts(taskResult);
-      if (isDecrypting) {
-        setProgressMessage("Decryption complete. Closing QMail securely...");
-        await shutdownCore();
-        if (window.electronAPI?.quitApp) {
-          await window.electronAPI.quitApp();
           return;
+        }
+
+        const taskResult = await waitForTaskCompletion(startResult.data.taskId, {
+          timeoutMs: 300000,
+          intervalMs: 1000,
+          onUpdate: (task) => {
+            if (isStale()) return;
+            const progress = Number(task?.progress);
+            setProgressMessage(
+              Number.isFinite(progress)
+                ? `${isEncrypting ? "Encrypting" : "Decrypting"} coin files (${walletName})... ${Math.min(100, Math.max(0, Math.round(progress)))}%`
+                : task?.message ||
+                  `${isEncrypting ? "Encrypting" : "Decrypting"} coin files (${walletName})...`,
+            );
+          },
+        });
+        if (isStale()) return;
+        if (!taskResult.success) {
+          setError(
+            taskResult.error ||
+              `Coin-file ${isEncrypting ? "encryption" : "decryption"} failed for wallet "${walletName}".`,
+          );
+          return;
+        }
+
+        const counts = getEncryptionCounts(taskResult);
+        if (counts) {
+          sawCounts = true;
+          aggregateCounts = addCounts(aggregateCounts, counts);
         }
       }
 
-      if (counts) {
+      if (isDecrypting) {
+        setProgressMessage("Decryption complete. Closing QMail securely...");
+        if (window.electronAPI?.quitApp) {
+          // Invalidate so finally/setState do not touch a tearing-down renderer.
+          operationRef.current += 1;
+          await shutdownCore();
+          await window.electronAPI.quitApp();
+          return;
+        }
+        await shutdownCore();
+        if (isStale()) return;
+      }
+
+      if (sawCounts) {
         const changedCount = isEncrypting
-          ? counts.encrypted
-          : counts.decrypted;
-        const summary =
+          ? aggregateCounts.encrypted
+          : aggregateCounts.decrypted;
+        let summary =
           `${changedCount.toLocaleString()} ${isEncrypting ? "encrypted" : "decrypted"}, ` +
-          `${counts.skipped.toLocaleString()} skipped, ` +
-          `${counts.errors.toLocaleString()} errors.`;
-        if (counts.errors > 0) {
+          `${aggregateCounts.skipped.toLocaleString()} skipped, ` +
+          `${aggregateCounts.errors.toLocaleString()} errors`;
+        if (aggregateCounts.alreadyTarget > 0) {
+          summary += `, ${aggregateCounts.alreadyTarget.toLocaleString()} already done`;
+        }
+        if (aggregateCounts.conflict > 0) {
+          summary += `, ${aggregateCounts.conflict.toLocaleString()} conflicts`;
+        }
+        summary += ".";
+        if (aggregateCounts.errors > 0 || aggregateCounts.conflict > 0) {
           setError(
             `${isEncrypting ? "Encryption" : "Decryption"} completed with file errors: ${summary}`,
           );
@@ -236,13 +363,17 @@ const CoinEncryptionModal = ({
         keySet: isEncrypting,
         encryptedFilesExist: isEncrypting,
         loginRequired: false,
+        keyState: isEncrypting ? "confirmed" : "none",
+        state: isEncrypting ? "encrypted" : "decrypted",
       }));
       const fileState =
         await window.electronAPI?.getCoinFileState?.();
+      if (isStale()) return;
       onComplete?.(
         fileState || { state: isEncrypting ? "encrypted" : "decrypted" },
       );
     } catch (operationError) {
+      if (isStale()) return;
       setError(
         operationError?.message ||
           `Coin-file ${
@@ -254,8 +385,10 @@ const CoinEncryptionModal = ({
           } failed.`,
       );
     } finally {
-      setProgressMessage("");
-      setIsWorking(false);
+      if (!isStale()) {
+        setProgressMessage("");
+        setIsWorking(false);
+      }
     }
   };
 
@@ -264,7 +397,10 @@ const CoinEncryptionModal = ({
     if (statusError) {
       return `Encryption status is unavailable: ${statusError}`;
     }
-    if (encryptionStatus?.keySet) {
+    if (
+      keyState === "confirmed" ||
+      (isEncrypting && keyState === "establishing_ready")
+    ) {
       return isEncrypting
         ? "An encryption key is already loaded. Confirm the warning to encrypt existing plaintext files."
         : isDecrypting
@@ -275,6 +411,27 @@ const CoinEncryptionModal = ({
       return "Encrypted coin files exist and currently require a password.";
     }
     return "No encrypted coin files were reported by the core.";
+  })();
+
+  const introCopy = (() => {
+    if (isEncrypting) {
+      return isMixedState
+        ? "Finish encrypting existing coin files in all registered wallets. Interrupted encryption runs can be resumed safely."
+        : "Set the password used to encrypt existing coin files in all registered wallets and all future coin-file writes during this core session.";
+    }
+    if (isDecrypting) {
+      return isMixedState
+        ? "Finish decrypting existing coin files in all registered wallets. Interrupted decryption runs can be resumed safely."
+        : "Enter the same password used for encryption. QMail will rewrite every encrypted coin file as plaintext, then remove the password from memory so future files stay decrypted.";
+    }
+    return "Encrypted coin files were found. Enter the same password used for encryption before opening the dashboard.";
+  })();
+
+  const submitLabel = (() => {
+    if (isWorking) return "Working...";
+    if (isEncrypting) return isMixedState ? "Finish Encrypting" : "Encrypt Coins";
+    if (isDecrypting) return isMixedState ? "Finish Decrypting" : "Decrypt Coins";
+    return "Unlock Coins";
   })();
 
   const submitDisabled =
@@ -325,11 +482,7 @@ const CoinEncryptionModal = ({
         <form onSubmit={handleSubmit}>
           <div className="coin-encryption-modal__body">
             <p className="coin-encryption-modal__intro">
-              {isEncrypting
-                ? "Set the password used to encrypt existing coin files in all registered wallets and all future coin-file writes during this core session."
-                : isDecrypting
-                  ? "Enter the same password used for encryption. QMail will rewrite every encrypted coin file as plaintext, then remove the password from memory so future files stay decrypted."
-                  : "Encrypted coin files were found. Enter the same password used for encryption before opening the dashboard."}
+              {introCopy}
             </p>
 
             <div
@@ -341,6 +494,32 @@ const CoinEncryptionModal = ({
               {isCheckingStatus && <Loader2 size={16} className="spinning" />}
               <span>{statusCopy}</span>
             </div>
+
+            {corruptType10 > 0 && (
+              <div
+                className="coin-encryption-modal__status coin-encryption-modal__status--warning"
+                role="status"
+              >
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>
+                  {corruptType10.toLocaleString()} damaged encrypted coin file(s)
+                  were detected. Contact support — do not delete any files.
+                </span>
+              </div>
+            )}
+
+            {saltDomains > 1 && (
+              <div
+                className="coin-encryption-modal__status coin-encryption-modal__status--warning"
+                role="status"
+              >
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>
+                  Some coin files were encrypted under a different password
+                  (e.g. copied from another wallet). They will be skipped.
+                </span>
+              </div>
+            )}
 
             {isEncrypting && (
               <div className="coin-encryption-modal__warning" role="note">
@@ -447,15 +626,7 @@ const CoinEncryptionModal = ({
                 disabled={submitDisabled}
               >
                 {isWorking && <Loader2 size={16} className="spinning" />}
-                <span>
-                  {isWorking
-                    ? "Working..."
-                    : isEncrypting
-                      ? "Encrypt Coins"
-                      : isDecrypting
-                        ? "Decrypt Coins"
-                        : "Unlock Coins"}
-                </span>
+                <span>{submitLabel}</span>
               </button>
             )}
           </footer>

@@ -1768,12 +1768,18 @@ function buildApplicationMenu() {
         },
         { type: 'separator' },
         {
-          label: 'Encrypt Coins',
+          label:
+            coinFileState.state === 'mixed'
+              ? 'Finish Encrypting Coins'
+              : 'Encrypt Coins',
           enabled: coinFileState.state !== 'encrypted',
           click: () => sendQmailMenuCommand('security-encrypt-coins'),
         },
         {
-          label: 'Decrypt Coins',
+          label:
+            coinFileState.state === 'mixed'
+              ? 'Finish Decrypting Coins'
+              : 'Decrypt Coins',
           enabled: coinFileState.state !== 'decrypted',
           click: () => sendQmailMenuCommand('security-decrypt-coins'),
         },

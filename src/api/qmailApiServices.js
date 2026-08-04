@@ -2280,6 +2280,12 @@ export const getCoinEncryptionStatus = async () => {
         keySet: isTruthyApiFlag(data?.key_set),
         encryptedFilesExist: isTruthyApiFlag(data?.encrypted_files_exist),
         loginRequired: isTruthyApiFlag(data?.login_required),
+        state: String(data?.state || ""),
+        keyState: String(data?.key_state || "none"),
+        encryptedCount: Number(data?.encrypted_count) || 0,
+        plaintextCount: Number(data?.plaintext_count) || 0,
+        corruptType10: Number(data?.corrupt_type10) || 0,
+        saltDomains: Number(data?.salt_domains) || 0,
       },
     };
   } catch (error) {
@@ -2317,27 +2323,69 @@ export const setCoinEncryptionPassword = async (password) => {
       body,
     });
     const data = await handleResponse(response);
-    if (data?.success === false || !isTruthyApiFlag(data?.key_set)) {
+    if (data?.success === false) {
       throw new Error(
         extractApiErrorMessage(data, "The encryption key was not set."),
       );
     }
 
+    const keyState = String(data?.key_state || "none");
     return {
       success: true,
       data: {
         ...data,
-        keySet: true,
-        passwordVerified: isTruthyApiFlag(data?.password_verified),
-        verifierCreated: isTruthyApiFlag(data?.verifier_created),
+        keySet: isTruthyApiFlag(data?.key_set),
+        keyState,
+        confirmed: keyState === "confirmed",
+        raida: data?.raida || null,
       },
     };
   } catch (error) {
     console.error("Set coin encryption password failed:", error);
+    const httpStatus = error.httpStatus ?? null;
+    const apiDetail =
+      (typeof error.apiData?.detail === "string" && error.apiData.detail.trim()) ||
+      (typeof error.apiData?.message === "string" && error.apiData.message.trim()) ||
+      null;
+
+    if (httpStatus === 401) {
+      return {
+        success: false,
+        badPassword: true,
+        httpStatus: 401,
+        error: "Wrong password. Please try again.",
+        ...(apiDetail ? { detail: apiDetail } : {}),
+      };
+    }
+    if (httpStatus === 503) {
+      return {
+        success: false,
+        inconclusive: true,
+        httpStatus: 503,
+        error:
+          "The password could not be verified (network or file problem). Your coins are safe — please try again.",
+        ...(apiDetail ? { detail: apiDetail } : {}),
+      };
+    }
+
+    const rawMessage = error.message;
+    if (
+      typeof rawMessage === "string" &&
+      /wrong\s+password|bad\s+password/i.test(rawMessage)
+    ) {
+      return {
+        success: false,
+        error: "The password could not be processed. Please try again.",
+        detail: rawMessage,
+        httpStatus,
+      };
+    }
+
     return {
       success: false,
-      error: error.message,
-      httpStatus: error.httpStatus ?? null,
+      error: rawMessage,
+      httpStatus,
+      ...(apiDetail ? { detail: apiDetail } : {}),
     };
   }
 };
@@ -2378,27 +2426,17 @@ export const shutdownCore = async ({ timeoutMs = 2000 } = {}) => {
 };
 
 /**
- * Starts the async plaintext-to-encrypted conversion. Omitting walletPath
- * uses the core's documented all-registered-wallets scope.
+ * Starts the async plaintext-to-encrypted conversion for one wallet.
+ * Omitting walletPath lets the core default to the Default wallet.
  */
-export const encryptExistingCoinFiles = async (
-  walletPath = null,
-  folders = ["Bank", "Fracked"],
-) => {
+export const encryptExistingCoinFiles = async (walletPath = null) => {
   try {
     const resolvedWalletPath = String(walletPath || "").trim();
-    const allowedFolders = (Array.isArray(folders) ? folders : [])
-      .map((folder) => String(folder || "").trim())
-      .filter((folder) => folder === "Bank" || folder === "Fracked");
-    if (allowedFolders.length === 0) {
-      throw new Error("Choose at least one supported wallet folder.");
-    }
 
     const body = new URLSearchParams();
     if (resolvedWalletPath) {
       body.set("wallet_path", resolvedWalletPath);
     }
-    body.set("folders", [...new Set(allowedFolders)].join(","));
     const response = await fetch(
       `${API_BASE_URL}/system/encrypt_existing_files`,
       {
@@ -2429,28 +2467,18 @@ export const encryptExistingCoinFiles = async (
 };
 
 /**
- * Starts the forward-compatible encrypted-to-plaintext conversion. The core
- * implementation is expected to mirror encrypt_existing_files and return a
- * task_id for /api/system/tasks polling.
+ * Starts the encrypted-to-plaintext conversion for one wallet. Mirrors
+ * encrypt_existing_files and returns a task_id for /api/system/tasks polling.
+ * Requires a confirmed key; omits walletPath to default to the Default wallet.
  */
-export const decryptExistingCoinFiles = async (
-  walletPath = null,
-  folders = ["Bank", "Fracked"],
-) => {
+export const decryptExistingCoinFiles = async (walletPath = null) => {
   try {
     const resolvedWalletPath = String(walletPath || "").trim();
-    const allowedFolders = (Array.isArray(folders) ? folders : [])
-      .map((folder) => String(folder || "").trim())
-      .filter((folder) => folder === "Bank" || folder === "Fracked");
-    if (allowedFolders.length === 0) {
-      throw new Error("Choose at least one supported wallet folder.");
-    }
 
     const body = new URLSearchParams();
     if (resolvedWalletPath) {
       body.set("wallet_path", resolvedWalletPath);
     }
-    body.set("folders", [...new Set(allowedFolders)].join(","));
     const response = await fetch(
       `${API_BASE_URL}/system/decrypt_existing_files`,
       {
@@ -2474,10 +2502,7 @@ export const decryptExistingCoinFiles = async (
     console.error("Decrypt existing coin files failed:", error);
     return {
       success: false,
-      error:
-        error.httpStatus === 501
-          ? "Coin decryption is not available in this core build yet."
-          : error.message,
+      error: error.message,
       httpStatus: error.httpStatus ?? null,
     };
   }
@@ -3060,6 +3085,42 @@ const lookupWalletPathByName = async (walletName) => {
   } catch (e) {
     console.warn(`lookupWalletPathByName: /wallets/list unreachable for ${walletName}:`, e);
     return { path: null, reason: "network" };
+  }
+};
+
+/**
+ * Lists every registered wallet as { name, path }, normalizing both
+ * wallet_name/name and wallet_path/path spellings from /api/wallets/list.
+ * Never throws — returns { success:false, error } on any failure.
+ */
+export const listRegisteredWalletPaths = async () => {
+  try {
+    const listRes = await fetch(`${API_BASE_URL}/wallets/list`);
+    if (!listRes.ok) {
+      return {
+        success: false,
+        error: `Server responded with ${listRes.status} ${listRes.statusText}`,
+      };
+    }
+    const listData = await listRes.json();
+    if (!listData || !Array.isArray(listData.wallets)) {
+      return { success: false, error: "Invalid response from wallets list." };
+    }
+
+    const wallets = listData.wallets
+      .map((wallet) => ({
+        name: String(wallet?.wallet_name || wallet?.name || "").trim(),
+        path: String(wallet?.wallet_path || wallet?.path || "").trim(),
+      }))
+      .filter((wallet) => wallet.path);
+
+    return { success: true, data: { wallets } };
+  } catch (error) {
+    console.warn("listRegisteredWalletPaths: /wallets/list failed:", error);
+    return {
+      success: false,
+      error: error.message || "Could not list registered wallets.",
+    };
   }
 };
 
