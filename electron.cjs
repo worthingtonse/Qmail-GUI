@@ -1583,6 +1583,158 @@ function buildDepositLocationMenuItems(method) {
   return items;
 }
 
+// Wallet > Import from Old CloudCoin Programs. Each legacy CloudCoin client
+// keeps per-wallet coin folders under a well-known home-relative root:
+// one subfolder per wallet/account, each with Bank and Fracked inside. The
+// scan runs here (the renderer has no fs access) and the renderer then
+// deposits the folders one at a time via /transactions/deposit?source_folder=
+// so thousands of coin files never travel through a URL.
+const LEGACY_IMPORT_PROGRAMS = {
+  desktop: { label: 'CloudCoin Desktop', rootSegments: ['cloudcoin_desktop', 'Wallets'] },
+  wallet: { label: 'CloudCoin Wallet', rootSegments: ['CloudCoinWallet', 'Accounts'] },
+  manager: { label: 'CloudCoin Manager', rootSegments: ['cloudcoin_manager', 'Wallets'] },
+};
+const LEGACY_COIN_SUBFOLDERS = ['Bank', 'Fracked'];
+
+// CloudCoin Wallet keeps encrypted coins in "Vault" folders. Those files
+// cannot be deposited (the core cannot read them), so the scan counts them
+// separately and the import warns instead of silently skipping them.
+const LEGACY_VAULT_FOLDER = 'vault';
+
+function countFilesInFolder(folderPath) {
+  try {
+    return fs
+      .readdirSync(folderPath, { withFileTypes: true })
+      .filter((entry) => entry.isFile()).length;
+  } catch {
+    return 0;
+  }
+}
+
+// Vault folders may hold coin files directly or nest them under their own
+// Bank/Fracked subfolders; a shallow recursive count covers both layouts.
+function countFilesRecursively(folderPath, depth = 3) {
+  if (depth < 0) return 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(folderPath, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      count += 1;
+    } else if (entry.isDirectory()) {
+      count += countFilesRecursively(path.join(folderPath, entry.name), depth - 1);
+    }
+  }
+  return count;
+}
+
+// Returns { folders: [{ wallet, kind, path, fileCount }], vaultFileCount } for
+// every Bank/Fracked folder that holds at least one file, or null when the
+// program's root folder does not exist (distinguishes "not installed" from
+// "installed but empty"). Vault folders — either an account named "Vault" or
+// a Vault subfolder inside an account — are excluded from the import list and
+// only counted, because their coins are encrypted.
+function collectLegacyCoinFolders(rootDir) {
+  let walletDirs;
+  try {
+    walletDirs = fs
+      .readdirSync(rootDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory());
+  } catch {
+    return null;
+  }
+  const folders = [];
+  let vaultFileCount = 0;
+  for (const walletDir of walletDirs) {
+    const walletPath = path.join(rootDir, walletDir.name);
+    if (walletDir.name.toLowerCase() === LEGACY_VAULT_FOLDER) {
+      vaultFileCount += countFilesRecursively(walletPath);
+      continue;
+    }
+    for (const kind of LEGACY_COIN_SUBFOLDERS) {
+      const folderPath = path.join(walletPath, kind);
+      const fileCount = countFilesInFolder(folderPath);
+      if (fileCount > 0) {
+        folders.push({ wallet: walletDir.name, kind, path: folderPath, fileCount });
+      }
+    }
+    vaultFileCount += countFilesRecursively(path.join(walletPath, 'Vault'));
+  }
+  return { folders, vaultFileCount };
+}
+
+async function importLegacyCoinsFromMenu(programKey) {
+  const program = LEGACY_IMPORT_PROGRAMS[programKey];
+  if (!program || !mainWindow || mainWindow.isDestroyed()) return;
+
+  const rootDir = path.join(app.getPath('home'), ...program.rootSegments);
+  const scan = collectLegacyCoinFolders(rootDir);
+  if (scan === null) {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Import Coins',
+      message: `No ${program.label} data was found on this computer.`,
+      detail: `Looked for: ${rootDir}`,
+    });
+    return;
+  }
+
+  const { folders, vaultFileCount } = scan;
+  if (vaultFileCount > 0) {
+    const vaultDetail =
+      `${vaultFileCount.toLocaleString()} coin ${vaultFileCount === 1 ? 'file is' : 'files are'} ` +
+      `in the ${program.label} Vault. Vault coins are encrypted, so this program cannot import them. ` +
+      `Open ${program.label} and move them out of the Vault into a wallet that is not encrypted ` +
+      `(or withdraw them), then run this import again.`;
+    if (folders.length === 0) {
+      await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Import Coins',
+        message: `All ${program.label} coins are in the encrypted Vault.`,
+        detail: vaultDetail,
+      });
+      return;
+    }
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Import Coins',
+      message: `Some ${program.label} coins are in the encrypted Vault and will be skipped.`,
+      detail: vaultDetail,
+      buttons: ['Import Other Coins', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+  }
+
+  if (folders.length === 0) {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Import Coins',
+      message: `${program.label} has no coins to import.`,
+      detail: `No files were found in any Bank or Fracked folder under ${rootDir}.`,
+    });
+    return;
+  }
+  sendQmailMenuCommand({
+    command: 'import-legacy-coins',
+    program: programKey,
+    programLabel: program.label,
+    folders,
+  });
+}
+
+function buildLegacyImportMenuItems() {
+  return Object.entries(LEGACY_IMPORT_PROGRAMS).map(([key, program]) => ({
+    label: `Import Coins from ${program.label}`,
+    click: () => importLegacyCoinsFromMenu(key),
+  }));
+}
+
 // Menu entry point for Wallet > Withdraw Funds > .bin File. A location
 // chosen from the recent list goes straight to the Withdraw modal (which
 // prompts for amount and memo); "Choose New Location…" runs the folder
@@ -1739,6 +1891,10 @@ function buildApplicationMenu() {
               click: () => sendQmailMenuCommand({ command: 'add-funds', method: 'locker' }),
             },
           ],
+        },
+        {
+          label: 'Import from Old CloudCoin Programs',
+          submenu: buildLegacyImportMenuItems(),
         },
         {
           label: 'Withdraw Funds',

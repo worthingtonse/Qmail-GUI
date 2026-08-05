@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { ShieldAlert } from "lucide-react";
 import ComposeModal from "./ComposeModal";
 import WalletActionModal from "./WalletActionModal";
+import LegacyImportModal from "./LegacyImportModal";
 import CoinEncryptionModal from "./CoinEncryptionModal";
 import ContactsPane from "./ContactsPane";
 import TransactionsPane from "./TransactionsPane";
@@ -436,6 +437,9 @@ const QMailDashboard = ({
   // Preselection coming from the Wallet > Add Funds menu (method, files,
   // folder picked in the main process before the modal opens).
   const [walletActionContext, setWalletActionContext] = useState(null);
+  // Wallet > Import from Old CloudCoin Programs: non-null while the legacy
+  // import modal is open; doubles as the "an import is already running" guard.
+  const [legacyImportRequest, setLegacyImportRequest] = useState(null);
   const [coinSecurityAction, setCoinSecurityAction] = useState(null);
   const [coinFileState, setCoinFileState] = useState(
     initialCoinFileState || {
@@ -1226,6 +1230,13 @@ const QMailDashboard = ({
   };
 
   const handleOpenWalletAction = async (mode, context = null) => {
+    if (legacyImportRequest) {
+      showDashboardNotification(
+        "A coin import is running. Wait for it to finish before using wallet funds.",
+        "info",
+      );
+      return;
+    }
     if (!coinFilesReadyForWalletActivity()) return;
 
     if (mode !== "withdraw") {
@@ -1264,6 +1275,34 @@ const QMailDashboard = ({
   const handleCloseWalletAction = () => {
     setWalletActionMode(null);
     setWalletActionContext(null);
+  };
+
+  // Wallet > Import from Old CloudCoin Programs. The main process has already
+  // scanned the legacy client's wallet folders; here we only enforce
+  // one-import-at-a-time before handing the folder list to the modal.
+  const handleLegacyImportCommand = (payload) => {
+    if (legacyImportRequest) {
+      showDashboardNotification(
+        "A coin import is already open. Finish or close it before starting another.",
+        "info",
+      );
+      return;
+    }
+    if (walletActionMode) {
+      showDashboardNotification(
+        "Finish or close the current wallet window before importing coins.",
+        "info",
+      );
+      return;
+    }
+    if (!coinFilesReadyForWalletActivity()) return;
+    if (!Array.isArray(payload?.folders) || payload.folders.length === 0) return;
+
+    setLegacyImportRequest({
+      programKey: payload.program,
+      programLabel: payload.programLabel || "the old CloudCoin program",
+      folders: payload.folders,
+    });
   };
 
   const handleOpenCoinSecurity = async (action) => {
@@ -3476,6 +3515,9 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
               : null,
           );
           break;
+        case "import-legacy-coins":
+          handleLegacyImportCommand(payload);
+          break;
         case "backup-wallet":
           await handleBackupWalletCommand(payload.wallet, payload.destination);
           break;
@@ -4432,6 +4474,11 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         walletBalance={walletBalance}
         qmailAddress={qmailAddress}
         onClose={handleCloseWalletAction}
+        onWalletUpdated={handleWalletUpdated}
+      />
+      <LegacyImportModal
+        request={legacyImportRequest}
+        onClose={() => setLegacyImportRequest(null)}
         onWalletUpdated={handleWalletUpdated}
       />
       <CoinEncryptionModal
