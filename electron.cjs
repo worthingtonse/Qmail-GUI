@@ -1632,12 +1632,14 @@ function countFilesRecursively(folderPath, depth = 3) {
   return count;
 }
 
-// Returns { folders: [{ wallet, kind, path, fileCount }], vaultFileCount } for
-// every Bank/Fracked folder that holds at least one file, or null when the
-// program's root folder does not exist (distinguishes "not installed" from
-// "installed but empty"). Vault folders — either an account named "Vault" or
-// a Vault subfolder inside an account — are excluded from the import list and
-// only counted, because their coins are encrypted.
+// Returns { folders: [{ wallet, kind, path, fileCount }], vaultFileCount,
+// vaultWallets: [name] } for every Bank/Fracked folder that holds at least one
+// file, or null when the program's root folder does not exist (distinguishes
+// "not installed" from "installed but empty"). Vault folders — either an
+// account named "Vault" or a Vault subfolder inside an account — are excluded
+// from the import list and only counted, because their coins are encrypted.
+// The names of the wallets holding them are kept so the warning can tell the
+// user exactly which wallet to decrypt.
 function collectLegacyCoinFolders(rootDir) {
   let walletDirs;
   try {
@@ -1648,11 +1650,16 @@ function collectLegacyCoinFolders(rootDir) {
     return null;
   }
   const folders = [];
+  const vaultWallets = [];
   let vaultFileCount = 0;
   for (const walletDir of walletDirs) {
     const walletPath = path.join(rootDir, walletDir.name);
     if (walletDir.name.toLowerCase() === LEGACY_VAULT_FOLDER) {
-      vaultFileCount += countFilesRecursively(walletPath);
+      const count = countFilesRecursively(walletPath);
+      if (count > 0) {
+        vaultFileCount += count;
+        vaultWallets.push(walletDir.name);
+      }
       continue;
     }
     for (const kind of LEGACY_COIN_SUBFOLDERS) {
@@ -1662,9 +1669,54 @@ function collectLegacyCoinFolders(rootDir) {
         folders.push({ wallet: walletDir.name, kind, path: folderPath, fileCount });
       }
     }
-    vaultFileCount += countFilesRecursively(path.join(walletPath, 'Vault'));
+    const nestedVaultCount = countFilesRecursively(path.join(walletPath, 'Vault'));
+    if (nestedVaultCount > 0) {
+      vaultFileCount += nestedVaultCount;
+      vaultWallets.push(walletDir.name);
+    }
   }
-  return { folders, vaultFileCount };
+  return { folders, vaultFileCount, vaultWallets };
+}
+
+// Step-by-step instructions for decrypting legacy coins. The user cannot see a
+// "Vault" anywhere in CloudCoin Wallet — the encrypted coins live in a normal
+// wallet — so the message names the wallets by name and walks through moving
+// their coins into a new, unencrypted wallet.
+function describeEncryptedWallets(programLabel, fileCount, vaultWallets) {
+  const names = vaultWallets.map((name) => `"${name}"`);
+  const many = names.length > 1;
+  const walletList = many
+    ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    : names[0] || 'an encrypted wallet';
+  const walletWord = many ? 'wallets called' : 'a wallet called';
+
+  return [
+    `${fileCount.toLocaleString()} coin ${fileCount === 1 ? 'file was' : 'files were'} found in ` +
+      `${walletWord} ${walletList}. These cannot be imported until they are first decrypted ` +
+      `within ${programLabel}. To decrypt them:`,
+    '',
+    `1. Open ${programLabel} and create a new wallet by clicking the "Add Wallet" icon at the ` +
+      'bottom of the left pane, where all the wallets are listed. You may need to scroll down to ' +
+      'see the "Add Wallet" choice.',
+    '2. Name the new wallet "Decrypted". When you create it, make sure you choose NOT to encrypt ' +
+      'it and NOT to make it recoverable by email.',
+    `3. In the left pane, click the encrypted wallet ${names[0] || ''} so that it is selected.`.replace(
+      /\s+/g,
+      ' ',
+    ),
+    '4. On the upper right menu, click "Transfer/Send" and then "Transfer within wallets".',
+    '5. In the "Transfer To" drop-down box, choose your "Decrypted" wallet.',
+    '6. In the "Amount" box, enter the entire amount that is in the encrypted wallet.',
+    '7. For the memo, enter "Decrypt for conversion", then click "Continue".',
+    ...(many
+      ? [
+          '8. Repeat steps 3 through 7 for each of the other encrypted wallets listed above, ' +
+            'transferring their coins into the same "Decrypted" wallet.',
+          '',
+          'Once every encrypted wallet is empty, run this import again.',
+        ]
+      : ['', 'Once the encrypted wallet is empty, run this import again.']),
+  ].join('\n');
 }
 
 async function importLegacyCoinsFromMenu(programKey) {
@@ -1683,18 +1735,14 @@ async function importLegacyCoinsFromMenu(programKey) {
     return;
   }
 
-  const { folders, vaultFileCount } = scan;
+  const { folders, vaultFileCount, vaultWallets } = scan;
   if (vaultFileCount > 0) {
-    const vaultDetail =
-      `${vaultFileCount.toLocaleString()} coin ${vaultFileCount === 1 ? 'file is' : 'files are'} ` +
-      `in the ${program.label} Vault. Vault coins are encrypted, so this program cannot import them. ` +
-      `Open ${program.label} and move them out of the Vault into a wallet that is not encrypted ` +
-      `(or withdraw them), then run this import again.`;
+    const vaultDetail = describeEncryptedWallets(program.label, vaultFileCount, vaultWallets);
     if (folders.length === 0) {
       await dialog.showMessageBox(mainWindow, {
         type: 'warning',
         title: 'Import Coins',
-        message: `All ${program.label} coins are in the encrypted Vault.`,
+        message: `All ${program.label} coins are encrypted and cannot be imported yet.`,
         detail: vaultDetail,
       });
       return;
@@ -1702,7 +1750,7 @@ async function importLegacyCoinsFromMenu(programKey) {
     const { response } = await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: 'Import Coins',
-      message: `Some ${program.label} coins are in the encrypted Vault and will be skipped.`,
+      message: `Some ${program.label} coins are encrypted and will be skipped.`,
       detail: vaultDetail,
       buttons: ['Import Other Coins', 'Cancel'],
       defaultId: 0,

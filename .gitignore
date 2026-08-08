@@ -47,20 +47,10 @@ docs/css-audit/cache/
 # Python bytecode from the avatar-sheet vectorizer scripts.
 __pycache__/
 
-# Design drafts / screenshots parked in public/ — not referenced by the app,
-# and Vite copies all of public/ into the packaged build.
-public/Q.pdn
-public/Q.png
-public/Q2.png
-public/Q3.png
-public/Q4.png
-public/qA.png
-public/qA.jpg
-public/djfkd.png
-public/inboxfee.png
-public/screenhotbig.png
-public/Screenshot *.png
-public/a-close-up-studio-photograph-*.png
-public/a-macro-photograph-*.png
-public/a-striking-close-up-*.png
-public/elegant-logo-design-*.png
+# Scratch space for artwork: source files (.pdn), design drafts, screenshots
+# and anything else not actually referenced by the app. Vite copies all of
+# public/ into the build, so parking art directly in public/ ships it to
+# every user. Put working art here instead — it stays out of git and out of
+# the packaged app (see the "!public/non-committed-art" exclusion in
+# vite.config.js). Art that the app actually uses belongs in public/ proper.
+public/non-committed-art/

@@ -81,6 +81,16 @@ const dispatchSoundPlaybackBlocked = (src, error) => {
   );
 };
 
+// Every glass effect plays the same file, so they share one lazily-created
+// Audio element rather than one per effect name.
+const GLASS_SOUND_TYPES = new Set([
+  "glassClick",
+  "glassHover",
+  "glassTab",
+  "glassSuccess",
+  "glassError",
+]);
+
 class SoundService {
   constructor() {
     this.sounds = {};
@@ -89,53 +99,22 @@ class SoundService {
     this.mailSoundFile = normalizeSoundValue(
       readStoredSoundFile(DEFAULT_MAIL_SOUND_FILE),
     );
-    this.preloadSounds();
-  }
-
-  // Preload all sound effects
-  preloadSounds() {
-    if (typeof Audio === "undefined") return;
-
-    const soundFiles = {
-      glassClick: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-      glassHover: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-      glassTab: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-      glassSuccess: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-      glassError: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-    };
-
-    Object.entries(soundFiles).forEach(([key, src]) => {
-      if (!src) return;
-      const audio = new Audio();
-      audio.src = src;
-      audio.preload = 'auto';
-      audio.volume = this.volume;
-      
-      // Handle loading errors gracefully
-      audio.onerror = () => {
-        console.warn(`Could not load sound: ${src}`);
-      };
-      
-      this.sounds[key] = audio;
-    });
+    // Deliberately no preloading here. Constructing Audio elements at import
+    // time spins up Chromium's out-of-process AudioService and decodes the
+    // mp3 before the user has done anything, costing tens of MB in a session
+    // that may never play a sound. play() creates the element on first use.
   }
 
   // Play a specific sound
   play(soundType, { force = false } = {}) {
     if ((!this.isEnabled && !force) || typeof Audio === "undefined") return;
+    if (!GLASS_SOUND_TYPES.has(soundType)) return;
 
-    let sound = this.sounds[soundType];
+    let sound = this.sounds.glass;
 
-    // Lazy-load sound if not preloaded
+    // Created on first play, then reused; cloneNode below allows overlap.
     if (!sound) {
-      const soundFiles = {
-        glassClick: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-        glassHover: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-        glassTab: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-        glassSuccess: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-        glassError: buildSoundSrc(DEFAULT_MAIL_SOUND_FILE),
-      };
-      const src = soundFiles[soundType];
+      const src = buildSoundSrc(DEFAULT_MAIL_SOUND_FILE);
       if (!src) return;
       sound = new Audio();
       sound.src = src;
@@ -144,7 +123,7 @@ class SoundService {
       sound.onerror = () => {
         console.warn(`Could not load sound: ${src}`);
       };
-      this.sounds[soundType] = sound;
+      this.sounds.glass = sound;
     }
 
     if (sound) {

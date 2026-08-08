@@ -61,6 +61,20 @@ const formatBalance = (value) => {
   return `${Math.ceil(number).toLocaleString()} CC`;
 };
 
+const friendlyWithdrawError = (message) => {
+  const text = String(message || "");
+  if (/no coins in wallet/i.test(text) || /no coins in bank/i.test(text)) {
+    return "Your wallet has no coins to withdraw.";
+  }
+  if (/insufficient funds/i.test(text)) {
+    return "Not enough CloudCoins in this wallet for that amount.";
+  }
+  if (/cannot make exact change/i.test(text)) {
+    return "The wallet cannot make exact change for this amount. Try a different amount.";
+  }
+  return text || "Withdraw failed.";
+};
+
 const formatFileSize = (bytes) => {
   const size = Number(bytes);
   if (!Number.isFinite(size) || size <= 0) return "0 B";
@@ -793,7 +807,7 @@ const WalletActionModal = ({
       setStatusMessage("Creating locker...");
       const result = await withdrawToLockerCode(withdrawAmount, null, memoValue);
       if (!result?.success) {
-        setError(result?.error || "Withdraw failed.");
+        setError(friendlyWithdrawError(result?.error));
         return;
       }
 
@@ -803,7 +817,7 @@ const WalletActionModal = ({
       setStatusMessage("");
       setSuccessMessage("Coins put in locker.");
     } catch (err) {
-      setError(err?.message || "Withdraw failed.");
+      setError(friendlyWithdrawError(err?.message));
     } finally {
       // Clear on every exit path — a failed withdraw must not leave the
       // "Creating locker..." / "Exporting coins..." spinner next to an error.

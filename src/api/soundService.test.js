@@ -1,7 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Counts how many Audio elements the service constructs, so the tests can
+// assert that importing the module does not touch the audio stack at all.
+let audioInstances = [];
+
+const stubAudio = () => {
+  audioInstances = [];
+  class FakeAudio {
+    constructor() {
+      this.src = "";
+      this.volume = 1;
+      this.currentTime = 0;
+      audioInstances.push(this);
+    }
+    cloneNode() {
+      return new FakeAudio();
+    }
+    play() {
+      return Promise.resolve();
+    }
+  }
+  vi.stubGlobal("Audio", FakeAudio);
+};
+
 const loadSoundService = async (storedValues = {}) => {
   vi.resetModules();
+  stubAudio();
   vi.stubGlobal("window", {
     localStorage: {
       getItem: vi.fn((key) => (
@@ -11,6 +35,7 @@ const loadSoundService = async (storedValues = {}) => {
       )),
       setItem: vi.fn(),
     },
+    dispatchEvent: vi.fn(),
   });
 
   const module = await import("./soundService.js");
@@ -49,5 +74,45 @@ describe("soundService stored volume", () => {
 
     const clampedService = await loadSoundService({ "qmail.sound.volume": "4" });
     expect(clampedService.getSettings().volume).toBe(1);
+  });
+});
+
+describe("soundService lazy audio allocation", () => {
+  it("creates no Audio elements when the module is imported", async () => {
+    await loadSoundService();
+
+    expect(audioInstances).toHaveLength(0);
+  });
+
+  it("creates a single shared element on first play and reuses it", async () => {
+    const soundService = await loadSoundService();
+
+    soundService.playGlassClick();
+    // One cached element plus the clone that actually plays.
+    const afterFirstPlay = audioInstances.length;
+    expect(afterFirstPlay).toBe(2);
+
+    soundService.playGlassTab();
+    soundService.playGlassSuccess();
+
+    // Each later play adds only a clone — no second cached element per type.
+    expect(audioInstances.length).toBe(afterFirstPlay + 2);
+  });
+
+  it("does not allocate audio while sound is disabled", async () => {
+    const soundService = await loadSoundService({ "qmail.sound.enabled": "false" });
+
+    soundService.playGlassClick();
+
+    expect(audioInstances).toHaveLength(0);
+  });
+
+  it("applies volume changes to the cached element", async () => {
+    const soundService = await loadSoundService();
+
+    soundService.playGlassClick();
+    soundService.setVolume(0.8);
+
+    expect(audioInstances[0].volume).toBe(0.8);
   });
 });
