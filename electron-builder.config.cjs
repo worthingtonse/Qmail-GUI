@@ -71,24 +71,38 @@ const config = {
   },
 
   linux: {
-    // AppImage: a single self-contained executable file, the Linux
-    // analogue of the portable Windows .exe — no install step, runs
-    // from anywhere including a USB stick.
+    // Three Linux artifacts from one build:
+    //   AppImage — portable, runs from anywhere incl. a USB stick (needs FUSE).
+    //   deb      — Debian/Ubuntu/Mint install: `sudo apt install ./QMail*.deb`,
+    //              pulls deps, adds a menu entry, no sandbox/FUSE hassle.
+    //   tar.gz   — zero-dependency fallback: extract and run the binary. Works
+    //              on any distro when FUSE/libfuse2 is missing.
     target: [
-      {
-        target: "AppImage",
-        arch: ["x64"],
-      },
+      { target: "AppImage", arch: ["x64"] },
+      { target: "deb", arch: ["x64"] },
+      { target: "tar.gz", arch: ["x64"] },
     ],
-    artifactName: isIntl ? "QMail-intl.AppImage" : "QMail.AppImage",
     category: "Network",
     icon: "public/icon.png",
+    // .deb requires a maintainer field.
+    maintainer: "RAIDA Tech <sean@raidatech.com>",
     extraResources: [
       {
         from: "backend/core",
         to: "backend/core",
       },
     ],
+  },
+
+  // Per-target artifact names. The AppImage MUST stay exactly "QMail.AppImage":
+  // publish_gui_bin.sh / promote-all.sh and the download pages hard-code that
+  // name. The deb/tar.gz get versioned names; the publish step maps them to
+  // canonical + dated names under /bin.
+  appImage: {
+    artifactName: isIntl ? "QMail-intl.AppImage" : "QMail.AppImage",
+  },
+  deb: {
+    artifactName: "QMail-${version}-${arch}.${ext}",
   },
 };
 
