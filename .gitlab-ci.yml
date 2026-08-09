@@ -1,11 +1,52 @@
-# CI/CD for ccv3/gui - Phase 5 of consensus-plan-FINAL.txt.
-# Every branch/MR validates. Every merge to protected phase2 packages Windows
-# and Linux desktop artifacts with the newest published core binaries, publishes
-# both to bin/, then and only then bumps qmail_client_version.
+# =============================================================================
+# CI/CD for ccv3/gui — manual, per-platform releases.
+#
+# WHAT CHANGED (and why): pushing to phase2 used to package Windows + Linux and
+# publish them automatically, as a locked pair. Releases are now driven by hand:
+#
+#   validate            runs automatically on every branch and MR (unchanged) —
+#                       the cheap net that catches a broken commit long before
+#                       anyone tries to ship it.
+#   package / publish   run ONLY from Build > Pipelines > "Run pipeline", where
+#                       you choose BUILD_PLATFORM and PUBLISH.
+#
+# HOW TO RELEASE
+#   Build > Pipelines > Run pipeline, on the branch you want, then set:
+#
+#     BUILD_PLATFORM = windows | linux | mac | all     (default: none — nothing
+#                                                       packages if you omit it)
+#     PUBLISH        = no                              build only; artifacts are
+#                                                       downloadable from the job
+#     PUBLISH        = yes                             build, then publish to
+#                                                       r11 and refresh the
+#                                                       canonical download name
+#
+# WHAT PUBLISH DOES, per platform:
+#     qmail-<plat>-YYYY-MM-DD.<ext>   dated release   (publish_*_bin.sh)
+#     qmail-<plat>-latest.<ext>       stable name     (publish_*_bin.sh)
+#     QMail.exe / .AppImage / .dmg    canonical public download
+#                                                     (promote_canonical.sh)
+#     SHA256SUMS                      regenerated
+#
+#   The canonical QMail.* name is what the download pages actually link to. It
+#   used to be refreshed only by running promote-all.sh by hand on Henry, which
+#   is how QMail.exe ended up serving a build four days older than
+#   qmail-windows-latest.exe. Publishing now promotes it in the same run.
+#
+# NO CROSS-PLATFORM DATE INTERLOCK: publishing per-platform necessarily gives up
+# the old assert_same_build_date pairing — a windows-only run has no linux
+# artifact to compare against. That interlock is preserved where it still
+# applies: BUILD_PLATFORM=all runs assert-build-dates before any publish.
+#
+# CORE PROPAGATION IS UNCHANGED: every package job downloads core-<plat>-latest
+# from bin/ and verifies it against SHA256SUMS before building, so any build
+# picks up the newest published core automatically.
+# =============================================================================
 
 stages:
   - validate
   - package
+  - verify
   - publish
   - probe
 
@@ -14,6 +55,24 @@ variables:
   QMAIL_BIN_BASE_URL: "https://cloudcoinconsortium.com/bin"
   ELECTRON_BUILDER_IMAGE: "electronuserland/builder:18-wine-mono-05.26"
   WINDOWS_SIGNING: "off"
+  BUILD_PLATFORM:
+    value: "none"
+    options: ["none", "windows", "linux", "mac", "all"]
+    description: "Which platform to package. 'none' validates only."
+  PUBLISH:
+    value: "no"
+    options: ["no", "yes"]
+    description: "yes = publish to r11 and refresh the canonical QMail.* download."
+
+# CI_PIPELINE_SOURCE == "web" is what makes package/publish manual-only: a
+# pipeline started by a git push is never "web", so pushing runs validate alone.
+.package_rules: &package_rules
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
+
+.publish_rules: &publish_rules
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PUBLISH == "yes" && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
 
 validate:
   stage: validate
@@ -31,12 +90,16 @@ validate:
     - npm run test
     - npm run build
 
+# ---------------------------------------------------------------------------
+# package
+# ---------------------------------------------------------------------------
 package-windows:
   stage: package
   tags: [windows-build]
   timeout: 90m
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  variables:
+    PLATFORM_NAME: "windows"
+  <<: *package_rules
   script:
     - powershell -NoProfile -ExecutionPolicy Bypass -Command "node -v; npm -v"
     - npm ci
@@ -54,9 +117,9 @@ package-linux:
   tags: [linux-build]
   timeout: 90m
   variables:
+    PLATFORM_NAME: "linux"
     GIT_CLEAN_FLAGS: -ffdx -e .npm -e .cache
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  <<: *package_rules
   script:
     - bash ci/package_linux_in_docker.sh
   artifacts:
@@ -67,12 +130,38 @@ package-linux:
       - ci-build/linux-core.sha256
     expire_in: 1 week
 
-publish-desktop:
-  stage: publish
+# allow_failure while the mac path beds in, per mac-phase6/README.md. Drop it
+# once mac has shipped cleanly a few times.
+package-mac:
+  stage: package
+  tags: [macos-build]
+  allow_failure: true
+  timeout: 90m
+  variables:
+    PLATFORM_NAME: "mac"
+  <<: *package_rules
+  script:
+    - node -v; npm -v
+    - npm ci
+    - bash ci/package_mac.sh
+  artifacts:
+    paths:
+      - release/QMail.dmg
+      - ci-build/version-mac.json
+      - ci-build/qmail-mac.sha256
+      - ci-build/mac-core.sha256
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# verify — only meaningful for BUILD_PLATFORM=all, where win+linux ship as a
+# pair and the old same-build-date guarantee still applies. Runs before any
+# publish so a mismatched pair fails the run instead of landing half a release.
+# ---------------------------------------------------------------------------
+assert-build-dates:
+  stage: verify
   tags: [fleet-deploy]
-  allow_failure: false
   rules:
-    - if: '$CI_COMMIT_BRANCH == "phase2"'
+    - if: '$CI_PIPELINE_SOURCE == "web" && $PUBLISH == "yes" && $BUILD_PLATFORM == "all"'
   needs:
     - job: package-windows
       artifacts: true
@@ -80,22 +169,110 @@ publish-desktop:
       artifacts: true
   script:
     - bash ci/assert_same_build_date.sh ci-build/version-windows.json ci-build/version-linux.json
-    - bash ci/publish_gui_bin.sh release/QMail.exe release/QMail.AppImage ci-build/version-windows.json
+
+# ---------------------------------------------------------------------------
+# publish — each platform publishes independently, then promotes its own
+# canonical name. A windows run never touches QMail.dmg / QMail.AppImage.
+# ---------------------------------------------------------------------------
+publish-windows:
+  stage: publish
+  tags: [fleet-deploy]
+  variables:
+    PLATFORM_NAME: "windows"
+  <<: *publish_rules
+  needs:
+    - job: package-windows
+      artifacts: true
+    - job: assert-build-dates
+      optional: true
+  script:
+    - bash ci/publish_gui_bin.sh windows release/QMail.exe ci-build/version-windows.json
+    - bash ci/promote_canonical.sh windows ci-build/version-windows.json
   artifacts:
     paths:
       - ci-build/version-windows.json
       - ci-build/qmail-windows.sha256
+    expire_in: 1 week
+
+publish-linux:
+  stage: publish
+  tags: [fleet-deploy]
+  variables:
+    PLATFORM_NAME: "linux"
+  <<: *publish_rules
+  needs:
+    - job: package-linux
+      artifacts: true
+    - job: assert-build-dates
+      optional: true
+  script:
+    - bash ci/publish_gui_bin.sh linux release/QMail.AppImage ci-build/version-linux.json
+    - bash ci/promote_canonical.sh linux ci-build/version-linux.json
+  artifacts:
+    paths:
+      - ci-build/version-linux.json
       - ci-build/qmail-linux-desktop.sha256
     expire_in: 1 week
 
-bump-client-version-probe:
-  stage: probe
+publish-mac:
+  stage: publish
   tags: [fleet-deploy]
-  allow_failure: false
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "phase2"'
+  allow_failure: true
+  variables:
+    PLATFORM_NAME: "mac"
+  <<: *publish_rules
   needs:
-    - job: publish-desktop
+    - job: package-mac
       artifacts: true
   script:
-    - bash ci/bump_qmail_client_version.sh ci-build/version-windows.json
+    - bash ci/publish_mac_bin.sh release/QMail.dmg ci-build/version-mac.json
+    - bash ci/promote_canonical.sh mac ci-build/version-mac.json
+  artifacts:
+    paths:
+      # bump-client-version-mac reads buildDate out of this, so it has to
+      # survive the job boundary the way the windows/linux ones do.
+      - ci-build/version-mac.json
+      - ci-build/qmail-mac.sha256
+    expire_in: 1 week
+
+# ---------------------------------------------------------------------------
+# probe — bump the published client version for the platform(s) just shipped.
+# Per-platform so a Windows release does not prompt Mac and Linux users to
+# update to a build that does not exist for them.
+# ---------------------------------------------------------------------------
+bump-client-version-windows:
+  stage: probe
+  tags: [fleet-deploy]
+  variables:
+    PLATFORM_NAME: "windows"
+  <<: *publish_rules
+  needs:
+    - job: publish-windows
+      artifacts: true
+  script:
+    - bash ci/bump_qmail_client_version.sh ci-build/version-windows.json windows
+
+bump-client-version-linux:
+  stage: probe
+  tags: [fleet-deploy]
+  variables:
+    PLATFORM_NAME: "linux"
+  <<: *publish_rules
+  needs:
+    - job: publish-linux
+      artifacts: true
+  script:
+    - bash ci/bump_qmail_client_version.sh ci-build/version-linux.json linux-app
+
+bump-client-version-mac:
+  stage: probe
+  tags: [fleet-deploy]
+  allow_failure: true
+  variables:
+    PLATFORM_NAME: "mac"
+  <<: *publish_rules
+  needs:
+    - job: publish-mac
+      artifacts: true
+  script:
+    - bash ci/bump_qmail_client_version.sh ci-build/version-mac.json mac

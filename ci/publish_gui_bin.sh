@@ -1,17 +1,30 @@
 #!/usr/bin/env bash
-# Publish QMail desktop artifacts to /bin/ on r11 after both platform
-# package jobs have succeeded. This mirrors core's publish_bin.sh layout but
-# handles the Windows and Linux GUI pair atomically in one job.
+# =============================================================================
+# Publish ONE QMail desktop artifact to /bin/ on r11.
+#
+#   publish_gui_bin.sh <windows|linux> <artifact> <version.json>
+#
+# Writes the dated release name and the stable *-latest name, archives a dated
+# snapshot, and regenerates SHA256SUMS. It deliberately does NOT touch the
+# canonical QMail.* download names — that is promote_canonical.sh, run as a
+# separate step so the two concerns stay separable.
+#
+# WAS: this took <exe> <appimage> <version.json> and published Windows and
+# Linux together in one atomic call, because releases always shipped as a pair.
+# Releases are now driven per-platform from the Run-pipeline screen, so the
+# pairing moved up into .gitlab-ci.yml (assert-build-dates still guards
+# BUILD_PLATFORM=all) and this script handles exactly one platform.
+# =============================================================================
 set -euo pipefail
 
-WIN=${1:?usage: publish_gui_bin.sh <QMail.exe> <QMail.AppImage> <version.json>}
-LINUX=${2:?usage: publish_gui_bin.sh <QMail.exe> <QMail.AppImage> <version.json>}
-VERSION_JSON=${3:?usage: publish_gui_bin.sh <QMail.exe> <QMail.AppImage> <version.json>}
+PLATFORM=${1:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
+ARTIFACT=${2:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
+VERSION_JSON=${3:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
 
 BIN_DIR=/var/www/cloudcoinconsortium.com/bin
 SSH_OPTS="-o BatchMode=yes"
 
-if [[ ! -s "$WIN" || ! -s "$LINUX" || ! -s "$VERSION_JSON" ]]; then
+if [[ ! -s "$ARTIFACT" || ! -s "$VERSION_JSON" ]]; then
   echo "missing publish input artifact" >&2
   exit 1
 fi
@@ -29,39 +42,43 @@ read_build_date() {
 
 BUILD_DATE=$(read_build_date "$VERSION_JSON")
 
-WIN_DATED="qmail-windows-${BUILD_DATE}.exe"
-WIN_LATEST="qmail-windows-latest.exe"
-LINUX_DATED="qmail-linux-desktop-${BUILD_DATE}.AppImage"
-LINUX_LATEST="qmail-linux-desktop-latest.AppImage"
+case "$PLATFORM" in
+  windows)
+    DATED="qmail-windows-${BUILD_DATE}.exe"
+    LATEST="qmail-windows-latest.exe"
+    ;;
+  linux)
+    DATED="qmail-linux-desktop-${BUILD_DATE}.AppImage"
+    LATEST="qmail-linux-desktop-latest.AppImage"
+    ;;
+  *)
+    echo "unsupported platform: $PLATFORM (use publish_mac_bin.sh for mac)" >&2
+    exit 2
+    ;;
+esac
+
 REMOTE_DIR="/tmp/qmail-gui-${CI_PIPELINE_ID:-manual}-$$"
 
-echo "Publishing QMail desktop artifacts for buildDate=$BUILD_DATE"
+echo "Publishing $PLATFORM artifact for buildDate=$BUILD_DATE"
 ssh $SSH_OPTS r11 "mkdir -p '$REMOTE_DIR'"
-rsync -e "ssh $SSH_OPTS" -z --partial --timeout=60 "$WIN" "r11:$REMOTE_DIR/$WIN_DATED"
-rsync -e "ssh $SSH_OPTS" -z --partial --timeout=60 "$LINUX" "r11:$REMOTE_DIR/$LINUX_DATED"
+rsync -e "ssh $SSH_OPTS" -z --partial --timeout=60 "$ARTIFACT" "r11:$REMOTE_DIR/$DATED"
 
 ssh $SSH_OPTS r11 "bash -s" <<EOF
 set -e
 BIN_DIR='$BIN_DIR'
 DATE='$BUILD_DATE'
 REMOTE_DIR='$REMOTE_DIR'
-WIN_DATED='$WIN_DATED'
-WIN_LATEST='$WIN_LATEST'
-LINUX_DATED='$LINUX_DATED'
-LINUX_LATEST='$LINUX_LATEST'
+DATED='$DATED'
+LATEST='$LATEST'
 
-sudo install -m 0755 "\$REMOTE_DIR/\$WIN_DATED" "\$BIN_DIR/\$WIN_DATED"
-sudo install -m 0755 "\$REMOTE_DIR/\$LINUX_DATED" "\$BIN_DIR/\$LINUX_DATED"
-sudo cp "\$REMOTE_DIR/\$WIN_DATED" "\$BIN_DIR/.\$WIN_LATEST.tmp"
-sudo cp "\$REMOTE_DIR/\$LINUX_DATED" "\$BIN_DIR/.\$LINUX_LATEST.tmp"
-sudo chmod 0755 "\$BIN_DIR/.\$WIN_LATEST.tmp" "\$BIN_DIR/.\$LINUX_LATEST.tmp"
-sudo mv "\$BIN_DIR/.\$WIN_LATEST.tmp" "\$BIN_DIR/\$WIN_LATEST"
-sudo mv "\$BIN_DIR/.\$LINUX_LATEST.tmp" "\$BIN_DIR/\$LINUX_LATEST"
+sudo install -m 0755 "\$REMOTE_DIR/\$DATED" "\$BIN_DIR/\$DATED"
+sudo cp "\$REMOTE_DIR/\$DATED" "\$BIN_DIR/.\$LATEST.tmp"
+sudo chmod 0755 "\$BIN_DIR/.\$LATEST.tmp"
+sudo mv "\$BIN_DIR/.\$LATEST.tmp" "\$BIN_DIR/\$LATEST"
 sudo mkdir -p "\$BIN_DIR/archive/\$DATE"
-sudo cp -p "\$BIN_DIR/\$WIN_DATED" "\$BIN_DIR/archive/\$DATE/"
-sudo cp -p "\$BIN_DIR/\$LINUX_DATED" "\$BIN_DIR/archive/\$DATE/"
+sudo cp -p "\$BIN_DIR/\$DATED" "\$BIN_DIR/archive/\$DATE/"
 cd "\$BIN_DIR"
 ls -1 | grep -v '^archive\$' | grep -v '^SHA256SUMS\$' | xargs sha256sum | sudo tee SHA256SUMS >/dev/null
 rm -rf "\$REMOTE_DIR"
-echo "published: \$WIN_DATED + \$WIN_LATEST + \$LINUX_DATED + \$LINUX_LATEST + archive/\$DATE/ + SHA256SUMS"
+echo "published: \$DATED + \$LATEST + archive/\$DATE/ + SHA256SUMS"
 EOF
