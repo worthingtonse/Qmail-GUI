@@ -116,6 +116,25 @@ else
   printf '' > "$tmp_manifest.live"
 fi
 
+# The legacy file's date — the last shipped desktop release. Used twice: as
+# the manifest's line-1 header, and as the seed value for platforms that have
+# never published a date of their own. Read once, before the merge, because
+# the awk seeding below needs it.
+if [[ "$PLATFORM_KEY" == "$LEGACY_KEY" ]]; then
+  HEADER_DATE=$BUILD_DATE
+else
+  HEADER_DATE=$(
+    ssh $SSH_OPTS r11 "cat '$REMOTE_PATH'" 2>/dev/null |
+      tr -d '\r' |
+      sed -nE 's/^echo "([0-9]{4}-[0-9]{2}-[0-9]{2})";$/\1/p' |
+      head -n 1
+  ) || true
+  if [[ ! "$HEADER_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "could not read the current legacy date for the manifest header" >&2
+    exit 1
+  fi
+fi
+
 # Merge in awk rather than python3/jq: every other script in ci/ sticks to
 # POSIX tools, and the fleet-deploy runner is not guaranteed to have either.
 #
@@ -125,7 +144,7 @@ fi
 # shape is ignored rather than trusted.
 MANIFEST_JSON=$(
   awk -v new_key="$PLATFORM_KEY" -v new_date="$BUILD_DATE" -v keys="$VALID_KEYS" \
-      -v seeding="$SEEDING" '
+      -v seeding="$SEEDING" -v seed_date="$HEADER_DATE" '
     # Scan every "key": "value" pair on the line. Pairs may share a line
     # (the served file is pretty-printed, but a hand-edit may not be), so
     # this walks the line pair by pair rather than testing it as a whole.
@@ -162,9 +181,18 @@ MANIFEST_JSON=$(
       # released, and stamping it with this build date would announce a
       # release that does not exist — the exact bug this file prevents for
       # the platforms it does know about.
+      #
+      # Seed with seed_date (the date the legacy file serves — the last
+      # shipped desktop release), NOT new_date. Seeding with new_date tells
+      # every platform that did not build today that it has a release
+      # today: a Mac user gets an update prompt for a .dmg that was never
+      # produced, and clicking it hands them the previous build. seed_date
+      # is a date that actually happened, so the worst case is a platform
+      # looking slightly older than it is — which prompts nobody.
+      # (No apostrophes here — this awk program is single-quoted.)
       if (seeding)
         for (i = 1; i <= n; i++)
-          if (!(ordered[i] in seen)) seen[ordered[i]] = new_date
+          if (!(ordered[i] in seen)) seen[ordered[i]] = seed_date
 
       # This run only moves its own platform.
       seen[new_key] = new_date
@@ -194,25 +222,10 @@ if [[ "$MANIFEST_JSON" != "{"*"}" ]] || ! grep -q "\"$PLATFORM_KEY\": \"$BUILD_D
   exit 1
 fi
 
+# HEADER_DATE was resolved before the merge (the seeding path needs it).
 # Line 1 of the manifest mirrors the legacy file: "the latest desktop
 # client". A core release must not move it, or a first-line-only reader
-# would see a core date and think a new GUI shipped. Reuse whatever the
-# legacy file already serves unless this run is the one rewriting it.
-if [[ "$PLATFORM_KEY" == "$LEGACY_KEY" ]]; then
-  HEADER_DATE=$BUILD_DATE
-else
-  HEADER_DATE=$(
-    ssh $SSH_OPTS r11 "cat '$REMOTE_PATH'" 2>/dev/null |
-      tr -d '\r' |
-      sed -nE 's/^echo "([0-9]{4}-[0-9]{2}-[0-9]{2})";$/\1/p' |
-      head -n 1
-  ) || true
-  if [[ ! "$HEADER_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    echo "could not read the current legacy date for the manifest header" >&2
-    exit 1
-  fi
-fi
-
+# would see a core date and think a new GUI shipped.
 cat > "$tmp_manifest" <<EOF
 <?php
 // Per-platform latest release dates for the QMail client.
