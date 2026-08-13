@@ -153,9 +153,20 @@ package-mac:
     - node -v; npm -v
     - npm ci
     - bash ci/package_mac.sh
+  # The dmg is deliberately NOT an artifact. A universal build carries both
+  # the x86_64 and arm64 Electron runtimes and lands at ~180MB, over this
+  # instance's 100MB artifact ceiling — the upload failed with 413 and took
+  # the whole job down with it, after a successful notarized build.
+  #
+  # Raising the ceiling would fix the symptom and keep the wrong shape: the
+  # dmg would travel Mac -> GitLab -> fleet-deploy runner only to be rsync'd
+  # to r11, which the Mac can reach directly. So the mac publish happens on
+  # the mac (see publish-mac) and the dmg never leaves this machine.
+  #
+  # The small sidecars still travel: later jobs need version-mac.json, and
+  # they are a few hundred bytes.
   artifacts:
     paths:
-      - release/QMail.dmg
       - ci-build/version-mac.json
       - ci-build/qmail-mac.sha256
       - ci-build/mac-core.sha256
@@ -223,12 +234,22 @@ publish-linux:
       - ci-build/qmail-linux-desktop.sha256
     expire_in: 1 week
 
+# Runs on the MAC, not fleet-deploy: the dmg is ~180MB and never becomes an
+# artifact (see package-mac), so it exists only in the mac runner's build
+# directory. The mac reaches r11 directly — it published core-mac-latest
+# that way — so publishing from here saves a 360MB round trip through
+# GitLab and stays inside the artifact limit.
+#
+# GIT_STRATEGY: none is what makes this work. The default would re-clone
+# over the build directory and delete the dmg package-mac just produced;
+# this job needs no repo content beyond what is already on disk.
 publish-mac:
   stage: publish
-  tags: [fleet-deploy]
+  tags: [macos-build]
   allow_failure: true
   variables:
     PLATFORM_NAME: "mac"
+    GIT_STRATEGY: none
   <<: *publish_rules
   needs:
     - job: package-mac
