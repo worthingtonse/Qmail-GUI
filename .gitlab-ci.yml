@@ -64,15 +64,24 @@ variables:
     options: ["no", "yes"]
     description: "yes = publish to r11 and refresh the canonical QMail.* download."
 
-# CI_PIPELINE_SOURCE == "web" is what makes package/publish manual-only: a
-# pipeline started by a git push is never "web", so pushing runs validate alone.
+# What makes package/publish manual-only is the pipeline SOURCE:
+#   "web"  Build > Pipelines > Run pipeline in the browser
+#   "api"  a POST to /projects/:id/pipeline — the deploy-exe / deploy-mac /
+#          deploy-AppImage helpers in the PowerShell profile
+# A pipeline started by a git push is "push" and matches neither, so pushing
+# still runs validate alone.
+#
+# "api" was missing until 2026-08-13, which meant the profile helpers started a
+# pipeline that matched no package job, packaged nothing, and then reported
+# SUCCESS because validate was the only job that ran. A deploy that ships
+# nothing must not look like a deploy that worked.
 .package_rules: &package_rules
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web" && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
 
 .publish_rules: &publish_rules
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web" && $PUBLISH == "yes" && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PUBLISH == "yes" && ($BUILD_PLATFORM == "all" || $BUILD_PLATFORM == $PLATFORM_NAME)'
 
 validate:
   stage: validate
@@ -161,7 +170,7 @@ assert-build-dates:
   stage: verify
   tags: [fleet-deploy]
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "web" && $PUBLISH == "yes" && $BUILD_PLATFORM == "all"'
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PUBLISH == "yes" && $BUILD_PLATFORM == "all"'
   needs:
     - job: package-windows
       artifacts: true
