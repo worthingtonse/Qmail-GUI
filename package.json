@@ -19,6 +19,7 @@
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
     "electron-pack": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "pack-mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac --universal --dir --publish=never",
     "build-portable": "npm run build && electron-builder --config electron-builder.config.cjs --win portable",
     "build-portable-intl": "npm run build && cross-env QMAIL_BUILD=intl electron-builder --config electron-builder.config.cjs --win portable",
     "build-portable-all": "npm run build && electron-builder --config electron-builder.config.cjs --win portable && cross-env QMAIL_BUILD=intl electron-builder --config electron-builder.config.cjs --win portable",

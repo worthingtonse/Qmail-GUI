@@ -928,9 +928,21 @@ function startBackend(port) {
     // directly), fall back to the directory of the running .exe.
     backendDir = path.join(process.resourcesPath, 'backend');
     backendPath = path.join(backendDir, backendBinary);
-    dataDir =
-      process.env.PORTABLE_EXECUTABLE_DIR
-      || path.dirname(app.getPath('exe'));
+    if (process.platform === 'darwin') {
+      // macOS: the .app bundle is read-only when installed in /Applications,
+      // and there is no "portable USB stick" idiom like Windows. Persist data
+      // in the standard per-user location (app name is "q-mail", so this is
+      // ~/Library/Application Support/q-mail).
+      dataDir = app.getPath('userData');
+    } else {
+      // Windows/Linux portable: data lives NEXT TO the launcher so users can
+      // carry wallets/mail on a USB stick. electron-builder portable mode
+      // exposes the launcher's on-disk directory via PORTABLE_EXECUTABLE_DIR;
+      // fall back to the directory of the running executable.
+      dataDir =
+        process.env.PORTABLE_EXECUTABLE_DIR
+        || path.dirname(app.getPath('exe'));
+    }
   }
 
   backendDataDir = dataDir;
