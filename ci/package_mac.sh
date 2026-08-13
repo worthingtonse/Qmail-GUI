@@ -61,9 +61,17 @@ if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
   echo "[package_mac] Developer ID signing: $MAC_SIGN_IDENTITY"
   # The core is a bare Mach-O we ship as a resource. Sign it BEFORE
   # electron-builder runs so it is already valid when the app is sealed.
+  # codesign --sign wants the FULL identity string.
   codesign --force --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" --sign "$MAC_SIGN_IDENTITY" backend/core
-  CSC_IDENTITY_AUTO_DISCOVERY=true CSC_NAME="$MAC_SIGN_IDENTITY" \
+
+  # electron-builder wants the name WITHOUT the "Developer ID Application:"
+  # prefix and rejects it outright ("Please remove prefix ... — appropriate
+  # certificate will be chosen automatically"), so the same identity has to
+  # be spelled two ways in one script. Strip the prefix if present; a value
+  # that was already bare passes through untouched.
+  CSC_NAME_VALUE="${MAC_SIGN_IDENTITY#Developer ID Application: }"
+  CSC_IDENTITY_AUTO_DISCOVERY=true CSC_NAME="$CSC_NAME_VALUE" \
     npx electron-builder --config electron-builder.config.cjs \
       --mac --universal --dir --publish=never
 else
