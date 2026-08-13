@@ -586,7 +586,9 @@
 .email-list-pane__row-menu-popover {
   position: absolute;
   top: calc(100% + var(--space-xs));
-  left: 0;
+  /* The trigger sits at the list pane's trailing edge. Keep the menu inside
+     that pane so it cannot be covered by the reading/details pane. */
+  inset-inline-end: 0;
   z-index: 20;
   display: flex;
   flex-direction: column;
