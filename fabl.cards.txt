@@ -1,0 +1,202 @@
+================================================================================
+ FABL.CARDS.TXT — Analysis: Mail-list "stacking cards" overlap
+ Report by: Claude Fable 5 (claude-fable-5)          Date: 2026-08-02
+ Subject:   Why inbox/sent rows stack onto each other, why clicks land on the
+            wrong row, why the clicked row "goes transparent", and how to turn
+            the accident into a deliberate fanned-card-deck design.
+================================================================================
+
+1. WHAT IS ACTUALLY HAPPENING (root cause)
+--------------------------------------------------------------------------------
+The overlap is NOT a rendering glitch and has nothing to do with the number of
+mails per se. It is classic CSS flexbox shrinking:
+
+  a) The scroll container `.email-list-pane__list` (EmailListPane.css:272) is
+     `display:flex; flex-direction:column; overflow-y:auto`.
+
+  b) Each row `.email-list-pane__item` (EmailListPane.css:319) is a flex child.
+     Flex children default to `flex-shrink: 1`.
+
+  c) The row declares `min-height: 4.5rem` (72px). This is the trap. A flex
+     child's default minimum is `min-height:auto`, which means "never shrink
+     below my content height" — with that default the rows could NEVER
+     overlap. By writing an explicit `min-height: 4.5rem` we replaced the
+     content-based floor with a 72px floor, explicitly giving the browser
+     permission to squash each row down to 72px.
+
+  d) A row's natural content height is ~110px: the header line (sender ☰ /
+     address / date / star, ~24px) PLUS the body with the 4.5rem (72px)
+     cartouche avatar, plus padding. 110px of content in a 72px box.
+
+  e) The rows have no `overflow: hidden`, so the extra ~38px of content
+     (mostly the big cartouche) simply spills out of the bottom of each row
+     and paints over the next row.
+
+So: few mails => container not full => no shrink pressure => rows are their
+natural height, everything looks fine. Many mails => the flex algorithm tries
+to fit ALL rows into the visible pane before scrolling, shrinking every row to
+its 72px floor => every row overflows onto the row below => the "stacked
+cards" look appears. It's genuinely an accident that it looks good.
+
+2. WHY THE CLICK LANDS ON THE "WRONG" MAIL
+--------------------------------------------------------------------------------
+Browser hit-testing follows paint order. The rows are `position: relative`
+siblings, so a LATER row (the one below) always paints — and receives clicks —
+above an EARLIER row wherever their boxes overlap.
+
+The visible cartouche of mail A physically lies inside mail B's 72px box
+region. The user aims at "mail A's card" (they can see its avatar/subject
+there), but the click is inside B's box, which is on top — so B is selected.
+Visual card and clickable box disagree by up to ~38px. That is the whole
+misclick bug.
+
+3. WHY THE CLICKED ROW "BECOMES TRANSPARENT"
+--------------------------------------------------------------------------------
+The selected/unread/hover backgrounds are mixed with *transparent*, not with
+the pane color:
+
+  --card-hover:  rgba(255,255,255,0.05)                (themes.css:29)
+  selected:      color-mix(in srgb, var(--accent-primary) 10%, transparent)
+                                                        (EmailListPane.css:355)
+  unread:        color-mix(in srgb, var(--status-info)  8%, transparent)
+                                                        (EmailListPane.css:360)
+
+Normally that's fine — the transparent mix just tints the opaque pane behind
+it. But once rows overlap, a selected/unread row's near-transparent background
+lets the OVERFLOWING CONTENT OF THE ROW ABOVE show through it. The screenshot
+shows exactly this: the unread rows (purple envelope) are see-through and the
+previous row's giant cartouche ghosts through their header text. Read rows
+have opaque `--secondary-bg` and hide the overlap, which is why only some rows
+look haunted. So "it becomes transparent" = its background genuinely is
+~92-95% transparent; you only notice when something is behind it.
+
+4. THE TWO-LINE BORING FIX (if we ever just want normal rows back)
+--------------------------------------------------------------------------------
+  .email-list-pane__item { flex-shrink: 0; }
+Rows keep natural height, the list scrolls, overlap impossible. Optionally
+also mix selection tints over var(--secondary-bg) instead of `transparent` so
+rows are always opaque. Keep this in the back pocket; the rest of this report
+is about doing the fun thing instead.
+
+5. RECOMMENDED: DELIBERATE FANNED CARD DECK — PURE CSS
+--------------------------------------------------------------------------------
+No canvas, no SVG needed. This is the venerable "CSS card stack" pattern
+(negative margins + paint order + shadows) that has worked since IE days,
+polished with modern CSS we already use elsewhere in this codebase
+(color-mix, CSS variables). Electron's Chromium supports all of it.
+
+Key insight: hit-testing follows paint order. If we make the OVERLAP
+INTENTIONAL and CONSTANT, the visible slice of every card is exactly its
+clickable slice, and the misclick problem solves itself. The user clicks what
+they see; what they see is what they hit.
+
+Sketch (numbers illustrative):
+
+  .email-list-pane__list {
+    /* give cards breathing room at the top for the hover "pull" */
+    padding-top: var(--space-sm);
+  }
+
+  .email-list-pane__item {
+    flex-shrink: 0;                      /* stop accidental squashing */
+    height: auto;                        /* natural content height   */
+    margin-top: -2.4rem;                 /* CONTROLLED overlap: each card
+                                            shows a ~34px "spine"    */
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    /* the stacked-paper illusion: top edge catches the light,
+       body falls into shadow — exactly the gradient Sean imagined */
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, white 7%, var(--secondary-bg)) 0%,
+      var(--secondary-bg) 2.4rem,
+      color-mix(in srgb, black 18%, var(--secondary-bg)) 100%
+    );
+    /* dark seam under each card sells the depth */
+    box-shadow: 0 -0.5rem 1rem rgba(0, 0, 0, 0.45);
+  }
+  .email-list-pane__item:first-child { margin-top: 0; }
+
+  /* the existing hover pop, promoted to "draw a card from the deck" */
+  .email-list-pane__item:hover,
+  .email-list-pane__item:focus-visible {
+    transform: translateY(-1.25rem);     /* replaces current -4px pop  */
+    z-index: 10;                          /* card comes fully forward  */
+    box-shadow: 0 -0.75rem 1.5rem rgba(0, 0, 0, 0.6);
+  }
+
+  .email-list-pane__item--selected {
+    transform: translateY(-1.25rem);
+    z-index: 9;
+    /* opaque! mix over the bg, never over `transparent` */
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-primary) 22%, var(--secondary-bg)) 0%,
+      color-mix(in srgb, var(--accent-primary) 10%, var(--secondary-bg)) 100%
+    );
+  }
+
+  /* likewise make unread/pending tints opaque: mix with var(--secondary-bg),
+     not `transparent`, so nothing ever ghosts through a card */
+
+  @media (prefers-reduced-motion: reduce) { /* keep existing: no transform */ }
+
+Design notes:
+  * FAN DIRECTION. With plain DOM order, later (lower) cards sit on top, like
+    a deck fanned toward you — the newest mail at top shows its full face and
+    each older mail tucks under the one above? No — inverse: each card tucks
+    UNDER the one BELOW it. If we prefer the top card of the list to be "on
+    top of the deck" (usually reads better since Newest is first), add:
+       .email-list-pane__item { z-index: calc(1000 - var(--i)); }
+    with style={{'--i': index}} in EmailListPane.jsx — one-line JSX change.
+    Hit-testing follows z-index, so clicks stay honest either way.
+  * The header row (sender + date + star) must live in the exposed "spine"
+    strip, so the overlap constant should be tuned so the spine shows the
+    header line: sender left, date right — like tabs on file folders. The
+    current DOM already has exactly that header-first structure
+    (email-list-pane__item-header), so no JSX restructuring is needed.
+  * The star / hamburger / copy buttons in the spine remain fully clickable —
+    they're in the exposed strip and z-index raises the row on hover anyway.
+  * Optional garnish: a 1px lighter top border
+    (border-top: 1px solid color-mix(in srgb, white 12%, transparent))
+    reads as the lit edge of a physical card; tiny alternating
+    rotate(±0.3deg) on nth-child makes the fan look hand-stacked. Cheap,
+    removable, très chic.
+  * Keyboard/a11y unaffected: rows stay real DOM buttons/divs in document
+    order; focus-visible gets the same "pull card" treatment as hover.
+
+6. THE ALTERNATIVES CONSIDERED (and why not)
+--------------------------------------------------------------------------------
+  * HTML5 CANVAS: Would require reimplementing text layout, ellipsis,
+    hover states, hit regions, scrolling, and accessibility from scratch;
+    screen readers and keyboard nav go blind; the React list, virtualization
+    and the existing row menu popovers would all have to be rebuilt. Total
+    overkill for what is a paint-order/negative-margin trick. Rejected.
+  * SVG: Same accessibility/interaction losses as canvas (foreignObject is a
+    quirks minefield in complex flex layouts), no benefit — SVG has no
+    special power here that CSS gradients/shadows lack. Rejected.
+  * CSS 3D (perspective + rotateX): Genuinely pretty "cover-flow" fans are
+    possible, but text legibility suffers at an angle, and a mail list must
+    stay readable. Could be added later as a subtle rotateX(2deg) garnish.
+  * SCROLL-DRIVEN ANIMATIONS (animation-timeline: view()): Modern Chromium
+    (ours qualifies) can fan cards dynamically as they scroll into view, or
+    do the "cards pile up under the header" position:sticky stack. Slick but
+    stateful-feeling; propose as a phase 2 experiment, not the base fix.
+  * position: sticky stacking: The other classic "stacked cards" trick (each
+    card sticks and the next slides over it). Great for marketing pages,
+    wrong for a mail list where the user scans hundreds of rows.
+
+7. VERDICT
+--------------------------------------------------------------------------------
+Keep the serendipitous card-deck look, but make it intentional:
+  1. `flex-shrink: 0` — kill the accidental squash (the true bug).
+  2. Constant negative margin-top — reintroduce the overlap on OUR terms.
+  3. Opaque gradient backgrounds (light top edge -> darker bottom) — Sean's
+     gradient instinct is exactly right and makes the stack read as paper.
+  4. Top-edge box-shadow seams + existing hover pop upgraded to a bigger
+     translateY + z-index raise = "drawing a card from the deck".
+  5. Replace every `color-mix(..., transparent)` row tint with a mix over
+     var(--secondary-bg) so no card is ever see-through again.
+Because hit-testing follows paint order, aligning the visible slice with the
+clickable slice automatically fixes the misclicks. Pure CSS, ~30 lines, one
+optional one-line JSX change for fan direction, zero new dependencies.
+================================================================================

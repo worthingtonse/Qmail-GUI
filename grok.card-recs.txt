@@ -1,0 +1,317 @@
+================================================================================
+QMAIL MESSAGE LIST — CARD STACK RECOMMENDATIONS
+File: grok.card-recs.txt
+Author: Grok 4.5 (xAI)
+Date: 2026-08-02
+Inputs synthesized:
+  - grok.cards.txt          (this model)
+  - docs/gpt5.cards.txt     (GPT-5 analysis)
+  - fabl.cards.txt          (Claude Fable 5 analysis)
+================================================================================
+
+
+0. PURPOSE
+----------
+Three independent analyses of the inbox/sent “stacked cards” bug and the
+desired fanned-deck look were reviewed. This document states what should
+actually be done: root-cause verdict, design choices where the reports
+agree or disagree, a phased implementation plan, and acceptance criteria.
+
+This file is recommendations only. It does not apply code changes.
+
+
+1. CONSENSUS (ALL THREE REPORTS AGREE)
+--------------------------------------
+Use these as non-negotiable product decisions.
+
+  C1. Technology
+      Pure CSS + existing React DOM (EmailListItem / EmailListPane).
+      Reject HTML5 Canvas for the live list.
+      Reject SVG as the list host (optional decoration only, if ever).
+
+  C2. The look is worth keeping
+      The deck / “pick a card” hover is desirable. Do not throw it away
+      when fixing correctness; rebuild it intentionally.
+
+  C3. Correctness before aesthetics
+      Geometry and hit targets must be honest before any fan, gradient,
+      or negative-margin polish.
+
+  C4. Opaque card surfaces
+      Selected, unread, pending, and hover backgrounds must mix tints
+      into an opaque base (var(--secondary-bg) or equivalent), never into
+      `transparent`. Selecting a message must never look like the card
+      vanished or became a ghost sheet.
+
+  C5. Explicit stack elevation
+      Hover, focus-within, selected, and menu-open must use explicit
+      z-index layers. Relying on bare DOM paint order is not enough.
+
+  C6. Keep the hover “draw from deck” motion
+      translateY lift (and mild shadow/scale) stays. Respect
+      prefers-reduced-motion and --motion-scale (already partially done).
+
+  C7. Accessibility baseline
+      Real DOM rows, keyboard focus, nested controls, focus-visible
+      outlines, and readable contrast in dark/light themes stay intact.
+
+
+2. ROOT CAUSE VERDICT
+---------------------
+gpt5.cards.txt and fabl.cards.txt identify the same primary defect.
+That diagnosis is accepted here and supersedes the incomplete root-cause
+emphasis in grok.cards.txt (which over-weighted hover transform alone).
+
+  Primary bug
+  -----------
+  .email-list-pane__list is a column flex container.
+  .email-list-pane__item defaults to flex-shrink: 1.
+  .email-list-pane__item sets min-height: 4.5rem, which is far below the
+  natural content height (~header + 4.5rem avatar + padding ≈ 100px+).
+
+  When many messages are present, flex tries to fit all items into the
+  visible pane. Each item is allowed to shrink down to 4.5rem. Content
+  is not clipped (no overflow:hidden), so ~30–40px of each card paints
+  over the next row.
+
+  Hit-testing follows the compressed layout box and later siblings’ paint
+  order. The user aims at a visible avatar/subject belonging to message A
+  that sits inside message B’s box → B is selected. That is the misclick.
+
+  Secondary amplifiers (real, but not the origin of the stack)
+  ------------------------------------------------------------
+  - Hover translateY without z-index promotion.
+  - Selected / unread / hover tints mixed with transparent.
+  - Selecting unread may clear unread styling immediately, amplifying the
+    “it went transparent” impression (noted in gpt5).
+
+  Non-causes
+  ----------
+  - Not “too many mails” as a magic threshold by itself — density only
+    creates shrink pressure.
+  - Not a missing canvas/SVG renderer.
+  - Not primarily pagination.
+
+One-line fix if we only wanted a normal list again (all reports note this):
+
+  .email-list-pane__item { flex-shrink: 0; /* or flex: 0 0 auto */ }
+
+That must ship as part of Phase 1 regardless of fan design.
+
+
+3. WHERE THE REPORTS DISAGREE — AND THE CHOSEN PATH
+---------------------------------------------------
+Disagreement centers on how aggressive the intentional stack should be.
+
+  fabl.cards.txt
+    Make overlap intentional via constant negative margin-top so each
+    card shows a ~header “spine.” Visible slice = clickable slice; paint
+    order fixes hits. Stronger deck feel, closer to the accident.
+
+  gpt5.cards.txt
+    Do not recreate content-into-neighbor-hit-area overlap. Keep cards
+    vertically separate; invent fan with shadows, tiny offsets, and
+    pointer-events:none pseudo-elements. Safer for a mail client.
+
+  grok.cards.txt
+    Phase A correctness, then optional compact density later; mild fan
+    only if still wanted after gradients.
+
+  DECISION
+  --------
+  Default UI: GPT-5 path — separate cards, opaque gradient faces, fan as
+  illusion (shadows, micro-offset, optional pseudo edges). No content of
+  card A may occupy a region whose pointer target is card B.
+
+  Optional later: Fable-style compact “spine stack” mode only if:
+    - flex-shrink remains 0 (natural height always),
+    - overlap is a fixed design constant, not flex squashing,
+    - the exposed strip is header-only and fully owned by that card’s
+      stacking context,
+    - hover/focus expands or elevates the full card with z-index,
+    - edge click tests pass at 100% and 200% UI scale.
+
+  Do not ship negative-margin compact mode in the first PR. Get honest
+  geometry + card chrome first; re-evaluate density after users see it.
+
+
+4. DESIGN SPEC TO IMPLEMENT
+---------------------------
+
+4.1 Geometry (required)
+  - .email-list-pane__item { flex: 0 0 auto; }  (or flex-shrink: 0)
+  - Keep min-height only as a floor, never as the shrink target that
+    invites overflow; natural height wins.
+  - List remains the sole vertical scroller (overflow-y: auto).
+  - Card content (except open menus) must live inside the item’s box.
+    Prefer overflow: visible only where the row menu needs it; do not
+    allow body/avatar to paint into the next item’s layout box.
+
+4.2 Surfaces (required)
+  - Base: opaque vertical gradient, top slightly lighter than bottom
+    (≈5–8% lighter at top edge, slight darken at bottom).
+    Always color-mix against var(--secondary-bg) / theme tokens so light
+    theme works.
+  - Hover: opaque elevated surface (not rgba glass alone); soft outer
+    shadow; keep or slightly increase translateY.
+  - Selected: opaque accent blend into secondary-bg; keep leading accent
+    border; never transparent. Selection must still look solid after
+    unread → read transition.
+  - Unread / pending: opaque cool/warm tints into secondary-bg; selection
+    rules must win or deliberately combine (fix cascade order so
+    selected is not overridden accidentally).
+  - Loading: prefer reduced emphasis without making the card see-through
+    in a way that ghosts neighbors (avoid bare opacity on the whole row
+    if possible; if kept, keep it mild).
+
+4.3 Stacking layers (required)
+  ordinary     z-index: 1
+  selected     z-index: 3
+  hover/focus  z-index: 5
+  menu-open    z-index: 30  (existing; keep highest among row states)
+  popover      z-index: 20 within the elevated row (existing)
+
+  .email-list-pane__list { isolation: isolate; }
+  Optional per-card isolation: isolate for local pseudo stacks.
+
+4.4 Fan illusion (Phase 2, default mode)
+  - Small vertical gap between cards (~6–8px / space-sm range).
+  - Soft lower shadow so each card reads “above” the next.
+  - Optional index-based horizontal offset pattern (e.g. 0 / 2 / 4 / 1 px)
+    via style={{ '--fan-i': index }} or careful :nth-child (watch
+    pagination footer not breaking the pattern — prefer CSS var from map).
+  - Rotation: omit at first, or cap at ±0.15deg after Windows scaling
+    tests. Text crispness before keeping.
+  - Optional ::before / ::after thin “card edge” strips behind the face
+    with pointer-events: none only.
+  - Hover/focus: translateY(-3px to -6px), optional scale(1.005–1.01),
+    higher z-index, stronger shadow. Same cue for :focus-within.
+
+4.5 Compact spine mode (Phase 3+, optional, not default)
+  - Only if product still wants the accidental density after Phase 1–2.
+  - Constant negative margin (not flex shrink).
+  - Header strip is the only permanently exposed band.
+  - Hover/selected fully elevates the card.
+  - Pass the full hit-test matrix before enabling by default.
+
+4.6 Semantic cleanup (recommended, can trail visuals)
+  - Today: <article role="button"> with many nested interactive children
+    and stopPropagation. It works but is fragile.
+  - Later: article as non-button container; primary open control for the
+    content region; real buttons for menu, copy, read, trash, star,
+    attachment. Not blocking for Phase 1–2 CSS.
+
+
+5. IMPLEMENTATION PHASES
+------------------------
+
+PHASE 1 — Correctness (first PR; ship alone if needed)
+  Files: EmailListPane.css primarily; verify EmailListItem.jsx still ok.
+
+  1. flex: 0 0 auto (or flex-shrink: 0) on .email-list-pane__item.
+  2. Opaque selected / unread / pending / hover backgrounds (mix into
+     secondary-bg, not transparent).
+  3. Explicit z-index for hover, focus-within, selected, menu-open.
+  4. Confirm list still scrolls; no double scrollbars.
+  5. Manual smoke: 1, 10, 50 messages; click top/middle/bottom of cards;
+     nested controls still isolated.
+
+  Exit criteria: No visual content overlap between rows. Click always
+  selects the card under the pointer. Selected card never looks hollow.
+
+PHASE 2 — Card material + deck hover (second PR)
+  1. Border-radius, opaque top→bottom gradient, lower shadow.
+  2. Small inter-card gap.
+  3. Elevate hover/focus motion and shadow (deck draw).
+  4. Optional micro fan offsets + pointer-events:none edge pseudos.
+  5. Theme check: dark, light, reduced-motion, high contrast if present.
+  6. Scale check: 100%, 150%, 200% Windows / browser zoom.
+
+  Exit criteria: List reads as cards without feeling broken. Hover
+  clearly “draws” one card. All Phase 1 exit criteria still hold.
+
+PHASE 3 — Optional density / semantics (only if wanted)
+  1. Compact spine stack behind a preference or density threshold, or
+  2. Semantic split of primary open control vs secondary actions, or both.
+
+  Do not block product release of Phase 1–2 on Phase 3.
+
+
+6. EXPLICITLY OUT OF SCOPE (FOR NOW)
+------------------------------------
+  - Canvas or WebGL deck renderer
+  - Full CSS 3D cover-flow / large rotateX fan
+  - position: sticky marketing-page card piles as the mail list model
+  - Scroll-driven animation as the base fix (fine as a later experiment)
+  - Rebuilding the list in SVG foreignObject
+  - Virtualization (orthogonal; revisit only if page sizes grow huge)
+
+
+7. TEST MATRIX (MINIMUM)
+------------------------
+Layout
+  - 0, 1, 2, 10, 50 messages
+  - Inbox, Sent, Drafts, Trash, Archive
+  - Long subjects/senders, tags, attachments, pending decrypt, open menu
+  - Narrow list pane and responsive full-width
+
+Pointer
+  - Click top, center, bottom edge of each visible card
+  - Click while a neighbor is hovered
+  - Menu, copy, star, read toggle, trash, attachment without opening mail
+  - Open menu near bottom of viewport; scroll with menu open
+
+State
+  - Select unread → remains solidly selected after mark-read
+  - Rapid selection changes; sort change; folder change
+  - Loading draft row if applicable
+
+A11y / motion / theme
+  - Keyboard-only navigation of rows and secondary actions
+  - focus-visible ring not buried under neighbors
+  - prefers-reduced-motion: no lift/scale; static chrome remains
+  - Dark and light theme contrast on gradient ends
+
+
+8. PRIORITY ORDER FOR THE FIRST PR
+----------------------------------
+  P0  flex-shrink: 0 / flex: 0 0 auto
+  P0  opaque selected (and unread/pending) backgrounds
+  P0  z-index on hover / focus-within / selected / menu-open
+  P1  gradient card face + radius + shadow
+  P1  refined hover lift + outer shadow
+  P2  micro fan offsets / pseudo edges
+  P3  compact spine mode
+  P3  semantic article/button split
+
+
+9. RATIONALE IN ONE PARAGRAPH
+-----------------------------
+The stacked look is an accident of flex-shrink against a too-small
+min-height, not a designed deck. All three reports want CSS, not canvas.
+Ship the geometry fix and opaque surfaces first so clicks match what the
+user sees; then restyle rows as real cards with a light-top gradient and
+a stronger “draw from deck” hover. Keep cards hit-box-honest by default;
+only reintroduce deliberate overlap later if a compact spine mode passes
+strict pointer tests. That path preserves the delight everyone noticed
+without preserving the bug that made it unusable.
+
+
+10. SOURCE MAP
+--------------
+  Analysis
+    grok.cards.txt
+    docs/gpt5.cards.txt
+    fabl.cards.txt
+  Implementation targets
+    src/qmail/screens/EmailListPane.css
+    src/qmail/screens/EmailListPane.jsx   (index → CSS vars if fan offsets)
+    src/qmail/screens/EmailListItem.jsx   (class hooks; later semantics)
+    src/styles/tokens.css / themes.css    (surfaces, motion, contrast)
+  Visual reference
+    docs/stacking.png
+
+
+================================================================================
+END OF RECOMMENDATIONS
+================================================================================

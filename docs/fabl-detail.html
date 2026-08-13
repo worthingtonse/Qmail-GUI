@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QMail Reading Pane — Fable redesign</title>
+<style>
+  :root {
+    --primary-bg:   #0d1017;
+    --secondary-bg: #151921;
+    --tertiary-bg:  #1c212c;
+    --border-subtle: rgba(255,255,255,0.06);
+    --border-medium: rgba(255,255,255,0.12);
+    --text-primary:  #e8eaf0;
+    --text-secondary:#aab0c0;
+    --text-tertiary: #7c8496;
+    --text-muted:    #565e70;
+    --accent-primary:#7c6cf0;
+    --accent-success:#34d399;
+    --accent-warning:#f0b64c;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--primary-bg); color: var(--text-primary);
+    font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header.demo {
+    padding: 14px 24px; border-bottom: 1px solid var(--border-medium);
+    background: var(--secondary-bg);
+  }
+  header.demo h1 { margin: 0 0 2px; font-size: 17px; }
+  header.demo p { margin: 0; color: var(--text-tertiary); font-size: 12.5px; }
+  .tabs { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .tabs button {
+    padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary);
+  }
+  .tabs button:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+  .tabs button.active {
+    border-color: transparent; color: #fff;
+    background: linear-gradient(135deg, var(--accent-primary), #4cc9f0);
+  }
+  main { display: flex; flex: 1; min-height: 0; }
+  .stage { flex: 1; padding: 24px; display: flex; justify-content: center; }
+  .pane {
+    width: min(860px, 100%); align-self: flex-start;
+    border: 1px solid var(--border-medium); border-radius: 14px;
+    background: var(--secondary-bg); overflow: hidden;
+  }
+
+  /* ================= HEADER — metadata only ================= */
+  .rp-head {
+    display: flex; gap: 20px; align-items: stretch;
+    padding: 18px 22px 16px;
+    border-bottom: 2px solid var(--border-subtle);
+    background: linear-gradient(180deg,
+      color-mix(in srgb, white 6%, var(--secondary-bg)) 0%,
+      var(--secondary-bg) 60%,
+      color-mix(in srgb, black 10%, var(--secondary-bg)) 100%);
+  }
+
+  /* --- The hero cartouche: bigger, glowing in its tier color --- */
+  .rp-cartouche-wrap { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .rp-cartouche {
+    width: 112px; height: 112px; border-radius: 18px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 40px; line-height: 1.1;
+    border: 3px solid var(--tier);
+    background: linear-gradient(180deg,
+      color-mix(in srgb, var(--tier) 34%, #141821) 0%,
+      color-mix(in srgb, var(--tier) 10%, #141821) 100%);
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.5),
+      0 0 26px color-mix(in srgb, var(--tier) 38%, transparent),
+      0 8px 18px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  /* replied badge rides the cartouche corner — visible at a glance */
+  .rp-cartouche .replied-badge {
+    position: absolute; right: -10px; bottom: -10px;
+    width: 34px; height: 34px; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; border: 3px solid var(--secondary-bg);
+    background: var(--accent-success); color: #06281c;
+  }
+  .rp-cartouche .replied-badge.pending { background: var(--text-muted); color: var(--secondary-bg); }
+  .rp-tier-tag {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--tier);
+  }
+
+  /* --- Metadata grid --- */
+  .rp-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+  .rp-from-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .rp-from-name { font-size: 19px; font-weight: 700; }
+  .rp-from-addr { color: var(--text-tertiary); font-size: 13px; }
+  .rp-copy {
+    border: 0; background: var(--tertiary-bg); color: var(--text-muted);
+    border-radius: 6px; padding: 3px 7px; cursor: pointer; font-size: 11px;
+  }
+  .rp-copy:hover { color: var(--text-primary); }
+  .rp-date { margin-left: auto; color: var(--text-tertiary); font-size: 12.5px; white-space: nowrap; }
+
+  .rp-recips { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline; }
+  .rp-label {
+    font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-muted); padding-top: 3px;
+  }
+  .rp-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 6px; border-radius: 999px;
+    background: var(--tertiary-bg); border: 1px solid var(--border-subtle);
+    font-size: 12.5px; color: var(--text-secondary); white-space: nowrap;
+  }
+  .chip .dot {
+    width: 9px; height: 9px; border-radius: 999px;
+    background: var(--tier); box-shadow: 0 0 6px color-mix(in srgb, var(--tier) 60%, transparent);
+  }
+  .chip.you { border-color: color-mix(in srgb, var(--accent-primary) 55%, transparent); color: var(--text-primary); }
+  .chip.more { color: var(--text-muted); cursor: pointer; }
+  .chip.more:hover { color: var(--text-primary); border-color: var(--border-medium); }
+  /* overflow recipients: hidden until the row is expanded via "+N more" */
+  .chip.extra { display: none; }
+  .rp-chips.expanded .chip.extra { display: inline-flex; }
+  .rp-chips.expanded .chip.more { display: none; }
+
+  /* replied status as a text chip too (screen-reader friendly, scannable) */
+  .rp-status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .status-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  }
+  .status-chip.replied {
+    background: color-mix(in srgb, var(--accent-success) 16%, transparent);
+    color: var(--accent-success);
+    border: 1px solid color-mix(in srgb, var(--accent-success) 40%, transparent);
+  }
+  .status-chip.unreplied {
+    background: color-mix(in srgb, var(--accent-warning) 12%, transparent);
+    color: var(--accent-warning);
+    border: 1px solid color-mix(in srgb, var(--accent-warning) 35%, transparent);
+  }
+  .status-chip.sent {
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+    color: color-mix(in srgb, var(--accent-primary) 70%, white);
+    border: 1px solid color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  }
+
+  /* --- Action rail --- */
+  .rp-actions {
+    flex-shrink: 0; display: flex; flex-direction: column;
+    justify-content: space-between; align-items: flex-end; gap: 10px;
+  }
+  .rp-action-row { display: flex; gap: 8px; }
+  .icon-btn {
+    width: 40px; height: 40px; border-radius: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    border: 1px solid var(--border-medium); background: var(--tertiary-bg); color: var(--text-secondary);
+    border-top-color: rgba(255,255,255,0.16);
+  }
+  .icon-btn:hover { color: var(--text-primary); border-color: var(--accent-primary);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent-primary) 30%, transparent); }
+  .nav-group { display: flex; border: 1px solid var(--border-medium); border-radius: 12px; overflow: hidden; }
+  .nav-group button {
+    padding: 7px 14px; border: 0; cursor: pointer; font-size: 12.5px; font-weight: 600;
+    background: var(--tertiary-bg); color: var(--text-secondary);
+  }
+  .nav-group button + button { border-left: 1px solid var(--border-medium); }
+  .nav-group button:hover { color: var(--text-primary); background: color-mix(in srgb, white 6%, var(--tertiary-bg)); }
+
+  /* ================= BODY PANE — subject lives here ================= */
+  .rp-body { padding: 0; }
+  .rp-subject-band {
+    padding: 18px 26px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: linear-gradient(180deg,
+      color-mix(in srgb, white 3%, var(--secondary-bg)) 0%, transparent 100%);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  .rp-subject { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+  .rp-tags { display: flex; gap: 6px; }
+  .tag {
+    font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border-medium); color: var(--text-tertiary);
+  }
+  .rp-text { padding: 20px 26px 30px; color: var(--text-secondary); max-width: 68ch; }
+  .rp-text p { margin: 0 0 1em; }
+
+  aside {
+    width: 320px; padding: 22px; border-left: 1px solid var(--border-medium);
+    background: var(--secondary-bg); font-size: 13px; color: var(--text-secondary); overflow-y: auto;
+  }
+  aside h2 { margin: 0 0 8px; font-size: 14px; color: var(--text-primary); }
+  aside ul { margin: 6px 0 14px; padding-left: 18px; }
+  aside li { margin-bottom: 7px; }
+  aside b { color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<header class="demo">
+  <h1>Reading pane redesign — hero cartouche, metadata header, subject in body</h1>
+  <p>Three states below: an inbox message you replied to, one still awaiting your reply, and a sent message with To/CC/BCC arrays.</p>
+  <div class="tabs">
+    <button data-view="replied" class="active">Inbox · replied</button>
+    <button data-view="unreplied">Inbox · awaiting reply</button>
+    <button data-view="sent">Sent · To/CC/BCC</button>
+  </div>
+</header>
+
+<main>
+  <div class="stage"><div class="pane" id="pane"></div></div>
+
+  <aside>
+    <h2>Design decisions</h2>
+    <ul>
+      <li><b>Cartouche is the hero</b> — 112px, tier-colored border with a soft glow, tier name tag beneath. It's the sender's identity mark, so it gets the visual weight.</li>
+      <li><b>Header = metadata only.</b> From, To/CC/BCC, date, status. The subject moves into the message pane below, styled like a document title — that's where reading starts.</li>
+      <li><b>Recipient arrays as chips.</b> Each recipient is a pill with a tier-colored dot (danger→safe at a glance). Long lists truncate to <i>+N more</i>, click to expand. "You" is highlighted.</li>
+      <li><b>Replied at a glance, twice.</b> A green ↩ badge on the cartouche corner (glanceable) and an explicit chip with the reply date (precise). Unanswered inbox mail shows an amber "Awaiting your reply" chip — a gentle to-do cue.</li>
+      <li><b>BCC only where it exists</b> — sent items show it; the grid simply grows a row.</li>
+      <li><b>Action rail stays right</b>, but grouped: reply/reply-all/forward on top, Previous|Next as one compact segmented control at the bottom.</li>
+    </ul>
+  </aside>
+</main>
+
+<script>
+  const TIER = { bit:"#ef4444", byte:"#f59e0b", kilo:"#22c55e", mega:"#3b82f6", giga:"#8b5cf6", epic:"#d946ef" };
+  const tierOf = (addr) => addr.split("@")[1];
+
+  const VIEWS = {
+    replied: {
+      from: { name: "Priya Varga", addr: "118.3@kilo", sym: ["🏛️","🦢"] },
+      date: "Wed, Jul 18 · 4:51 PM",
+      to: ["20.123@giga", "40.139@bit", "38.152@byte", "51.9@mega", "77.41@epic"],
+      cc: ["119.135@kilo"],
+      bcc: null,
+      status: { kind: "replied", label: "↩ You replied · Jul 18, 5:10 PM" },
+      subject: "Login link",
+      tags: ["security"],
+      body: [
+        "Here is the login link you asked for:",
+        "https://login.tailscale.com/uinv/inv-x0079560",
+        "It expires in 24 hours — let me know if you need a fresh one."
+      ]
+    },
+    unreplied: {
+      from: { name: "38.152@byte", addr: "38.152@byte", sym: ["🪙","🔧"] },
+      date: "Today · 7:23 AM",
+      to: ["20.123@giga"],
+      cc: null,
+      bcc: null,
+      status: { kind: "unreplied", label: "◷ Awaiting your reply" },
+      subject: "Coin import success",
+      tags: [],
+      body: [
+        "Hi Sean — I have finally installed the wallet and imported the coins.",
+        "Everything validated on the first pass. What should I try next?"
+      ]
+    },
+    sent: {
+      from: { name: "You", addr: "20.123@giga", sym: ["🦅","⚖️"] },
+      date: "Jul 18 · 4:48 PM",
+      to: ["118.3@kilo", "119.135@kilo"],
+      cc: ["38.112@byte", "51.9@mega"],
+      bcc: ["77.41@epic"],
+      status: { kind: "sent", label: "➤ Sent · delivered to 5 recipients" },
+      subject: "Test Plan for Thursday's Quiet-Chamber Run",
+      tags: ["work"],
+      body: [
+        "Mira and Priya, I have reserved the quiet chamber for Thursday.",
+        "Full test matrix attached. Baseline calibration at 9:00, first run at 9:30.",
+        "Please confirm you can both make it."
+      ]
+    }
+  };
+
+  const chipHtml = (addr, isYou, extra) =>
+    `<span class="chip ${isYou ? "you" : ""} ${extra ? "extra" : ""}" style="--tier:${TIER[tierOf(addr)] || "#64748b"}"><span class="dot"></span>${isYou ? "You · " + addr : addr}</span>`;
+
+  // Overflow chips are rendered up front with class "extra" (hidden by CSS)
+  // and revealed by toggling a class — no HTML-in-attribute tricks.
+  function chipsRow(list, collapse = 3) {
+    if (!list) return "";
+    const hidden = Math.max(0, list.length - collapse);
+    return list.map((a, i) => chipHtml(a, a === "20.123@giga", i >= collapse)).join("")
+      + (hidden > 0 ? `<span class="chip more" data-expand>+${hidden} more</span>` : "");
+  }
+
+  function render(key) {
+    const v = VIEWS[key];
+    const tier = TIER[tierOf(v.from.addr)] || "#64748b";
+    const badge =
+      v.status.kind === "replied"
+        ? `<span class="replied-badge" title="You replied">↩</span>`
+        : v.status.kind === "unreplied"
+          ? `<span class="replied-badge pending" title="No reply yet">◷</span>`
+          : "";
+
+    document.getElementById("pane").innerHTML = `
+      <div class="rp-head" style="--tier:${tier}">
+        <div class="rp-cartouche-wrap">
+          <div class="rp-cartouche" style="--tier:${tier}">
+            <span>${v.from.sym[0]}</span><span>${v.from.sym[1]}</span>
+            ${badge}
+          </div>
+          <span class="rp-tier-tag" style="--tier:${tier}">${tierOf(v.from.addr)} class</span>
+        </div>
+
+        <div class="rp-meta">
+          <div class="rp-from-row">
+            <span class="rp-from-name">${v.from.name}</span>
+            <span class="rp-from-addr">${v.from.addr}</span>
+            <button class="rp-copy" title="Copy address">⧉ copy</button>
+            <span class="rp-date">${v.date}</span>
+          </div>
+          <div class="rp-recips">
+            <span class="rp-label">To</span><span class="rp-chips">${chipsRow(v.to)}</span>
+            ${v.cc ? `<span class="rp-label">Cc</span><span class="rp-chips">${chipsRow(v.cc)}</span>` : ""}
+            ${v.bcc ? `<span class="rp-label">Bcc</span><span class="rp-chips">${chipsRow(v.bcc)}</span>` : ""}
+          </div>
+          <div class="rp-status-row">
+            <span class="status-chip ${v.status.kind}">${v.status.label}</span>
+          </div>
+        </div>
+
+        <div class="rp-actions">
+          <div class="rp-action-row">
+            <button class="icon-btn" title="Reply">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+            </button>
+            <button class="icon-btn" title="Reply all">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 17 2 12 7 7"/><polyline points="12 17 7 12 12 7"/><path d="M22 18v-2a4 4 0 0 0-4-4H7"/></svg>
+            </button>
+            <button class="icon-btn" title="Forward">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+            </button>
+          </div>
+          <div class="nav-group">
+            <button title="Previous message">▲ Prev</button>
+            <button title="Next message">▼ Next</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="rp-body">
+        <div class="rp-subject-band">
+          <h1 class="rp-subject">${v.subject}</h1>
+          ${v.tags.length ? `<span class="rp-tags">${v.tags.map(t => `<span class="tag">${t}</span>`).join("")}</span>` : ""}
+        </div>
+        <div class="rp-text">${v.body.map(p => `<p>${p}</p>`).join("")}</div>
+      </div>`;
+  }
+
+  document.querySelectorAll(".tabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      render(btn.dataset.view);
+    });
+  });
+
+  // Delegated: "+N more" expands its recipient row in place.
+  document.getElementById("pane").addEventListener("click", (e) => {
+    const more = e.target.closest("[data-expand]");
+    if (more) more.closest(".rp-chips").classList.add("expanded");
+  });
+
+  render("replied");
+</script>
+</body>
+</html>

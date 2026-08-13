@@ -1,0 +1,179 @@
+Diagnosis: Importing a CloudCoin Desktop Bank folder reports all coins as counterfeit
+========================================================================================
+
+Reported behavior
+-----------------
+
+The user selected the Bank folder from an existing CloudCoin Desktop wallet
+in the QMail setup/import flow. QMail reported:
+
+  11 notes were counterfeit
+  Default has no QMail identity coin worth at least 1 CC
+
+The older CloudCoin Desktop transaction screenshot then showed a new entry
+at 2026-08-05 2:00 PM:
+
+  Balance Adjustment   -11.0   balance 0.0
+
+The user consequently observed the 11 coins disappearing from the Desktop
+wallet.
+
+Evidence and scope
+------------------
+
+The QMail screenshot proves that the deposit completed far enough to classify
+all 11 imported files as counterfeit and that no eligible identity coin was
+left in Default. It does not include the task receipt, per-coin serials, RAIDA
+responses, source paths, or encryption-status response, so the exact backend
+reason for the counterfeit classification cannot be proven from screenshots
+alone.
+
+The Desktop screenshot proves that the source wallet's balance was adjusted
+down by 11 CC at the same time. That is consistent with the import operation
+consuming or moving the source files, rather than merely copying them. It does
+not prove that the coins were destroyed: they may have been moved into a
+QMail quarantine/counterfeit/processed location. The destination must be
+checked before declaring permanent loss.
+
+Relevant current GUI flow
+-------------------------
+
+During onboarding, `ServiceSelectionScreen.jsx` opens `WalletActionModal`.
+For the Folder method, `WalletActionModal.jsx` calls:
+
+  depositCloudCoinFolder(selectedFolder.path, memoValue)
+
+`qmailApiServices.js` sends that folder to:
+
+  GET /api/transactions/deposit?source_folder=...&wallet_path=...
+
+The GUI then polls the task, reads the returned `totals`, and displays the
+counterfeit warning. The GUI does not itself authenticate individual coins,
+delete source files, or mark them counterfeit. Those actions are core-owned.
+
+The receipt helpers explicitly treat `counterfeit_count` and
+`legacy_counterfeit_count` as a warning, while `total_deposited` counts only
+coins accepted into the destination wallet. Therefore the displayed warning
+is a report of the backend result, not a frontend validation decision.
+
+Primary diagnosis
+-----------------
+
+There are two related defects to investigate:
+
+1. The 11 source coins were classified as counterfeit by the deposit/authentication
+   path. This may be a genuine RAIDA result, a failure to read the files
+   correctly, an incompatible/legacy file format, or an encryption/readability
+   regression. The screenshots alone cannot distinguish these cases.
+
+2. The import path appears destructive from the user's point of view. The
+   source Desktop wallet recorded -11 CC and the user could no longer see the
+   coins there. If the backend moves files before authentication is complete,
+   or moves counterfeit files without a clearly recoverable quarantine and
+   receipt, a false counterfeit result becomes a data-loss event.
+
+The immediate product failure is therefore not simply the word "counterfeit".
+It is that a failed or unexpected classification can remove the user's only
+visible copy without showing where the files went or providing a recovery
+path.
+
+Could the new file encryption be involved?
+-------------------------------------------
+
+Possibly, but it is not established by the available evidence.
+
+The new QMail file-encryption check runs in `QMail.jsx` while entering the
+QMail dashboard. Onboarding/import is initiated earlier from
+`ServiceSelectionScreen.jsx`, where `WalletActionModal` can submit a folder
+deposit before the dashboard startup unlock flow runs. Also, the encryption
+status contract describes registered QMail wallets; an arbitrary external
+CloudCoin Desktop source folder is not necessarily one of those registered
+wallets.
+
+Consequences to verify:
+
+  * If the selected Desktop Bank files were encrypted, the deposit endpoint
+    may need the source wallet's key. A QMail key loaded for QMail's wallets
+    must not be assumed to decrypt an unrelated Desktop wallet.
+  * If encrypted files were treated as ordinary plaintext, Type 10/header/
+    AN parsing could fail. A parser failure must never be converted into a
+    counterfeit classification.
+  * If the folder was mixed, partially encrypted, or interrupted during an
+    encryption run, some files may be unreadable while others are valid. The
+    task must report unreadable/encryption errors separately from RAIDA
+    counterfeit results.
+  * If the files were ordinary plaintext CloudCoin Desktop files, the new
+    QMail at-rest encryption should not by itself cause a valid coin to become
+    counterfeit. Counterfeit status is determined by authentication/RAIDA
+    results, not by whether QMail later encrypts the destination files.
+
+The current screenshots contain no encryption-status result and no file-level
+error, so encryption is a plausible regression hypothesis but not the proven
+root cause.
+
+Other processes potentially affected
+-------------------------------------
+
+The same risk may affect every operation that scans or authenticates external
+coin files:
+
+  * Add Funds by individual files and by folder: both use
+    `/api/transactions/deposit` and can expose the same classification and
+    source-file movement behavior.
+  * First-startup identity setup: a counterfeit or unreadable result leaves
+    no eligible identity coin and blocks QMail setup.
+  * Locker downloads: downloaded coins are authenticated and graded before
+    being saved; encryption/readability or RAIDA failures could produce
+    counterfeit/Fracked outcomes there too.
+  * Authenticate/health repair and export: encrypted or hidden files could be
+    omitted from scans, while a RAIDA failure can independently produce
+    Fracked or counterfeit grades.
+  * Wallet balance and transaction receipts: totals can diverge from the
+    source wallet if files are moved before the task result is durable and
+    visible.
+
+Required research / validation before code changes
+---------------------------------------------------
+
+1. Obtain the deposit task result and receipt for this incident, including
+   per-coin serials, `counterfeit_count`, `legacy_counterfeit_count`,
+   `error_count`, `limbo_count`, source path, destination path, and any RAIDA
+   pass/fail data.
+2. Inspect the source Desktop Bank folder and QMail data folders, including
+   `Counterfeit`, `Corrupted`, `Imported`, `Duplicates`, `Limbo`, `Grade`,
+   `Receipts`, and any transaction staging directory. Confirm whether the 11
+   original files were moved, copied, renamed, quarantined, or deleted.
+3. Reproduce with a disposable copy of the same Desktop wallet containing
+   known-good plaintext coins. Verify that the deposit preserves a recoverable
+   source or quarantine copy until authentication succeeds.
+4. Repeat with encrypted, unlocked, locked, mixed, and intentionally damaged
+   Type 10 files. Confirm that unreadable/encryption failures are reported as
+   such and never counted as counterfeit.
+5. Test both onboarding import and the normal Add Funds modal, because the
+   onboarding path can run before `QMail.jsx` performs its startup encryption
+   gate.
+6. Test a controlled RAIDA outage. A transport timeout, unavailable RAIDA,
+   or incomplete quorum should produce an inconclusive/error or Fracked
+   result according to the core contract, not irreversible counterfeit
+   disposal.
+
+Recommended safety requirements
+-------------------------------
+
+  * Never permanently delete or overwrite source files solely because a
+    deposit task reports counterfeit. Move them to a clearly named,
+    recoverable quarantine and record the original path and serials.
+  * Keep counterfeit, unreadable, legacy, duplicate, limbo, and transport
+    error totals distinct in the receipt and UI.
+  * Show the user where rejected files were placed and provide a safe reveal
+    or recovery action.
+  * Before onboarding import, determine whether the selected source folder is
+    encrypted and whether the required key is available. Do not silently use
+    QMail's key for an unrelated Desktop wallet.
+  * Add a confirmation warning that folder import may move files, or change
+    the operation to copy-first semantics until authentication is successful.
+
+Status
+------
+
+Diagnosis only. No source code was changed.

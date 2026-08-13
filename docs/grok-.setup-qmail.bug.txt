@@ -1,0 +1,337 @@
+Diagnosis: Set Up QMail — Bank folder import grades counterfeit and empties Desktop
+====================================================================================
+Author: Grok
+Date: 2026-08-05 (updated with reporter's own words)
+Status: DIAGNOSIS ONLY (no code changed)
+
+Reporter (Pierre, via Sean) — paraphrased from email
+----------------------------------------------------
+  "I installed QMail and did a test on my own CC Desktop wallet folder to
+   see how to make it easy for Michelle. I ran into this issue where I
+   selected the Bank folder and it said my 11 coins were counterfeit and
+   now they have disappeared from my Desktop wallet altogether."
+
+  He has a meeting with Michelle at 3:30pm and does not want her to hit
+  the same thing (coins vanish from Desktop / look lost).
+
+  Reporter speculation: "It may have something to do with changes we made
+  in the last build about checking if the encryption. I don't know."
+
+Screenshots provided
+--------------------
+  gui/docs/Pierre-QMail-Test.png          — QMail Set Up QMail modal
+  gui/docs/CC-Desktop-Screenshot .png     — CloudCoin Desktop 23.11.28 Transactions
+
+
+================================================================================
+1. What the user saw (facts from screenshots + email)
+================================================================================
+
+QMail (Pierre-QMail-Test.png)
+  - Modal: "Set Up QMail" (first-run onboarding)
+  - Import destination: Default Wallet
+  - Method: Folder (user selected the **CloudCoin Desktop Bank folder**)
+  - Memo: "First Startup"
+  - After run: "No folder selected" (UI cleared the path after deposit)
+  - Errors:
+      • "11 notes were counterfeit"
+      • "Default has no QMail identity coin worth at least 1 CC"
+  - Button: "Retry Identity Setup" (does not re-import coins)
+
+CloudCoin Desktop (CC-Desktop-Screenshot .png)
+  - Balance had been **11.0 CC**
+  - 8/5/2026 2:00 PM: **Balance Adjustment  −11.0  → balance 0.0**
+  - Older history (2024) shows normal deposits / locker activity ending at 11.0
+
+User impact (stated):
+  - 11 coins gone from Desktop Bank
+  - QMail did not complete identity setup
+  - Fear of repeating for Michelle
+
+
+================================================================================
+2. Root cause (two independent layers)
+================================================================================
+
+LAYER 1 — SOURCE FILES ARE MOVED BEFORE AUTH  [PRODUCT / CODE — HIGH]
+--------------------------------------------------------------------
+cmd_deposit.c deposit pipeline (deposit_execute):
+
+  Phase 1 MOVE   →  fs_move_file from external path → Default\Import
+  Phase 2 UNPACK
+  Phase 3 POWN   →  authenticate with RAIDA (may mark counterfeit)
+  Phase 4 GRADE  →  Bank / Fracked / Counterfeit / Limbo
+  Phase 5+       receipt / legacy upgrade
+
+**Move is permanent and happens first.** Selecting Desktop's Bank folder
+as the import source **removes the .bin files from Desktop** before RAIDA
+says whether they are good. After grade:
+
+  - If Bank/Fracked: coins live in QMail Default (Desktop still empty)
+  - If Counterfeit: coins live in QMail Default\Counterfeit (Desktop empty)
+
+Desktop then shows **Balance Adjustment −11 → 0** because the Bank files
+are gone (Desktop is folder-based; no files = zero balance). This matches
+Pierre's report exactly: "disappeared from my Desktop wallet altogether."
+
+This is not a Desktop bug. QMail deposit is designed as a **move import**,
+not a copy. The UI does not warn that the source folder's coins will leave
+the other program. For a support walkthrough (Pierre → Michelle), that is
+the catastrophic UX failure: even a successful import looks like theft from
+Desktop; a failed (counterfeit) import looks like destruction.
+
+
+LAYER 2 — ALL 11 NOTES GRADED COUNTERFEIT  [AUTH OUTCOME — NEEDS LOG]
+--------------------------------------------------------------------
+Deposit totals drove GUI warning via depositReceipts.js:
+
+  counterfeit_count (+ legacy_counterfeit_count) → "11 notes were counterfeit"
+
+Then onboarding always calls provision-from-default:
+
+  wallet_find_highest_eligible_coin(Default, denom 0..4)  // Bank + Fracked only
+  → RESULT_NOT_FOUND
+  → HTTP 422 "Default has no QMail identity coin worth at least 1 CC"
+     (exact string in api_handlers_qmail_identity.c ~434)
+
+Counterfeit notes are **not** eligible for Mail identity. So identity setup
+cannot finish. "Retry Identity Setup" only re-POSTs provision; it does **not**
+re-read the Desktop Bank (already empty) and cannot succeed without a new
+authentic ≥1 CC coin in Default Bank or Fracked.
+
+Why RAIDA/POWN called them counterfeit is **not proven** without Pierre's
+QMail main.log / deposit receipt for that task. Candidates:
+
+  (a) True counterfeit / already spent on network (notes last moved 2024).
+  (b) Network/RAIDA degradation → excessive fails → grade Counterfeit
+      (fail ≥ 13). Same day as other RAIDA trouble on lab installs.
+  (c) Encryption-related POWN path (see §3) — possible, not confirmed.
+  (d) Legacy upgrade path marking counterfeit (legacy_counterfeit_count)
+      if notes were old format and upgrade failed.
+
+
+================================================================================
+3. Encryption hypothesis (reporter + last-build changes)
+================================================================================
+
+Pierre: "may have something to do with … checking if the encryption."
+
+Two different "encryption" systems must stay separate:
+
+A) Type 10 **file** encryption (recent GUI/core work)
+   - On-disk encrypted .bin; write-gate; password / key_state APIs.
+   - Classic CloudCoin Desktop Bank coins are almost always **plaintext**
+     legacy/current unencrypted bins — not Type 10.
+   - A Type 10 failure typically surfaces as read/key errors, not a clean
+     "N notes were counterfeit" deposit warning.
+   - **Ruled unlikely as the direct cause of the counterfeit banner**
+     unless deposit mis-maps Type 10 read failures into counterfeit counts
+     (no evidence of that mapping in depositReceipts.js — it only reads
+     counterfeit_count / legacy_counterfeit_count from deposit totals).
+
+B) RAIDA **wire** encryption (POWN / encryption key coin)
+   deposit_phase_pown (cmd_deposit.c ~521–556):
+     1. encryption_key_select(target wallet)
+     2. else encryption_key_select_any_wallet
+     3. if still none → **POWN SUM unencrypted** ("first deposit mode")
+     4. else regular encrypted POWN with that key coin
+
+   On a brand-new QMail install with empty Default, first deposit usually
+   hits (3) POWN SUM — no Type 10, no helper key.
+
+   Hazard if **any** registered wallet already has a bad/counterfeit key coin:
+   select_any_wallet may pick it → encrypted POWN with broken key → mass
+   RAIDA reject → looks like all counterfeit. Recent encryption-key /
+   health changes could make this more common. **Plausible but unproven**
+   without log lines:
+     "POWN phase: Using encryption key coin SN …"
+     vs "using POWN SUM (unencrypted)"
+     and "BAD ENCRYPTION KEY" / DetectHash counterfeit patterns seen on
+     other installs (e.g. Client16).
+
+Legacy upgrade path (deposit Phase 5) also has encryption-key retry with
+ENC_TYPE_NONE when upgrade fails for missing key — separate from Type 10.
+
+**Conclusion on encryption:** Do not dismiss; check Pierre's main.log for
+POWN SUM vs key-coin POWN and any BAD ENCRYPTION KEY lines. Do **not**
+blame Type 10 file encryption without evidence. The **move-before-auth**
+behavior alone fully explains "disappeared from Desktop" regardless of
+why grade said counterfeit.
+
+
+================================================================================
+4. Causal chain (Pierre incident)
+================================================================================
+
+  1. Fresh QMail install; Set Up QMail → Folder → Desktop **Bank** folder.
+  2. deposit_phase_move: 11 .bin files **leave Desktop Bank** → Default\Import.
+  3. Desktop balance → 0 (Balance Adjustment −11 at ~2:00 PM).
+  4. POWN + GRADE: all 11 → Counterfeit (reason TBD — see log ask).
+  5. GUI: "11 notes were counterfeit".
+  6. provision-from-default: no Bank/Fracked ≥1 CC → 422 identity error.
+  7. Retry Identity Setup cannot fix; Desktop folder still empty.
+  8. Coins not "deleted from the universe" if they landed in
+     <QMail Client_Data>\Wallets\Default\Counterfeit\ — but they are
+     **gone from Desktop** and **unusable as identity/spend** until
+     re-evaluated / recovered by support tools.
+
+
+================================================================================
+5. Why this is dangerous for Michelle (and demos)
+================================================================================
+
+  - Natural workflow for onboarding help: "point QMail at your Desktop Bank."
+  - That **empties** the Desktop wallet even on success.
+  - On all-counterfeit (true or false), Desktop is empty AND QMail has no
+    identity — worst case for a non-technical user ("my coins disappeared").
+  - No in-modal recovery: Retry does not re-import; Cancel leaves them stuck.
+  - Matches onboarding dead-end class (fab.onboarding-review FINDING 2),
+    worsened by source-folder consumption of a **live second product**.
+
+
+================================================================================
+6. Code evidence (verified in tree)
+================================================================================
+
+Move-first import
+  core/src/commands/cmd_deposit.c
+    deposit_phase_move  → fs_move_file into Import
+    deposit_execute     → MOVE then deposit_execute_import (POWN/GRADE)
+
+Counterfeit warning
+  gui/src/qmail/screens/depositReceipts.js
+    getDepositWarnings → "N notes were counterfeit"
+
+Identity 422
+  core/api_src/api_handlers_qmail_identity.c
+    "Default has no QMail identity coin worth at least 1 CC"
+  wallet_find_highest_eligible_coin → Bank + Fracked only, denom 0..4
+
+Onboarding always provisions after deposit
+  gui/src/qmail/screens/WalletActionModal.jsx handleAddFunds
+    setDepositCompleted(true); clear folder; provisionIdentity()
+
+POWN encryption key selection
+  cmd_deposit.c deposit_phase_pown ~521–556
+    wallet key → any wallet key → POWN SUM unencrypted
+
+
+================================================================================
+7. What is NOT the problem
+================================================================================
+
+  - Not "Desktop randomly zeroed itself" without QMail — timing and −11
+    match the 11 notes import.
+  - Not a failed folder pick (deposit clearly ran and graded 11 notes).
+  - Not the withdraw Bank-guard bug (grok-.withdraw.bug.txt) — different flow.
+  - Not proven Type 10 file-encryption gate failure (no such error on UI).
+  - Identity error is correct once Default has zero eligible coins.
+
+
+================================================================================
+8. Blast radius
+================================================================================
+
+Same move-then-auth Folder/Files import:
+
+  | Path                         | Effect if source is live Desktop Bank      |
+  |------------------------------|--------------------------------------------|
+  | Set Up QMail → Folder        | Empties Desktop; this incident             |
+  | Set Up QMail → Files         | Removes selected files from Desktop        |
+  | Dashboard Add Funds → Folder | Same move behavior                         |
+  | Legacy import modal          | Same deposit pipeline if it uses deposit   |
+  | Set Up QMail → Locker        | Does not touch Desktop Bank                |
+
+After all-counterfeit:
+
+  | Action                      | Result                                     |
+  |------------------------------|--------------------------------------------|
+  | Retry Identity Setup         | Keeps failing (no eligible coin)           |
+  | Desktop wallet               | Remains empty (files moved)                |
+  | QMail Default\Counterfeit    | Likely holds the notes (check on device)   |
+
+
+================================================================================
+9. Immediate recovery guidance (ops — for Pierre / before Michelle)
+================================================================================
+
+  1. On Pierre's PC, search QMail data folder:
+       ...\Client_Data\Wallets\Default\Counterfeit\
+       ...\Client_Data\Wallets\Default\Suspect\
+       ...\Client_Data\Wallets\Default\Pending\
+     for the 11 notes (by serial / "1 CloudCoin" names / timestamp).
+  2. Pull main.log from that QMail install around the import time; search:
+       "Moved N files to Import"
+       "POWN complete:"
+       "POWN phase: Using encryption key" OR "POWN SUM"
+       "Graded:"
+       "counterfeit"
+  3. Do **not** tell Michelle to point QMail at her live Desktop Bank until
+     either:
+       - import is changed to copy (or explicit confirm + copy), or
+       - she understands coins **leave Desktop** and she has a backup.
+  4. Safer demo path: use a **copy** of Bank in a temp folder, or a small
+     test locker key, not the production Desktop Bank path.
+  5. If notes are truly authentic but mis-graded, support may re-auth from
+     Counterfeit/Pending backups (Pending holds pre-POWN ANs per deposit
+     design) — needs engineering/support runbook, not "Retry Identity".
+
+
+================================================================================
+10. Recommended fixes (NOT applied)
+================================================================================
+
+P0 — Stop silent destruction of other wallets' Bank
+  - Folder/Files deposit: **copy** by default when source is outside
+    Client_Data, OR require explicit confirm:
+      "These files will be MOVED out of the other program. Continue?"
+  - Better: copy into Import, leave originals until grade success; only
+    then optional delete — or never delete external sources from UI import.
+
+P0 — Onboarding when depositAddedNothing / all counterfeit
+  - Do not call provisionIdentity().
+  - Do not offer only "Retry Identity Setup".
+  - Offer "Import different coins" / re-enable Folder|Files|Locker.
+  - Explain: "Source files were moved into QMail. Counterfeit notes cannot
+    become your identity. Check Default\\Counterfeit or restore from backup."
+
+P1 — Encryption/POWN diagnostics
+  - Log and surface whether POWN SUM vs key-coin was used.
+  - If key-coin POWN fails massively, fall back to POWN SUM once and/or
+    refuse to use a key that DetectHash marks bad (avoid false counterfeit).
+  - Confirm Type 10 write-gate never classifies unreadables as counterfeit.
+
+P1 — Demo / first-run copy
+  - Launch-screen help: do not select another app's live Bank without a copy.
+  - Optional "Import from CloudCoin Desktop" wizard that copies Bank first.
+
+
+================================================================================
+11. Severity
+================================================================================
+
+CRITICAL for trust / support demos:
+  Selecting another product's Bank folder **removes** those coins from that
+  product before authenticity is known. Combined with all-counterfeit grade
+  + identity dead-end, users correctly report "my coins disappeared."
+
+HIGH for first-run completion (Michelle risk Pierre stated).
+
+Encryption (Type 10): **possible secondary**, not primary explanation of
+disappearance. Wire-key POWN path: **investigate via main.log**.
+
+
+================================================================================
+12. Open evidence to collect from Pierre's machine
+================================================================================
+
+  [ ] Path of QMail Client_Data used during the test
+  [ ] main.log excerpt for the deposit task
+  [ ] Contents of Default\Counterfeit / Suspect / Pending / Receipts
+  [ ] Whether any other wallet was registered (key-coin POWN path)
+  [ ] Exact Desktop Bank path he selected
+  [ ] Coin filenames/SNs of the 11 notes if still on disk
+
+No source code was changed for this write-up.
+Related: gui/docs/grok-.withdraw.bug.txt (separate Bank-empty withdraw bug).
+Related: gui/docs/fab.onboarding-review-findings.txt FINDING 2 (provision dead end).

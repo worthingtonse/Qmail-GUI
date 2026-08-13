@@ -1,0 +1,201 @@
+Diagnosis: Wallet -> Withdraw -> Locker Key
+================================================
+
+Observed UI error
+-----------------
+The Withdraw dialog displays a total wallet balance of 2,597,979 CC, but the
+Locker Key withdrawal form displays "No coins in Bank".
+
+Evidence from main.log
+----------------------
+
+At boot (2026-08-05 13:29:52), the core reported:
+
+  BOOT: no encrypted .bin files; 346 plaintext coin file(s) in Bank/Fracked.
+  health_run_detect: Found 345 coins (Bank=0, Fracked=345), authenticating
+
+The subsequent health pass did not move any of those coins into Bank:
+
+  Heal: 345 processed, 0 relocated to Grade, 0 healed, 0 partial,
+        0 counterfeit, 345 failed, 0 errors
+  Health check COMPLETED ... detect=345(fracked=345), ... fracked_fixed=0/345,
+  graded=0
+
+The locker withdrawal request then failed at 2026-08-05 14:27:58:
+
+  GET /api/locker/upload ?locker_key
+  HTTP status=404
+  message: "No coins in Bank"
+
+Diagnosis
+---------
+This is not a zero-total-wallet condition. The wallet balance is being
+calculated from coins that exist in the wallet, while the locker upload
+endpoint requires spendable coins specifically in the Bank grade. The
+Default wallet has 0 Bank coins and 345 Fracked coins when the request is
+made. Because the boot health/healing pass failed to regrade or heal any of
+the Fracked coins, the locker endpoint correctly rejects the request even
+though the aggregate wallet balance is 2,597,979 CC.
+
+The screenshot's amount (10,000 CC) and memo are not the cause. The failure
+occurs before withdrawal amount processing, at the Bank-coin availability
+check. The separate locker-pool status is healthy (40 upload units and 10
+inbox-fee units), so that pool is not the missing resource here.
+
+Likely underlying condition
+---------------------------
+The Default wallet's coins are stranded in Fracked because authentication /
+health repair did not successfully promote them to Bank. The log does not
+identify why all 345 repairs failed; it only establishes that no Bank-grade
+coin was available when the locker request was sent. This should be
+investigated as the underlying coin-health/grading issue, along with the UI
+behavior that shows the aggregate balance while the selected withdrawal
+method has no eligible Bank balance.
+
+No source code was changed.
+
+Addendum: comparison with the other model findings and encryption review
+==========================================================================
+
+The other findings add an important core-side detail: the locker-upload
+handler reportedly has an early guard that lists only the Default wallet's
+Bank folder and returns 404 "No coins in Bank" when that list is empty. The
+same handler reportedly contains later amount-selection logic that walks Bank
+and then Fracked, and its balance/snapshot helpers also include both grades.
+If those findings match the current core source, the early Bank-only guard is
+stale and prevents the already-present Fracked-selection path from running.
+That makes this a core locker-withdrawal bug, not merely an expected result
+of the wallet's Fracked state. A single 10,000-CC denomination-4 Fracked coin
+would have covered the requested amount if the selection path had been
+allowed to execute.
+
+The most specific reported reason for the Fracked state is RAIDA 5: it was
+marked offline, the health repair skipped FIX2 for that RAIDA, and the 345
+coins were therefore left at 24/25 rather than regraded into Bank. This is
+consistent with the main.log summary, but the log alone does not prove that
+RAIDA 5 is the only cause; it proves that all 345 repairs failed and no coin
+was regraded.
+
+Encryption impact
+-----------------
+
+The recent file-encryption feature is not the direct cause of this particular
+request. At boot the core reported "no encrypted .bin files" and found the
+coins as plaintext files in Bank/Fracked. The request was made later against
+that same wallet state. The log's "FixEncryption" messages concern the coin
+authentication/RAIDA repair path; they should not be confused with the new
+at-rest encryption of .bin files.
+
+However, the encryption rollout can affect the same failure and other
+processes in these ways:
+
+  * If encrypted files exist and the key is not confirmed/loaded, wallet
+    scans, balances, authentication, grading, exports, locker uploads, and
+    backups may see fewer or no usable coin files. The startup unlock gate is
+    intended to prevent that state from being used.
+  * A mixed or interrupted encryption run must preserve visibility of both
+    encrypted and plaintext files. Otherwise the displayed balance can be
+    lower than the actual wallet contents, or a withdrawal can falsely report
+    no eligible coins.
+  * Once the key is loaded and the files are successfully enumerated,
+    encryption should be transparent to Bank-versus-Fracked grading. It does
+    not repair a failed RAIDA or promote Fracked coins to Bank.
+  * The same all-Fracked/empty-Bank condition can affect any operation whose
+    core implementation retains a Bank-only preflight check. The .bin export
+    path is a separate process and should be tested explicitly with Bank=0,
+    Fracked>0; the GUI documents it as a Bank/Fracked export, but this finding
+    does not prove the current core implementation.
+
+Recommended investigation order (no fix applied)
+--------------------------------------------------
+
+1. Inspect the current core locker-upload handler and verify whether the
+   early Bank-only guard contradicts its later Bank+Fracked selector.
+2. Test locker upload and .bin export with a controlled wallet containing
+   Bank=0 and Fracked>0, both with encryption disabled and with encrypted
+   files unlocked.
+3. Test the same operations while encrypted files are locked, mixed, or
+   interrupted, confirming that the UI reports an encryption/readability
+   problem rather than "No coins in Bank".
+4. Separately restore/diagnose RAIDA 5 and rerun health repair; that should
+   return eligible coins to Bank but should not be required merely to spend
+   valid Fracked coins if the locker selector is designed to support them.
+
+No source code was changed; this file contains findings only.
+
+Build 53 log addendum — 2026-08-05 21:57:14
+==============================================
+
+Build 53 provides new information. The original Bank-only failure is no
+longer the response. The locker request now reaches the RAIDA upload phase:
+
+  PutLocker: 0/24 pass, 23 rejected, 0 errors, 1 timeouts (1239 ms)
+  HTTP status=500
+  message: "Upload failed - insufficient RAIDA confirmations"
+  successful_uploads=0
+  failed_uploads=25
+  raida_status_code=34
+  detail: "Encryption validation failed"
+
+This shows that the earlier locker preflight/Bank problem was bypassed or
+fixed in Build 53. The current failure occurs while the core validates the
+RAIDA-side encryption/authentication required by locker upload. It is not a
+wallet-balance or GUI amount-validation failure.
+
+The boot sequence identifies the immediate infrastructure problem:
+
+  HealthRunFixEncryption: 1 RAIDA broken (no shared secret), 24 helpers available
+  FixEncryption: RAIDA 5 ...
+  GetEncryptTicket: helper 14 returned status 6 (Invalid command)
+  FixEncryption: failed to get ticket from helper 14
+  HealthRunFixEncryption: failed to fix any of 1 broken RAIDA
+
+The same operation was retried with helpers 9 and 10 for the Mail wallet;
+helper 9 also returned status 6 (Invalid command). RAIDA 5 remained broken.
+The Default-wallet detect pass saw 23/24 usable responses in one batch and
+24/24 in another, but every coin remained Fracked because the missing RAIDA
+could not be repaired. A RAIDA 2 response also returned status 241 and one
+request timed out.
+
+Interpretation of "Encryption validation failed"
+--------------------------------------------------
+
+In this context, "encryption" is almost certainly the RAIDA protocol's
+per-RAIDA encryption/shared-secret validation, not the new at-rest encryption
+of .bin files. Supporting evidence is the immediately preceding
+HealthRunFixEncryption/FixEncryption/GetEncryptTicket activity and the
+explicit "1 RAIDA broken (no shared secret)" message. The log still does not
+prove whether the root cause is an RAIDA-side command/version mismatch, a bad
+shared-secret state, or a core protocol bug in the helper-ticket path.
+
+The response's `failed_uploads=25` despite `PutLocker: 0/24` is also useful:
+the upload operation attempted all 25 RAIDA confirmations, while the local
+executor obtained no successful confirmations. This is consistent with a
+validation gate failing across the whole upload, not with insufficient coins.
+
+Debug-mode decision
+-------------------
+
+Debug mode is now warranted for the next controlled reproduction. The current
+log begins with:
+
+  REST Core starting ... debug=off
+
+The GUI already has a supported debug launch path: `QMail.exe --debug`
+forwards `-debug` to core.exe. The data-folder configuration also currently
+has `debug_mode=false`. Do not infer that changing the at-rest encryption
+setting will help; enable core debug logging specifically so the next log can
+show the selected wallet/coin-selection result, the GetEncryptTicket helper
+responses, the PutLocker responses, and the exact encryption-validation
+branch.
+
+Preserve this non-debug log and the current `raida_stats.csv` first. Then
+reproduce one locker withdrawal with a small controlled amount. Do not run
+repeated real withdrawals while the core reports zero successful uploads.
+
+Current conclusion
+------------------
+
+Build 53 has moved the failure forward and exposed a new actionable cause:
+RAIDA encryption/shared-secret validation prevents all locker uploads. Core
+debug mode should be the next diagnostic step. No source code was changed.

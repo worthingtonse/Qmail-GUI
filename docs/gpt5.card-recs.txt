@@ -1,0 +1,397 @@
+QMAIL MESSAGE-CARD RECOMMENDATIONS
+==================================
+
+Inputs reviewed
+---------------
+
+  - grok.cards.txt
+  - fabl.cards.txt
+  - docs/gpt5.cards.txt
+  - docs/stacking.png
+  - The current EmailListPane / EmailListItem implementation
+
+This document consolidates the three analyses into an implementation
+recommendation. It does not apply the design changes.
+
+
+Decision
+--------
+
+Build the effect with semantic HTML and CSS. Do not use Canvas or SVG for the
+interactive message list.
+
+The first production version should be a scrollable list of fully measured,
+non-overlapping cards that creates a fanned-deck illusion with gradients,
+shadows, small horizontal offsets, decorative pseudo-card edges, and a lifted
+hover/focus state. It should not initially use large negative margins to place
+one message's interactive box over another message's interactive box.
+
+After the corrected version has passed pointer, keyboard, scaling, and theme
+tests, a small controlled overlap can be prototyped behind a class or setting.
+It should ship only if usability testing shows that people can reliably select
+every exposed card and still scan sender, subject, and time information.
+
+
+What all three reports establish
+--------------------------------
+
+There is strong agreement on the following:
+
+  1. CSS is sufficient and is the correct technology.
+  2. Canvas would require custom text layout, scrolling, accessibility, focus,
+     and hit testing. It would recreate the exact class of input bug at much
+     greater cost.
+  3. SVG is suitable for decoration but not for hosting the working mail list.
+  4. Selected, unread, pending, and hover surfaces should not be mixed against
+     transparent when cards may visually layer.
+  5. Hovered, focused, selected, and menu-open cards need explicit stack levels.
+  6. The existing upward hover motion is appealing and worth preserving.
+  7. Strong rotations and 3D perspective would damage mail-list readability.
+  8. Reduced-motion, keyboard focus, light/dark/high-contrast themes, and high
+     display scaling must be part of acceptance testing.
+
+
+Root-cause judgment
+-------------------
+
+Fabl and GPT5 identify the primary layout defect correctly:
+
+  - .email-list-pane__list is a column flex container.
+  - Each .email-list-pane__item retains the default flex-shrink: 1.
+  - Each item has an explicit min-height of 4.5rem.
+  - The content requires more than 4.5rem because it includes a header plus a
+    body containing a 4.5rem avatar, padding, gaps, subject, and preview.
+  - Under space pressure, flexbox shrinks the item toward 4.5rem while the
+    content continues painting outside the item because it is not clipped.
+
+That makes visible content and owning hit boxes disagree. Later siblings can
+paint and receive clicks in regions where an earlier card's overflow is still
+visible.
+
+Grok correctly identifies hover transform and missing z-index as additional
+boundary/stacking hazards, but its conclusion that transform is the main cause
+is incomplete. CSS transforms move both painted output and transformed hit
+testing; they do not by themselves explain the much larger overlap visible in
+the screenshot. The approximately 4px hover lift can aggravate shared edges,
+but the severe stacking starts with flex shrink plus content overflow.
+
+Therefore, adding z-index alone is not an adequate fix. flex-shrink must be
+fixed first.
+
+
+Why aggressive overlap should not be the initial fix
+----------------------------------------------------
+
+Fabl proposes stopping accidental shrink and deliberately reintroducing a
+large, constant negative margin (approximately 2.4rem), leaving each buried
+card's header as an exposed "spine." This is technically feasible and could be
+visually striking. With opaque faces and correct z-index ordering, its hit
+testing can be made deterministic.
+
+However, deterministic does not automatically mean intuitive or efficient:
+
+  - A user's pointer can reach only the topmost card in any overlap region.
+    Buried cards are selectable only through their exposed strip.
+  - A 2.4rem overlap would conceal much of the subject and preview information,
+    reducing the list's value as a scannable inbox.
+  - Row menus, stars, copy buttons, read-state buttons, trash controls, and
+    attachment controls increase the number of interactive regions that must
+    remain reachable in a narrow pane.
+  - Keyboard focus and scroll-into-view behavior become more complex when the
+    focused element is geometrically covered by a sibling.
+  - Large overlap would turn an accidental bug directly into a permanent
+    interaction model before the corrected baseline is measured.
+
+The safer design can look convincingly stacked without overlapping the actual
+message controls. Shadows and pointer-inert pseudo-elements can cross card
+boundaries; message content and primary hit targets should not do so initially.
+
+
+Recommended production design
+-----------------------------
+
+1. Correct card geometry
+
+Add one of the following to .email-list-pane__item:
+
+  flex: 0 0 auto;
+
+or:
+
+  flex-shrink: 0;
+
+The first form is clearer because it says the card neither grows nor shrinks
+and uses its natural height. Keep .email-list-pane__list as the sole vertical
+scroll container.
+
+Do not force a fixed item height. Messages with tags or future metadata must be
+allowed to grow.
+
+
+2. Establish predictable stack layers
+
+Use isolation: isolate on the list and each card. Recommended relative levels:
+
+  normal card          z-index: 1
+  selected card        z-index: 3
+  hover/focus card     z-index: 5
+  menu-open card       z-index: 30
+  menu popover         existing local high layer
+
+The actual numeric values matter less than the explicit ordering. Do not assign
+ever-growing z-index values to all 50 rows unless controlled overlap is later
+introduced and its fan direction genuinely requires that ordering.
+
+
+3. Use opaque card faces in every state
+
+The base should be an opaque top-light/bottom-dark gradient built from theme
+tokens. Conceptually:
+
+  top:    a small text-primary or white mix into secondary-bg
+  middle: secondary-bg/card-bg
+  bottom: a small dark mix into secondary-bg
+
+Selected, unread, and pending variants should mix their accent into an opaque
+base such as var(--secondary-bg), never into transparent.
+
+Place the selected rule after unread and pending rules, or use explicit combined
+selectors/custom properties, so selection remains stable when selecting an
+unread message also marks it read.
+
+The selected state should retain:
+
+  - an opaque accent/base gradient;
+  - the existing leading accent border;
+  - a small outer glow or stronger shadow;
+  - no opacity transition.
+
+Loading may dim inner content rather than applying opacity to the entire card;
+whole-card opacity also dims the card surface and permits underlying layers to
+show through.
+
+
+4. Create the fan illusion without overlapping controls
+
+Use a repeating set of very small horizontal offsets, for example:
+
+  slot 0: 0px
+  slot 1: 2px
+  slot 2: 4px
+  slot 3: 1px
+
+The React map can pass index % 4 as a class or CSS custom property. Avoid a
+large diagonal drift across dozens of messages.
+
+Initial production rotation should be zero. If text remains crisp at 100%,
+150%, and 200% Windows scaling, an experimental rotation no greater than about
+plus/minus 0.15 degrees may be considered.
+
+Add ::before and/or ::after pseudo-elements behind a card to suggest extra
+paper/card edges. These can be offset by a few pixels, carry a border and
+shadow, and visually overlap. They must have:
+
+  pointer-events: none;
+  aria-hidden behavior by virtue of being CSS-generated decoration;
+
+This yields a physical stack impression without creating another message's
+clickable surface under the visible text.
+
+
+5. Preserve and improve the "draw a card" hover
+
+Retain a modest lift:
+
+  translateY(-3px) translateX(1px) scale(1.005)
+
+Add the explicit hover z-index and a stronger outer shadow. Apply the same
+elevation to :focus-within so keyboard users receive an equivalent cue.
+
+The hover transform should be assembled with fan transform variables or split
+between a wrapper and card surface so hover does not accidentally erase the
+base horizontal offset.
+
+For prefers-reduced-motion, remove translate/scale/rotation while preserving
+the border, gradient, focus outline, opaque selection, and z-index ordering.
+
+
+6. Add real spacing and rounded card boundaries
+
+Use approximately 6px to 8px of vertical separation and a small horizontal
+inset so the rounded outline and shadow can be seen. This spacing is part of
+the hit-target guarantee: between-card space must not activate either card.
+
+The visual style should include:
+
+  - rounded corners;
+  - a slightly brighter top border;
+  - a darker lower edge/shadow;
+  - an opaque gradient;
+  - clear separation from the list background.
+
+This delivers the requested light-top/dark-bottom depth cue.
+
+
+7. Improve row semantics after the layout fix
+
+The current <article role="button" tabIndex="0"> contains several buttons and
+button-like controls. stopPropagation prevents many accidental selections, but
+the structure still places interactive descendants inside an element acting as
+a button.
+
+Recommended follow-up structure:
+
+  - a non-interactive article as the card container;
+  - one dedicated message-opening button/link over the primary content area;
+  - menu, copy, read/unread, trash, attachment, and star as sibling buttons
+    above the primary layer.
+
+This is not required to correct flex shrinking, but it makes hit ownership and
+keyboard behavior durable before any optional overlap experiment.
+
+
+Optional controlled-overlap experiment
+--------------------------------------
+
+After the baseline ships and is stable, test a separate compact/deck class with
+a small overlap—start around 6px to 8px, not 2.4rem.
+
+Requirements before enabling it:
+
+  - Card faces are opaque.
+  - flex-shrink remains zero.
+  - Paint order and z-index are explicit.
+  - Only the visually top card owns an overlap band.
+  - Every buried card retains a clearly visible, sufficiently large exposed
+    target.
+  - Focused cards automatically rise fully into view.
+  - Row menus cannot be covered or clipped.
+  - Subject scanning remains materially as fast as the non-overlapping layout.
+
+Do not automatically switch density merely because a folder crosses an email
+count threshold. That would cause the interface to change shape unexpectedly
+as messages arrive. If compact overlap proves valuable, make it a stable design
+or an explicit user preference.
+
+
+Implementation order
+--------------------
+
+Phase 1 — correctness patch
+
+  1. Set flex: 0 0 auto on message cards.
+  2. Add list/card isolation and explicit state z-index values.
+  3. Make base, unread, pending, hover, and selected card faces opaque.
+  4. Ensure selected styling wins after an unread message becomes read.
+  5. Keep menu-open above hover/selection.
+
+Phase 2 — card/deck styling
+
+  1. Add card insets, vertical spacing, rounded corners, gradient, and shadow.
+  2. Add repeating small horizontal fan offsets.
+  3. Add pointer-inert pseudo-card edges.
+  4. Tune hover/focus lift and selected elevation.
+  5. Tune all themes and reduced-motion behavior.
+
+Phase 3 — interaction hardening
+
+  1. Separate the primary message-opening control from secondary controls.
+  2. Verify keyboard sequence and scroll-to-focus behavior.
+  3. Add automated geometry and click-target regression coverage.
+
+Phase 4 — optional experiment
+
+  1. Prototype a small controlled negative margin behind an opt-in class.
+  2. User-test target accuracy and scanning speed.
+  3. Reject or ship based on observed behavior, not appearance alone.
+
+
+Acceptance criteria
+-------------------
+
+Geometry and scrolling
+
+  - With 50 messages, each card's allocated rectangle contains all of its
+    header, avatar, controls, subject, preview, and tags.
+  - The list's scrollHeight exceeds clientHeight and the list scrolls normally.
+  - No message content paints into another message's primary hit region.
+
+Pointer correctness
+
+  - Clicking sender, subject, preview, or card whitespace always opens that
+    exact message.
+  - Clicking within the gap between cards opens no message.
+  - Menu, copy, star, read/unread, trash, and attachment actions never open a
+    neighboring message.
+  - Hovering one card never prevents access to another card's visible controls.
+
+State clarity
+
+  - Selecting an unread message does not make its surface transparent when it
+    becomes read.
+  - Selected, hovered, focused, unread, pending, and loading states remain
+    visually distinguishable in every theme.
+  - An open action menu always renders above all cards.
+
+Accessibility and responsiveness
+
+  - Every message and secondary action is reachable and activatable by keyboard.
+  - Focus outlines are not clipped or covered.
+  - Reduced motion disables lift/fan motion without hiding state.
+  - Layout and target accuracy pass at 100%, 150%, and 200% scaling and at the
+    responsive full-width breakpoint.
+
+Suggested automated checks
+
+  - Render enough items to cause overflow and assert each card's bounding rect
+    does not intersect the next card's content rect in baseline mode.
+  - Click the subject center for several consecutive cards and assert the
+    selected ID matches the clicked ID.
+  - Select an unread card, update it to read, and assert its computed background
+    remains opaque and selected.
+  - Exercise every nested control and assert the row selection callback does not
+    fire.
+
+
+Ideas to adopt, defer, and reject
+--------------------------------
+
+Adopt now:
+
+  - Fabl/GPT5 flex-shrink diagnosis and fix.
+  - All reports' CSS-first conclusion.
+  - Opaque token-based gradients.
+  - Explicit hover/focus/selected/menu stack ordering.
+  - Existing hover lift, refined rather than removed.
+  - Pointer-inert decorative layers.
+
+Defer for a tested prototype:
+
+  - Negative-margin card overlap.
+  - Per-index z-index fan direction.
+  - Tiny rotations or perspective.
+  - Scroll-driven or sticky card animations.
+
+Reject for the working list:
+
+  - Canvas rendering.
+  - SVG/foreignObject as the list host.
+  - Large fan angles.
+  - Fixed-height cards.
+  - Large production overlap before target-accuracy testing.
+  - A z-index-only patch that leaves flex shrinking in place.
+
+
+Final recommendation
+--------------------
+
+Fix the flex geometry and transparent state surfaces first, then intentionally
+recreate the attractive deck effect with CSS gradients, shadows, card spacing,
+small fan offsets, and pointer-inert decorative edges. Preserve the lift-on-
+hover behavior with explicit elevation. This produces the requested physical
+card feeling while ensuring that the message a person sees is always the
+message they click.
+
+Treat true negative-margin overlap as an optional compact-mode experiment, not
+as part of the initial correctness fix. The aesthetic is worth keeping; the
+ambiguous interactive geometry is not.

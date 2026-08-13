@@ -1,0 +1,57 @@
+Superseded
+==========
+This draft was replaced by the multi-model synthesis:
+
+  gui/docs/grok-.withdraw.bug.txt
+
+Open that file for the current diagnosis (stale Bank-only guard + RAIDA 5
+health context + blast radius to other processes).
+
+Build 53 follow-up: new failure stage
+======================================
+
+The new main.log contains a materially different result from the earlier
+Build 52 attempt. The locker request no longer returns "No coins in Bank".
+At 21:57:14 it reaches PutLocker and returns:
+
+  PutLocker: 0/24 pass, 23 rejected, 0 errors, 1 timeouts
+  HTTP 500: "Upload failed - insufficient RAIDA confirmations"
+  successful_uploads=0, failed_uploads=25, raida_status_code=34
+  detail: "Encryption validation failed"
+
+Therefore the Bank-only preflight issue was bypassed or fixed in Build 53.
+The remaining failure is during the RAIDA confirmation/encryption-validation
+stage, not during wallet balance lookup or frontend amount validation.
+
+The boot log gives a concrete correlated cause:
+
+  HealthRunFixEncryption: 1 RAIDA broken (no shared secret), 24 helpers
+  GetEncryptTicket: helper 14 returned status 6 (Invalid command)
+  FixEncryption: failed to get ticket from helper 14
+  HealthRunFixEncryption: failed to fix any of 1 broken RAIDA
+
+The Mail-wallet retry selected helper 9 and got the same status 6 (Invalid
+command). RAIDA 5 remains the broken RAIDA. The Default wallet still has
+Bank=0 and Fracked=345; Detect reports 23/24 or 24/24 reachable/passable
+RAIDA, but the missing RAIDA leaves all coins Fracked. RAIDA 2 also returned
+status 241 in one detect request and one request timed out.
+
+Here "Encryption validation failed" refers to the RAIDA-side encryption /
+shared-secret validation used by the coin protocol, not necessarily the new
+at-rest encryption of .bin files. The preceding FixEncryption and
+GetEncryptTicket lines support that interpretation. The log cannot yet tell
+whether the exact defect is RAIDA protocol/version incompatibility, a bad
+shared-secret state, or a core bug in helper-ticket handling.
+
+Debug mode should be the next step
+-----------------------------------
+
+The log explicitly says `debug=off`, while the GUI already supports
+`QMail.exe --debug`, which forwards `-debug` to core.exe. A controlled debug
+reproduction should capture the locker operation's coin selection, every
+helper/GetEncryptTicket response, every PutLocker response, and the exact
+encryption-validation branch. Preserve this log and raida_stats.csv first,
+then run one small test withdrawal. Do not repeat real withdrawals while
+successful_uploads remains zero.
+
+No source code was changed by this update.

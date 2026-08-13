@@ -1,0 +1,384 @@
+Diagnosis: Wallet -> Withdraw Funds -> Locker Key
+=================================================
+Author: Grok (updated after multi-model review)
+Date: 2026-08-05
+App: QMail Beta, August 5, 2026 (build 52)
+Install / data: E:\20.123@giga
+Address: 20.123@giga
+Log: E:\20.123@giga\Client_Data\main.log
+Screenshot: 2,597,979 CC total; amount 10000; memo "For Pierre";
+            error "No coins in Bank"
+No source code was changed for this write-up.
+
+Peer notes reviewed
+-------------------
+  - gui/docs/GPT-.withdraw.bug.txt   (GPT — high-level Bank vs total balance)
+  - gui/docs/fabl.withdraw.bug.txt   (Fable/Claude — stale Bank-only guard)
+  - gui/docs/grok.withdraw.bug.txt   (earlier Grok draft — RAIDA 5 + Type 10)
+  - This file supersedes the earlier Grok draft with cross-model synthesis.
+
+
+1. Symptom
+----------
+Menu: Wallet -> Withdraw Funds -> Locker Key…
+
+  Default Wallet ........ 2,597,979 CC   (aggregate Bank + Fracked)
+  Method: Locker Key
+  Amount: 10000
+  Memo: For Pierre
+  Error: "No coins in Bank"
+
+API at 14:27:58:
+
+  GET /api/locker/upload ?locker_key=...
+  HTTP 404  {"error":true,"message":"No coins in Bank","code":404}
+
+Log note (Fable): the logged query string often shows only the first param
+name (e.g. "?locker_key") because params are null-split in place before the
+deferred request log. That does NOT mean amount/wallet_path were omitted.
+GUI withdrawToLockerCode (qmailApiServices.js) sends locker_key, amount,
+memo, wallet_path.
+
+
+2. Disk state (verified)
+------------------------
+E:\20.123@giga\Client_Data\Wallets\Default\
+
+  Bank\    : 0 .bin files
+  Fracked\ : 345 .bin files
+  Limbo\   : 0
+
+Filename denom breakdown of Fracked (matches Fable's byte-level sum):
+
+  ~0.01–1 class: small counts
+  10,000-named files: 257
+  TOTAL value from Fable's denom-byte read: 2,597,979.00 CC
+  (matches GUI balance exactly)
+
+So the wallet can fund 10,000 CC: a single fracked DN4 (10,000) coin is
+enough with no make-change.
+
+
+3. Primary software bug (HIGH) — stale Bank-only guard
+------------------------------------------------------
+Source of truth (verified in tree):
+
+  core/api_src/api_handlers_locker.c  →  api_handle_locker_upload()
+
+Early guard (~lines 432–441):
+
+  list_bin_files(bank_path, ...)
+  if (file_count <= 0) {
+      json_error_response_from_string(..., "No coins in Bank", 404);
+      return;
+  }
+
+This aborts BEFORE any coin selection. But the same handler ALREADY supports
+Bank + Fracked:
+
+  - Single-coin mode: Bank first, then Fracked fallback
+    (~495–515); error text even says "in Bank or Fracked" (~519).
+  - Amount mode: greedy Bank then Fracked + make-change cascade
+    (~574–677; Fracked pass ~602–627; comment ~946 on put path:
+    "greedy from Bank then Fracked").
+  - Snapshot helper locker_snapshot_bank_fracked_denom_counts (~373–393)
+    counts Bank + Fracked.
+  - Insufficient-funds path (~679–698) uses
+    calculate_wallet_balance_units() = Bank + Fracked
+    (api_handlers_utils.c).
+
+GPT was right that Bank was empty and the endpoint "requires Bank" at the
+guard. Fable was right that this is a *stale* requirement: selection logic
+below would spend Fracked, so the guard contradicts its own handler.
+
+Consequence for this session: Bank=0, Fracked=345 → every
+GET /api/locker/upload 404s with "No coins in Bank", even though amount-mode
+selection would have taken one fracked 10,000-CC coin.
+
+If the guard were relaxed (Bank+Fracked empty only, or removed so selection
+errors surface), THIS specific withdraw should succeed without waiting for
+heal.
+
+Related sibling endpoint:
+
+  api_handle_locker_put_no_sum (later in same file) has NO equivalent early
+  "No coins in Bank" abort; it goes straight to Bank-then-Fracked selection.
+  Behavior is inconsistent between locker upload vs put-no-sum.
+
+
+4. Secondary condition — why Bank is empty (RAIDA / health)
+-----------------------------------------------------------
+Still real and operationally important, but no longer the only explanation
+for the 404.
+
+Boot 13:29:52 (main.log):
+
+  BOOT: no encrypted .bin files; 346 plaintext coin file(s) in Bank/Fracked.
+  BOOT: Type 10 write-gate cache refreshed (wallet_is_encrypted=false)
+  health_run_detect: Found 345 coins (Bank=0, Fracked=345)
+
+Detect: 24/24 pass on reachable RAIDAs, 0 authentic, all classified fracked
+(Bank needs 25/25 AUTHENTIC).
+
+RAIDA 5 offline throughout:
+
+  DRD / FixEncryption / FIX2 all target RAIDA 5 and fail or skip
+  FixEncryptionSend: executor_run_single failed for RAIDA 5 (res=2)
+  Fix RAIDA  5: skipped
+  Heal: No RAIDA were fixed — skipping persist and regrade of 345 coins
+  Health: fracked_fixed=0/345, enc_fixed=0/1, graded=0
+
+raida_stats.csv: RAIDA 5 is_available=0, high timeout_count.
+
+Afternoon: RAIDA 11/14 QMail ping timeouts; Echo often 0/25 pass with many
+rejects (Fable) — network degradation separate from the early guard.
+
+Also: many Fracked names are 'MakeChange' outputs — health/make-change
+products stay fracked when the one failing RAIDA cannot be fixed.
+
+
+5. Encryption layers (recent Type 10 work — do not conflate)
+------------------------------------------------------------
+A) Coin FILE encryption (Type 10) — recently implemented
+   This wallet: plaintext only; wallet_is_encrypted=false.
+   Locker 404 is NOT a Type 10 decrypt / confirmed-key failure.
+
+B) RAIDA shared-secret FixEncryption (CMD45 / GetEncryptTicket)
+   Health: "1 RAIDA broken (no shared secret)" → RAIDA 5; CMD45 fails res=2
+   because node is offline. Wire crypto repair, not on-disk Type 10.
+
+Implication: adjacent to file-encryption delivery in the same release
+train, but the withdraw failure path is the Bank-only guard + empty Bank,
+not Type 10 file crypto.
+
+
+6. Multi-model synthesis
+------------------------
+| Source | Finding | Verdict after code+disk review |
+|--------|---------|--------------------------------|
+| GPT    | Balance is aggregate; locker needs Bank; health left 345 fracked | Correct as far as it goes; did not name RAIDA 5 or the stale guard |
+| Grok (prior) | RAIDA 5 offline blocks heal; Type 10 distinct from FixEncryption | Correct secondary causation; incomplete on primary guard bug |
+| Fable  | Early Bank-only guard contradicts Bank+Fracked selection; denom sum = UI total; log query-string truncation | Primary bug CONFIRMED in api_handlers_locker.c; denom sum re-checked via filenames |
+
+Best combined root cause:
+
+  (1) PRIMARY UX/API bug: early "No coins in Bank" guard blocks
+      Bank+Fracked selection that the handler already implements.
+  (2) SECONDARY wallet state: all spendable value in Fracked because RAIDA 5
+      offline → heal/FixEncryption cannot promote coins to Bank.
+  (3) UI aggravation: modal shows Bank+Fracked total next to a Bank-only
+      (guard) error string.
+
+
+7. Blast radius — other processes that may be affected
+------------------------------------------------------
+Same *empty-Bank / all-Fracked* wallet state can break or degrade more than
+Locker Key withdraw. Severity depends on whether the path is Bank-only or
+Bank+Fracked.
+
+A) Directly same bug class (Bank-only early check while Fracked has value)
+
+  - GET /api/locker/upload  (this incident)
+    Guard: Bank only → 404 "No coins in Bank"
+  - find_breakable_denom_for_gap() in same file (~350–353)
+    Scans Bank only; returns -9 if Bank empty. Even AFTER fixing the early
+    guard, make-change for non-exact amounts may still fail if all
+    breakable coins sit only in Fracked (this 10000 request does not need
+    change).
+
+B) Bank-then-Fracked selection (works if Bank empty but Fracked funded)
+
+  - Amount selection inside locker_upload (after guard) and locker put-no-sum
+  - qmail_select_coins_for_units (qmail_coin_select.c) — Bank then Fracked
+    for QMail send / fee funding (no early "No coins in Bank" on that
+    selector). Caveat: qcs_find_breakable_denom_for_gap / largest breakable
+    still Bank-only → make-change can stall for awkward amounts when Bank
+    is empty.
+  - qmail_locker_pool funding helpers that list Bank then Fracked
+  - system transfer coin moves that scan Bank + Fracked
+  - coins authenticate API (explicit Bank + Fracked load)
+
+C) Bank-only by design (will fail or no-op when Bank empty)
+
+  - /api/transactions/export (.bin File withdraw) — cmd_export_coins is
+    documented as selecting from Bank (api_handlers_export.c comments).
+    Wallet -> Withdraw -> .bin File likely fails under the same wallet
+    state (different error than locker upload, e.g. insufficient funds /
+    export failed).
+  - Coin consolidate path loads Bank only (api_handlers_coins.c
+    consolidate_load_bank).
+  - Any UI/API that assumes "balance" implies "exportable Bank coins".
+
+D) Health / identity (related, not the same 404)
+
+  - Boot health cannot regrade Fracked → Bank while RAIDA 5 offline.
+  - Mail wallet identity coin SN 5243 also stuck Fracked with same RAIDA 5
+    heal failure (second health pass in log).
+  - QMail beacon pings to RAIDA 11/14 timing out — separate reliability
+    issue; may affect mail more than withdraw.
+
+E) UI surfaces
+
+  - WalletActionModal withdraw shows aggregate balance for both Locker Key
+    and .bin File methods — same misleading total for any Bank-gated spend.
+  - No proactive "0 Bank / N Fracked" warning before submit.
+
+F) NOT broken by this guard (evidence this session)
+
+  - Locker pool status: upload_available=40, inbox_fee=10 (pre-funded units;
+    separate from Default Bank selection).
+  - Balance API: correctly reports Bank+Fracked total.
+  - Type 10 write-gate: wallet_is_encrypted=false; not involved.
+
+
+8. Causal chain (updated)
+-------------------------
+1. Coins live in Fracked (RAIDA 5 fail/offline; heal skips regrade).
+2. Balance API / GUI show 2,597,979 CC (Bank+Fracked) — correct.
+3. User requests Locker withdraw of 10,000 (fundable from Fracked).
+4. api_handle_locker_upload hits Bank-only early guard → 404.
+5. Bank+Fracked selection code never runs.
+6. UI shows cryptic "No coins in Bank" under a large total.
+
+If step 4 were fixed and amount is exact (one DN4), withdraw can succeed
+even while heal remains blocked. Heal still needed for Bank-only features
+(export, consolidate) and for long-term health.
+
+
+9. Recovery (ops, no code)
+--------------------------
+Short term for Locker withdraw: code fix to the guard (when approved) is
+sufficient for exact amounts from Fracked.
+
+Wallet health:
+1. Restore RAIDA 5 (is_available=1 in raida_stats.csv).
+2. Re-run Authenticate / health so FIX2 can heal and grade into Bank.
+3. Confirm Default\Bank non-empty for Bank-only features (.bin export).
+
+
+10. Recommended fixes (NOT applied — notes only)
+------------------------------------------------
+Core — primary
+  api_handlers_locker.c api_handle_locker_upload:
+  - Require coins in Bank OR Fracked (or drop early guard and rely on
+    existing Insufficient funds / No coin of denomination paths).
+  - Message if both empty: e.g. "No coins in wallet (Bank and Fracked empty)".
+  - single_coin_mode already free_file_list(files, file_count) with file_count
+    possibly 0 after guard removal — verify free_file_list(NULL/0) is safe
+    (Fable called this out).
+
+Core — follow-ups
+  - find_breakable_denom_for_gap + largest_breakable scans: include Fracked
+    (or take wallet_path and scan both), same for qmail_coin_select helpers.
+  - Align put-no-sum vs upload early-exit policy.
+  - Heal: clearer log when only offline RAIDAs block fix; consider regrade
+    of ALREADY_AUTHENTIC when raida_fixed==0.
+
+GUI
+  - Show Bank vs Fracked (or spendable) on Withdraw modal.
+  - Optional "Heal fracked coins" when Bank empty and Fracked > 0.
+
+Type 10 regression checklist (unchanged)
+  - Plaintext wallets still select/export correctly.
+  - Encrypted wallets must not map decrypt failures to "No coins in Bank".
+
+
+11. Evidence index
+------------------
+main.log:
+  13:29:52  BOOT plaintext; wallet_is_encrypted=false; Bank=0 Fracked=345
+  13:29:53  RAIDA 5 offline; Detect all fracked, 24/24 pass
+  13:29:55–59  FixEncryption RAIDA 5 fails res=2; enc_fixed=0/1
+  13:29:59–30:00  Heal 345; Fix RAIDA 5 skipped; fracked_fixed=0/345
+  13:30:00–06  Mail SN 5243 same pattern
+  14:27:57  GET /api/wallets/list (wallet resolve OK)
+  14:27:58  GET /api/locker/upload → 404 No coins in Bank
+
+Code:
+  api_handlers_locker.c:438–441  Bank-only guard (PRIMARY)
+  api_handlers_locker.c:495–627  Bank+Fracked selection (contradicts guard)
+  api_handlers_utils.c           balance = Bank + Fracked
+  api_handlers_export.c          .bin export → Bank-oriented cmd_export_coins
+  qmail_coin_select.c            Bank then Fracked; break helpers Bank-only
+
+Disk:
+  Default\Bank 0 files; Default\Fracked 345; ~257× 10,000 CC files present
+
+
+12. Severity
+------------
+HIGH for spend UX: any wallet that is temporarily all-Fracked (common when
+one RAIDA is down or after make-change) cannot Locker-withdraw despite
+shown balance and despite selection code that would work.
+
+MEDIUM operational: RAIDA 5 offline leaves Bank empty, blocking Bank-only
+export/consolidate until heal succeeds.
+
+No code was changed in this diagnosis pass.
+
+
+================================================================================
+BUILD 53 FOLLOW-UP (2026-08-05 ~21:57) — NOT THE SAME ERROR
+================================================================================
+Install: E:\20.123@giga  QMail.exe 9:55 PM, version.json buildNumber 53
+Log: E:\20.123@giga\Client_Data\main.log (session starting 21:56:08)
+Wallet still: Bank=0, Fracked=345 files
+
+Source tree already has the Bank+Fracked guard fix
+(api_handlers_locker.c: list Bank + Fracked; 404 only if BOTH empty;
+message "No coins in wallet"). Packaged release core:
+  D:\Code\p2\gui\release\win-unpacked\resources\backend\core.exe
+  8/5/2026 9:53:54 PM  size 2395136
+Note: E:\20.123@giga\core.exe is a STALE Jul 8 copy (2204672) and is NOT
+what Electron launches (packaged path is resources/backend inside the
+app). Do not debug that stray binary.
+
+NEW failure at 21:57:14 (after guard fix took effect):
+
+  GET /api/locker/upload
+  HttpResponse: status=500
+  {
+    "error": true,
+    "message": "Upload failed - insufficient RAIDA confirmations",
+    "code": 500,
+    "operation": "locker_upload",
+    "locker_key": "2QT-YGZU",
+    "successful_uploads": 0,
+    "failed_uploads": 25,
+    "raida_status_code": 34,
+    "detail": "Encryption validation failed"
+  }
+
+Preceding core line:
+
+  PutLocker: 0/24 pass, 23 rejected, 0 errors, 1 timeouts (1239 ms)
+
+Interpretation:
+  - Coin selection SUCCEEDED (request reached PutLocker / RAIDA). The old
+    "No coins in Bank" early abort is GONE for this build.
+  - Failure is now RAIDA wire crypto: status 34 =
+    RAIDA_STATUS_INVALID_ENCRYPTION ("Encryption validation failed" in
+    raida_status.c / raida_status.h).
+  - Boot health still: RAIDA 5 offline (is_available=0); FixEncryption
+    "1 RAIDA broken (no shared secret)"; FixEncryption ticket failures;
+    enc_fixed=0/1; fracked_fixed=0/345. Coins remain all-Fracked.
+  - Type 10 file encryption still off: wallet_is_encrypted=false, plaintext
+    bins. The 34s are client↔RAIDA shared-secret encryption, not Type 10.
+
+Build 52 vs 53:
+
+  | Build | HTTP | message                          | Stage reached         |
+  |-------|------|----------------------------------|-----------------------|
+  | 52    | 404  | No coins in Bank                 | Early Bank-only guard |
+  | 53    | 500  | insufficient RAIDA confirmations | PutLocker / status 34 |
+
+Next debug step (already supported — no code change required):
+
+  QMail.exe --debug
+  # optional: QMail.exe --port 8082 --debug
+
+  electron.cjs forwards --debug as core -debug; F12 for renderer DevTools.
+  Repro locker withdraw once; capture main.log for PutLocker per-RAIDA
+  status lines and encryption-key selection around the upload.
+
+No code was changed for this build-53 note.

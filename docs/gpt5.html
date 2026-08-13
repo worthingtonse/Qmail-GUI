@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QMail Fanned Card List Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d15;
+      --pane: #101620;
+      --pane-2: #151c28;
+      --card: #192330;
+      --card-bottom: #111923;
+      --line: rgba(188, 205, 229, 0.14);
+      --line-strong: rgba(188, 205, 229, 0.28);
+      --text: #f4f7fb;
+      --muted: #8e9bad;
+      --accent: #a783ff;
+      --accent-2: #65c9ff;
+      --success: #42d59b;
+      --warning: #ffc44f;
+      --danger: #ff7187;
+      --radius: 14px;
+      --motion: 180ms;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(112, 82, 211, 0.22), transparent 34%),
+        radial-gradient(circle at 90% 100%, rgba(35, 163, 207, 0.16), transparent 38%),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    .prototype {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: 100%;
+    }
+
+    .prototype-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 15px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(12, 17, 27, 0.84);
+      backdrop-filter: blur(18px);
+    }
+
+    .prototype-header h1,
+    .prototype-header p { margin: 0; }
+
+    .prototype-header h1 {
+      font-size: 18px;
+      letter-spacing: -0.01em;
+    }
+
+    .prototype-header p {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .principles {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 7px;
+    }
+
+    .principle {
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.035);
+      color: #c8d1df;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(365px, 470px) minmax(360px, 1fr);
+      min-height: 0;
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      border-inline: 1px solid var(--line);
+      background: rgba(9, 13, 21, 0.42);
+    }
+
+    .mail-pane {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--line);
+      background: rgba(15, 21, 31, 0.92);
+    }
+
+    .mail-toolbar {
+      position: relative;
+      z-index: 50;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 22, 32, 0.94);
+    }
+
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .search svg { color: var(--muted); flex: none; }
+
+    .search input {
+      min-width: 0;
+      width: 100%;
+      padding: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+    }
+
+    .search input::placeholder { color: #718095; }
+
+    .sort-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 11px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .sort-row::-webkit-scrollbar { display: none; }
+
+    .sort-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .sort-button {
+      padding: 5px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: transparent;
+      color: #bbc5d4;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .sort-button.active {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #0b1020;
+      box-shadow: 0 5px 18px rgba(123, 119, 255, 0.3);
+    }
+
+    /* The list scrolls. Its children never shrink to fit this viewport. */
+    .card-list {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      padding: 15px 17px 28px 13px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      isolation: isolate;
+      scrollbar-gutter: stable;
+    }
+
+    .card-list::-webkit-scrollbar { width: 10px; }
+    .card-list::-webkit-scrollbar-track { background: transparent; }
+    .card-list::-webkit-scrollbar-thumb {
+      border: 3px solid transparent;
+      border-radius: 999px;
+      background: #354152;
+      background-clip: padding-box;
+    }
+
+    /*
+      Correctness rule: flex: 0 0 auto. Each card owns its complete natural
+      height, so its visual content and hit box cannot drift apart.
+    */
+    .mail-card {
+      --fan-x: 0px;
+      --lift: 0px;
+      --scale: 1;
+      position: relative;
+      z-index: 1;
+      flex: 0 0 auto;
+      width: calc(100% - 7px);
+      min-height: 126px;
+      margin-left: var(--fan-x);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--text) 7%, var(--card)) 0%,
+          var(--card) 34%,
+          color-mix(in srgb, #000 16%, var(--card-bottom)) 100%
+        );
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.08) inset,
+        0 9px 17px rgba(0, 0, 0, 0.23);
+      isolation: isolate;
+      transform: translateY(var(--lift)) scale(var(--scale));
+      transform-origin: center;
+      transition:
+        transform var(--motion) ease,
+        border-color var(--motion) ease,
+        box-shadow var(--motion) ease,
+        background var(--motion) ease;
+    }
+
+    .mail-card[data-fan="1"] { --fan-x: 2px; }
+    .mail-card[data-fan="2"] { --fan-x: 5px; }
+    .mail-card[data-fan="3"] { --fan-x: 1px; }
+
+    /* Decorative cards imply layers, but never receive a pointer event. */
+    .mail-card::before,
+    .mail-card::after {
+      content: "";
+      position: absolute;
+      inset: 5px -4px -5px 4px;
+      z-index: -1;
+      border: 1px solid rgba(190, 208, 232, 0.11);
+      border-radius: inherit;
+      background: #0c121c;
+      pointer-events: none;
+    }
+
+    .mail-card::after {
+      inset: 9px -7px -9px 7px;
+      z-index: -2;
+      border-color: rgba(190, 208, 232, 0.07);
+      background: #080d14;
+    }
+
+    .mail-card:hover,
+    .mail-card:focus-within {
+      --lift: -3px;
+      --scale: 1.005;
+      z-index: 5;
+      border-color: rgba(167, 131, 255, 0.58);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.13) inset,
+        0 15px 26px rgba(0, 0, 0, 0.38),
+        0 0 22px rgba(132, 105, 235, 0.12);
+    }
+
+    .mail-card.unread {
+      background:
+        linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent-2) 13%, var(--card)) 0%,
+          color-mix(in srgb, var(--accent-2) 5%, var(--card)) 42%,
+          color-mix(in srgb, #000 16%, var(--card-bottom)) 100%
+        );
+    }
+
+    /* Selected comes after unread and remains fully opaque when read changes. */
+    .mail-card.selected {
+      z-index: 3;
+      border-color: rgba(167, 131, 255, 0.78);
+      background:
+        linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--accent) 25%, var(--card)) 0%,
+          color-mix(in srgb, var(--accent) 13%, var(--card)) 48%,
+          color-mix(in srgb, var(--accent) 8%, var(--card-bottom)) 100%
+        );
+      box-shadow:
+        4px 0 0 var(--accent) inset,
+        0 1px 0 rgba(255, 255, 255, 0.15) inset,
+        0 13px 25px rgba(0, 0, 0, 0.35),
+        0 0 24px rgba(167, 131, 255, 0.14);
+    }
+
+    .mail-card.menu-open { z-index: 30; }
+
+    /* One native button owns the whole card. Secondary controls sit above it. */
+    .card-open {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      width: 100%;
+      border: 0;
+      border-radius: inherit;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .card-open:focus-visible {
+      outline: 2px solid var(--accent-2);
+      outline-offset: 3px;
+    }
+
+    .card-content {
+      position: relative;
+      z-index: 2;
+      padding: 12px 13px 13px 15px;
+      pointer-events: none;
+    }
+
+    .card-header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 9px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .card-action {
+      position: relative;
+      z-index: 3;
+      display: inline-grid;
+      place-items: center;
+      width: 29px;
+      height: 29px;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      pointer-events: auto;
+    }
+
+    .card-action:hover,
+    .card-action:focus-visible {
+      border-color: var(--line-strong);
+      outline: 0;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+    }
+
+    .card-action.starred { color: var(--warning); }
+
+    .sender {
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 780;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .unread .sender,
+    .unread .subject { font-weight: 820; }
+
+    .timestamp {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .card-body {
+      display: grid;
+      grid-template-columns: auto auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding-top: 10px;
+    }
+
+    .read-dot {
+      width: 27px;
+      height: 27px;
+      border-color: var(--line);
+      color: #6f7d90;
+    }
+
+    .unread .read-dot {
+      color: var(--accent);
+      filter: drop-shadow(0 0 6px rgba(167, 131, 255, 0.35));
+    }
+
+    .avatar {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 58px;
+      border: 2px solid var(--avatar, #be7cff);
+      border-radius: 11px 11px 15px 15px;
+      background:
+        linear-gradient(145deg, color-mix(in srgb, var(--avatar, #be7cff) 32%, #172130), #091019 58%);
+      color: var(--avatar, #be7cff);
+      font-size: 19px;
+      font-weight: 900;
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--avatar, #be7cff) 18%, transparent),
+        0 7px 12px rgba(0, 0, 0, 0.32);
+    }
+
+    .message-copy { min-width: 0; }
+
+    .subject,
+    .preview {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .subject {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .preview {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .menu-popover {
+      position: absolute;
+      top: 43px;
+      left: 12px;
+      z-index: 40;
+      display: none;
+      width: 170px;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: #111925;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.52);
+      pointer-events: auto;
+    }
+
+    .menu-open .menu-popover { display: grid; }
+
+    .menu-popover button {
+      padding: 8px 9px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #c4cedc;
+      font-size: 12px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .menu-popover button:hover { background: rgba(255, 255, 255, 0.065); }
+
+    .reader {
+      display: grid;
+      place-content: center;
+      min-width: 0;
+      padding: clamp(28px, 5vw, 64px);
+      background:
+        linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    .reader-card {
+      width: min(540px, 100%);
+      padding: clamp(24px, 4vw, 44px);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(18, 25, 36, 0.82);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+      backdrop-filter: blur(12px);
+    }
+
+    .reader-kicker {
+      color: var(--accent-2);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .reader-card h2 {
+      margin: 10px 0 5px;
+      font-size: clamp(24px, 4vw, 38px);
+      letter-spacing: -0.035em;
+      line-height: 1.08;
+    }
+
+    .reader-meta { color: var(--muted); font-size: 13px; }
+
+    .reader-body {
+      margin-top: 26px;
+      color: #c6d0de;
+      font-size: 15px;
+      line-height: 1.75;
+    }
+
+    .reader-proof {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-top: 28px;
+      padding: 12px 14px;
+      border: 1px solid rgba(66, 213, 155, 0.25);
+      border-radius: 11px;
+      background: rgba(66, 213, 155, 0.075);
+      color: #9ce8c8;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .reader-proof strong { color: var(--success); }
+
+    @media (max-width: 760px) {
+      .prototype-header { align-items: flex-start; flex-direction: column; }
+      .principles { justify-content: flex-start; }
+      .workspace { grid-template-columns: 1fr; }
+      .mail-pane { border-right: 0; }
+      .reader { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+      .mail-card { --lift: 0px !important; --scale: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype">
+    <header class="prototype-header">
+      <div>
+        <h1>QMail · Fanned Message Cards</h1>
+        <p>Standalone interaction prototype — scroll, hover, select, star, and toggle read state.</p>
+      </div>
+      <div class="principles" aria-label="Prototype principles">
+        <span class="principle">Natural card height</span>
+        <span class="principle">Opaque surfaces</span>
+        <span class="principle">Pointer-safe layers</span>
+        <span class="principle">CSS only</span>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <section class="mail-pane" aria-label="Inbox card prototype">
+        <div class="mail-toolbar">
+          <label class="search">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+            <input id="search" type="search" placeholder="Search all mail…" aria-label="Search messages">
+          </label>
+          <div class="sort-row" aria-label="Sort messages">
+            <span class="sort-label">Sort:</span>
+            <button class="sort-button active" type="button">Newest</button>
+            <button class="sort-button" type="button">Unread</button>
+            <button class="sort-button" type="button">Income</button>
+            <button class="sort-button" type="button">Starred</button>
+          </div>
+        </div>
+        <div id="card-list" class="card-list" aria-label="Messages"></div>
+      </section>
+
+      <section class="reader" aria-live="polite">
+        <article class="reader-card">
+          <div class="reader-kicker">Selected message</div>
+          <h2 id="reader-subject">Choose a card</h2>
+          <div id="reader-meta" class="reader-meta">Hover to lift it from the deck, then click.</div>
+          <div id="reader-body" class="reader-body">
+            This panel confirms which message actually received the click. The visible card and the clickable card now share the same complete rectangle.
+          </div>
+          <div class="reader-proof">
+            <span aria-hidden="true">✓</span>
+            <span><strong>Interaction proof:</strong> selecting an unread message marks it read while its selected surface stays solid and clearly visible.</span>
+          </div>
+        </article>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const messages = [
+      { id: 1, sender: "38.152@byte", time: "7:23 PM", subject: "Coin import success", preview: "Your imported coins passed authentication and are ready.", initials: "CI", color: "#ff9c45", unread: true },
+      { id: 2, sender: "38.152@byte", time: "4:59 PM", subject: "Aliases ??", preview: "How does one set up an alias linked to a mailbox?", initials: "A?", color: "#ff9c45", unread: true },
+      { id: 3, sender: "118.3@kilo", time: "Wed 10:54 AM", subject: "Login link", preview: "Here is the secure link we discussed yesterday.", initials: "LL", color: "#67d8ce", unread: false },
+      { id: 4, sender: "118.3@kilo", time: "Wed 10:49 AM", subject: "My device number", preview: "The new device has been enrolled successfully.", initials: "DN", color: "#67d8ce", unread: false },
+      { id: 5, sender: "40.139@bit", time: "Jul 21 4:05 PM", subject: "Re: TEST", preview: "Thank you, professor. Everything is working now.", initials: "RT", color: "#ffe44f", unread: false },
+      { id: 6, sender: "40.139@bit", time: "Jul 20 2:20 PM", subject: "TEST", preview: "This message checks the new delivery workflow.", initials: "T", color: "#ffe44f", unread: false },
+      { id: 7, sender: "119.135@kilo", time: "Jul 18 4:51 PM", subject: "Thursday Run Complete", preview: "The quiet-chamber run completed with no errors.", initials: "TR", color: "#56e0b6", unread: true, starred: true },
+      { id: 8, sender: "38.112@byte", time: "Jul 18 4:48 PM", subject: "Test Plan for Thursday", preview: "Mira and Priya have reserved the lab for the test.", initials: "TP", color: "#f2a35d", unread: false },
+      { id: 9, sender: "119.135@kilo", time: "Jul 18 4:46 PM", subject: "Receipt attached", preview: "The signed receipt and validation report are attached.", initials: "RA", color: "#56e0b6", unread: true, starred: true },
+      { id: 10, sender: "51.254@bit", time: "Jul 17 9:13 AM", subject: "Design review notes", preview: "I added comments about spacing and keyboard behavior.", initials: "DR", color: "#b48cff", unread: false },
+      { id: 11, sender: "83.9@mega", time: "Jul 16 6:02 PM", subject: "Wallet backup complete", preview: "Your encrypted backup was created successfully.", initials: "WB", color: "#68b7ff", unread: true },
+      { id: 12, sender: "12.204@byte", time: "Jul 15 11:30 AM", subject: "Lunch next week?", preview: "Tuesday or Wednesday would both work for me.", initials: "LN", color: "#ff7fa5", unread: false },
+      { id: 13, sender: "7.44@giga", time: "Jul 14 8:12 AM", subject: "Quarterly summary", preview: "The full summary is ready for your review.", initials: "QS", color: "#ffc75a", unread: false },
+      { id: 14, sender: "101.16@kilo", time: "Jul 12 3:27 PM", subject: "Welcome to QMail", preview: "A few tips to help you get started securely.", initials: "WQ", color: "#9a8cff", unread: true }
+    ];
+
+    const icons = {
+      menu: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>',
+      star: '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"></path></svg>',
+      mail: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg>',
+      open: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9h18v10H3z"></path><path d="m3 10 9 5 9-5M7 9l5-4 5 4"></path></svg>'
+    };
+
+    const list = document.getElementById("card-list");
+    const search = document.getElementById("search");
+    let selectedId = null;
+    let menuId = null;
+
+    function render() {
+      const query = search.value.trim().toLowerCase();
+      const visible = messages.filter((message) =>
+        [message.sender, message.subject, message.preview].some((value) => value.toLowerCase().includes(query))
+      );
+
+      list.innerHTML = visible.map((message, index) => `
+        <article
+          class="mail-card ${message.unread ? "unread" : ""} ${message.id === selectedId ? "selected" : ""} ${message.id === menuId ? "menu-open" : ""}"
+          data-id="${message.id}"
+          data-fan="${index % 4}"
+        >
+          <button class="card-open" type="button" aria-label="Open ${message.subject}"></button>
+          <div class="card-content">
+            <div class="card-header">
+              <button class="card-action menu-button" type="button" aria-label="Message actions" aria-expanded="${message.id === menuId}">${icons.menu}</button>
+              <span class="sender">${message.sender}</span>
+              <span class="timestamp">${message.time}</span>
+              <button class="card-action star-button ${message.starred ? "starred" : ""}" type="button" aria-label="${message.starred ? "Remove star" : "Add star"}">${icons.star}</button>
+            </div>
+            <div class="card-body">
+              <button class="card-action read-dot read-button" type="button" aria-label="Mark as ${message.unread ? "read" : "unread"}">${message.unread ? icons.mail : icons.open}</button>
+              <span class="avatar" style="--avatar:${message.color}">${message.initials}</span>
+              <span class="message-copy">
+                <span class="subject">${message.subject}</span>
+                <span class="preview">${message.preview}</span>
+              </span>
+            </div>
+          </div>
+          <div class="menu-popover" role="menu">
+            <button type="button">Archive message</button>
+            <button type="button">Add sender to contacts</button>
+            <button type="button">Move to trash</button>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function selectMessage(message) {
+      selectedId = message.id;
+      message.unread = false;
+      document.getElementById("reader-subject").textContent = message.subject;
+      document.getElementById("reader-meta").textContent = `${message.sender} · ${message.time}`;
+      document.getElementById("reader-body").textContent = message.preview;
+      render();
+    }
+
+    list.addEventListener("click", (event) => {
+      const card = event.target.closest(".mail-card");
+      if (!card) return;
+      const message = messages.find((item) => item.id === Number(card.dataset.id));
+
+      if (event.target.closest(".menu-button")) {
+        menuId = menuId === message.id ? null : message.id;
+        render();
+        return;
+      }
+      if (event.target.closest(".star-button")) {
+        message.starred = !message.starred;
+        render();
+        return;
+      }
+      if (event.target.closest(".read-button")) {
+        message.unread = !message.unread;
+        render();
+        return;
+      }
+      if (event.target.closest(".menu-popover")) {
+        menuId = null;
+        render();
+        return;
+      }
+      if (event.target.closest(".card-open")) selectMessage(message);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (menuId && !event.target.closest(".mail-card.menu-open")) {
+        menuId = null;
+        render();
+      }
+    });
+
+    search.addEventListener("input", render);
+    document.querySelectorAll(".sort-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".sort-button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>

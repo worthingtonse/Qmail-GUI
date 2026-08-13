@@ -1,0 +1,472 @@
+================================================================================
+QMAIL EMAIL LIST — STACKED / FANNED CARD ANALYSIS
+Report: grok.cards.txt
+Author model: Grok 4.5 (xAI)
+Date: 2026-08-02
+Codebase: D:\Code\p2\gui  (branch phase2)
+Primary surfaces: src/qmail/screens/EmailListPane.{jsx,css}, EmailListItem.jsx
+Reference capture: docs/stacking.png / user screenshot of dense inbox
+================================================================================
+
+
+1. PURPOSE
+----------
+When an inbox or sent folder holds many messages, the list visually “stacks”
+rows onto one another. That look is accidentally attractive — like cards in a
+deck — but interaction breaks: a click often selects the neighbor above or
+below, and the chosen row becomes transparent, which is confusing.
+
+This report explains why that happens in the current implementation, evaluates
+whether a deliberate fanned card-stack treatment is feasible, and compares
+CSS, SVG, and HTML5 Canvas approaches. It does not implement a fix; it is a
+design/engineering analysis only.
+
+
+2. CURRENT IMPLEMENTATION (AS BUILT)
+------------------------------------
+2.1 Structure
+  - EmailListPane renders a scrollable column (.email-list-pane__list) of
+    EmailListItem rows.
+  - Each row is an <article role="button"> with two bands:
+      header  — ☰ menu, sender address/name, timestamp, star
+      body    — envelope/trash actions, ~4.5rem cartouche avatar, subject + preview
+  - Rows are normal document flow (flex column). There is no virtualized list
+    and no absolute positioning of items. Pagination defaults are large
+    enough (tens to hundreds of rows) that many cards are on-screen at once
+    in a narrow ~22.5rem list pane.
+
+2.2 Relevant CSS (EmailListPane.css)
+  .email-list-pane__item {
+    position: relative;
+    min-height: 4.5rem;
+    background: var(--secondary-bg);          /* solid #151921 in dark theme */
+    transition: … transform … opacity …;
+  }
+
+  .email-list-pane__item:hover {
+    background: var(--card-hover);            /* rgba(255,255,255,0.05) */
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+    transform: translateY(calc(-1 * var(--space-xs)));  /* ~4px up */
+    /* NOTE: no z-index elevation on hover */
+  }
+
+  .email-list-pane__item--selected {
+    border-inline-start-color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+    /* fully see-through except a 10% accent wash */
+  }
+
+  .email-list-pane__item--unread  { translucent info wash }
+  .email-list-pane__item--pending { translucent warning wash }
+  .email-list-pane__item--loading { opacity: 0.7 }
+
+  .email-list-pane__item--menu-open { z-index: 30; }  /* only for popover */
+
+2.3 What is NOT present today
+  - No negative margin-bottom / margin-top to deliberately collapse rows.
+  - No per-index z-index, rotation, or scale for a deck fan.
+  - No hit-target isolation strategy (pointer-events layering beyond the
+    menu-open case).
+  - No depth gradient on the card face.
+
+The “stack of cards” sensation is therefore mostly emergent, not designed.
+
+
+3. WHY IT LOOKS LIKE A STACK (THE ACCIDENTAL AESTHETIC)
+-------------------------------------------------------
+Several independent choices combine into a deck-like reading when density is
+high:
+
+  A. Hover “pop from deck”
+     translateY(-4px) on hover is exactly the motion language of lifting a
+     card off a pile. Users correctly read it as card selection.
+
+  B. Two-band chrome per row
+     A header strip with its own bottom border, then a body with a large
+     avatar, reads as a physical card edge + face rather than a flat table
+     row. Sequential cards feel laminated.
+
+  C. Translucent paints
+     Hover, selected, unread, and pending all use low-alpha color-mix or
+     rgba surfaces. When one card lifts, neighbors show through — which
+     reinforces “stack” even when layout boxes barely overlap.
+
+  D. Narrow pane + many messages
+     --email-list-width is 22.5rem. With 50+ items and tall avatars, the
+     eye sees a continuous pile more than a sparse list. Scroll position
+     keeps many card edges in peripheral vision at once.
+
+  E. Transform vs layout mismatch (subtle geometric interpenetration)
+     CSS transforms do not affect layout flow. The hovered card paints
+     ~4px into the previous row’s box while leaving a 4px “ghost” strip
+     at its own bottom. At density, those strips and inset borders read
+     as layered edges.
+
+None of this is a bug in isolation. Together they create the appealing
+accident the product owner wants to keep — if hit targets and selection
+feedback can be made trustworthy.
+
+
+4. WHY CLICKS HIT THE WRONG MESSAGE
+-----------------------------------
+Root cause is interaction geometry, not bad onClick wiring.
+
+4.1 Transform moves paint and hit-testing, not layout
+  On hover, the item’s visual and hit region move up by ~space-xs, but its
+  layout slot stays put. The vacated band at the bottom of the layout box
+  is no longer owned by the hovered item for pointer events. Whatever
+  sits there in stacking order (often the next sibling’s top edge, or the
+  list background) receives the click instead.
+
+4.2 No z-index promotion on hover/selected
+  Only --menu-open raises z-index (to 30). A hovered or selected card
+  does not reliably paint above both neighbors. Later DOM siblings paint
+  on top of earlier ones at the same stacking level. Moving the pointer
+  near a shared edge therefore oscillates which article is the event
+  target — matching “whichever one you click, it feels like above or
+  below.”
+
+4.3 Large composite hit surface
+  The whole <article> is the click target (role="button"). Header text,
+  avatar, subject, and empty padding all select the message. Small
+  mis-hits from (4.1)/(4.2) still fire handleSelect on the wrong email.
+
+4.4 Child controls stopPropagation correctly, but don’t fix row identity
+  Star, trash, menu, copy-address, and attachment handlers call
+  stopPropagation. That prevents accidental select when using those
+  controls; it does not fix which row is under the cursor when the
+  pointer is over the shared overlap zone.
+
+4.5 Dense list amplifies edge cases
+  With few messages, a 4px lift is harmless. With a full page of tall
+  cards, every row’s top and bottom edges are near another interactive
+  article. Error rate scales with density — exactly when the stack look
+  appears.
+
+Summary: the same motion that makes cards feel choosable from a deck is
+what scrambles hit testing, because elevation is only a transform, not a
+true stack order change.
+
+
+5. WHY SELECTION FEELS LIKE “GOING TRANSPARENT”
+-----------------------------------------------
+Observed UX: “Whichever one you click on, it becomes transparent and that
+is confusing.”
+
+Mechanism:
+  --selected replaces the solid secondary-bg with:
+    color-mix(in srgb, var(--accent-primary) 10%, transparent)
+
+  That is ~10% purple haze over whatever is behind the element. Behind a
+  non-overlapping row is the list background (similar darkness), so the
+  card appears to wash out or ghost. If a neighbor is partially under the
+  lifted transform, that neighbor’s content shows through the selected
+  face — the selected card literally looks like a see-through sheet.
+
+Additional opacity sources:
+  - hover uses near-clear card-hover (5% white)
+  - loading rows use opacity: 0.7
+  - unread/pending washes are also translucent
+
+The left accent border and bold unread weight are the only strong “this
+is active” signals, and they lose to the transparency.
+
+This is independent of the fan idea: even a flat list should use an
+opaque (or high-opacity) selected surface so selection never reads as
+disappearance.
+
+
+6. DESIRED DIRECTION (PRODUCT INTENT)
+-------------------------------------
+Keep / intensify the delightful parts:
+  - Cards that feel lifted from a deck on hover
+  - Dense, stacked, slightly luxurious list when mail volume is high
+  - Optional fan-out so depth is readable at a glance
+
+Fix the broken parts:
+  - Click target must match the card the eye believes is on top
+  - Selected card must stay solid and obviously chosen
+  - Stacking should be intentional geometry, not accidental bleed
+
+Suggested visual metaphor (from the request):
+  “A stack of cards that are fanned out… gradient where the top of the
+   card is lighter than the bottom so it gives the illusion that they
+   were stacked.” Hover already “pops up like cards being chosen from
+   the deck” — preserve that motion language.
+
+
+7. TECHNIQUE COMPARISON
+-----------------------
+
+7.1 Pure CSS (recommended primary path)
+  Feasibility: HIGH for this React list.
+  Maturity: “Card stack / deck / accordion peek” patterns have existed
+  for a decade+ (negative margins + z-index + hover expand). Modern CSS
+  improves them: color-mix, isolation, cascade layers, @media
+  (prefers-reduced-motion), container queries, scroll-driven animations
+  (optional polish).
+
+  Building blocks:
+    (1) Opaque card face
+        background: linear-gradient(
+          180deg,
+          color-mix(in srgb, var(--secondary-bg) 92%, white) 0%,
+          var(--secondary-bg) 55%,
+          color-mix(in srgb, var(--secondary-bg) 85%, black) 100%
+        );
+        Optional thin top highlight + bottom edge shadow for thickness.
+
+    (2) Controlled stack compression (optional density mode)
+        .email-list-pane__item + .email-list-pane__item {
+          margin-top: calc(-1 * var(--stack-overlap, 0px));
+        }
+        Set --stack-overlap only when count > N or a “compact cards”
+        preference is on. Start with 0 in normal mode; enable overlap
+        deliberately rather than by transform side-effect.
+
+    (3) True stack order
+        style={{ zIndex: index + 1 }} or CSS counter / sibling rules.
+        Hover / selected / focus-within:
+          z-index: 1000 (or calc(var(--base-z) + 1000));
+          transform: translateY(-6px) scale(1.01);
+        This is the critical hit-test fix: the card under the pointer
+        must be the topmost stacking context.
+
+    (4) Fan (subtle)
+        transform: rotate(calc((var(--fan-i) - var(--fan-mid)) * 0.35deg));
+        Keep rotation tiny (±1–2°) in a mail list or text becomes hard
+        to scan. Stronger fan is better for a collapsed “pile” control
+        than for every visible row.
+
+    (5) Expand-on-hover if compressed
+        When using negative margin stack, hover/focus should restore
+        margin (or pad neighbors) so the full card is readable and the
+        hit box matches the painted face.
+
+    (6) isolation: isolate on .email-list-pane__list
+        Contains z-index wars with the rest of the dashboard.
+
+    (7) prefers-reduced-motion
+        Already zeros transforms on items; keep that. Fan/stack motion
+        must respect --motion-scale and reduced-motion.
+
+  Pros:
+    - Works with existing EmailListItem DOM, a11y, keyboard, React state
+    - GPU-friendly transforms; no canvas repaint tax
+    - Easy theming via design tokens already in tokens.css
+    - Incremental: fix z-index + opacity first, add fan later
+
+  Cons:
+    - Extreme fan angles fight text legibility in a utilitarian mail UI
+    - Negative-margin stacks need careful focus/keyboard scroll handling
+    - Very large lists (200+) still want virtualization eventually
+      (orthogonal to card styling)
+
+7.2 SVG
+  Feasibility: MEDIUM for decoration, LOW as the list host.
+
+  Good uses:
+    - Drop-shadow filters, edge ribbons, clipped stack silhouettes
+    - A single decorative “deck” glyph in empty states
+    - Cartouche frames (already SVG-based elsewhere in QMail avatars)
+
+  Poor uses:
+    - Hosting 50 interactive foreignObject cards: heavy, awkward
+      event models, worse text editing/selection, harder a11y
+    - Replacing the list layout; CSS flex/grid already solves flow
+
+  Verdict: keep SVG for avatar/chrome accents. Do not rebuild the inbox
+  as an SVG scene graph.
+
+7.3 HTML5 Canvas
+  Feasibility: HIGH for a toy demo, LOW for production mail.
+
+  Pros:
+    - Complete control over fan angles, lighting, 3D-ish perspective
+    - Can draw a literal deck with perspective and shuffle animations
+
+  Cons:
+    - Loses native text, selection, find-in-page, screen readers unless
+      a full parallel accessibility tree is maintained
+    - HiDPI blurriness unless carefully scaled
+    - Conflicts with React’s declarative list; every scroll/hover needs
+      redraw
+    - Click mapping requires manual hit regions (ironically reintroduces
+      the exact bug class we’re solving, in custom code)
+    - Overkill for “gradient + slight fan + z-index”
+
+  Verdict: not appropriate for the interactive inbox/sent list. A canvas
+  experiment could still be used offline to prototype the lighting look,
+  then bake the winning gradient into CSS.
+
+7.4 Hybrid (best practical recipe)
+  CSS for layout, stacking, hover lift, selection, and gradients.
+  Optional SVG filters only if a richer shadow is needed later.
+  No canvas for the live list.
+
+
+8. RECOMMENDED DESIGN SPEC (NON-BINDING)
+----------------------------------------
+Phase A — Correctness (must-have; small CSS change)
+  1. Hover and selected (and focus-within) raise z-index above siblings.
+  2. Selected background becomes opaque or near-opaque solid surface
+     (e.g. color-mix of accent into secondary-bg at 18–24%, not into
+     transparent). Keep the left accent bar.
+  3. Hover background also stays readable (card-hover over solid base,
+     not pure glass).
+  4. Optional: slight box-shadow on hover/selected (not only inset) so
+     the lifted card casts onto the pile — sells depth and clarifies
+     which face is top.
+
+Phase B — Intentional stack polish
+  5. Per-card vertical gradient (lighter top edge → darker bottom) as
+     requested, using theme tokens so light theme still works.
+  6. Optional compact density when message count on the page exceeds a
+     threshold: small negative margin + higher z-index by index + hover
+     expands the card. Default density remains non-overlapping for
+     power users who scan subjects quickly.
+  7. Very mild fan only if product still wants it after Phase A/B
+     gradient; prefer 0° for body text rows.
+
+Phase C — Out of scope unless requested
+  8. List virtualization for huge folders
+  9. Drag-to-reorder / deck shuffle animations
+  10. Canvas prototype of lighting (design only)
+
+
+9. CONCRETE CSS SKETCH (ILLUSTRATIVE, NOT APPLIED)
+--------------------------------------------------
+/* Stack containment */
+.email-list-pane__list {
+  isolation: isolate;
+}
+
+/* Card face with top-light / bottom-shadow gradient */
+.email-list-pane__item {
+  position: relative;
+  z-index: 1;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-primary) 6%, var(--secondary-bg)) 0%,
+      var(--secondary-bg) 40%,
+      color-mix(in srgb, black 18%, var(--secondary-bg)) 100%
+    );
+  /* layout unchanged unless compact mode sets --stack-overlap */
+  margin-top: 0;
+}
+
+.email-list-pane__list--compact .email-list-pane__item + .email-list-pane__item {
+  margin-top: calc(-1 * var(--stack-overlap, 1.25rem));
+}
+
+/* Bring the chosen card to the top of the deck */
+.email-list-pane__item:hover,
+.email-list-pane__item:focus-within,
+.email-list-pane__item--selected {
+  z-index: 50;
+}
+
+.email-list-pane__item:hover {
+  transform: translateY(calc(-1 * var(--space-sm))) scale(1.01);
+  box-shadow: var(--shadow-md);
+  /* solid-ish hover surface — not pure glass */
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-primary) 10%, var(--secondary-bg)) 0%,
+      color-mix(in srgb, var(--accent-primary) 8%, var(--secondary-bg)) 100%
+    );
+}
+
+.email-list-pane__item--selected {
+  /* opaque selection — never transparent */
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-primary) 22%, var(--secondary-bg)) 0%,
+      color-mix(in srgb, var(--accent-primary) 12%, var(--secondary-bg)) 100%
+    );
+}
+
+/* Optional tiny fan via custom property set from React: style={{'--fan-i': i}} */
+.email-list-pane__list--fan .email-list-pane__item {
+  transform: rotate(calc((var(--fan-i, 0) - var(--fan-mid, 0)) * 0.25deg));
+}
+.email-list-pane__list--fan .email-list-pane__item:hover {
+  transform: translateY(calc(-1 * var(--space-sm))) scale(1.01) rotate(0deg);
+}
+
+React would pass zIndex or --fan-i from the map index in EmailListPane.
+Menu-open should keep a still higher z-index (already 30; raise to e.g.
+100 so it wins over hover’s 50).
+
+
+10. ACCESSIBILITY & MOTION
+--------------------------
+  - Maintain role="button", tabIndex, Enter/Space activation.
+  - focus-visible outline must remain above the stack (z-index + outline).
+  - Compact/fan modes must not trap keyboard focus or skip items.
+  - prefers-reduced-motion: disable translate/scale/rotate; keep opaque
+    selected styles and z-index (those are not purely decorative).
+  - Contrast: gradient ends must keep subject/sender text at readable
+    contrast against both light and dark themes.
+  - Screen readers: still a list of articles; do not replace with a
+    single canvas bitmap.
+
+
+11. RISK REGISTER
+-----------------
+  R1  Negative-margin compact mode reintroduces hit bugs if hover does
+      not expand + raise z-index. Mitigation: ship Phase A first.
+  R2  Strong fan angles reduce scannability of subjects. Mitigation:
+      cap rotation; prefer gradient depth over rotation.
+  R3  box-shadow on every hover in a long list can be costly on low-end
+      GPUs. Mitigation: short transition, limit shadow blur, respect
+      reduced motion.
+  R4  Selected opaque color must work in light theme (themes.css
+      overrides). Mitigation: always color-mix against var(--secondary-bg)
+      / var(--card-bg), never hard-coded hex alone.
+  R5  Menu popover currently relies on item z-index 30; any new hover
+      z-index must leave menu-open on top.
+
+
+12. CONCLUSION
+--------------
+The stacked-card look is real, mostly accidental, and worth keeping as a
+directed design once interaction is repaired.
+
+The click-wrong-row bug comes from hover translateY without z-index
+promotion, amplified by density and a full-row hit target. The
+“becomes transparent” confusion is the selected state’s use of a
+mostly transparent background.
+
+A fanned, gradient-shaded deck is achievable entirely with CSS (classic
+negative-margin / z-index stack techniques plus modern color-mix
+gradients). SVG is optional decoration. HTML5 Canvas is the wrong tool
+for an interactive mail list.
+
+Recommended path:
+  1) Fix z-index + opaque selection/hover (correctness).
+  2) Add top-light card gradients (illusion of stacked thickness).
+  3) Optionally add a compact stacked density mode with expand-on-hover.
+  4) Treat aggressive fan rotation as a later, optional flourish.
+
+No code was changed for this report.
+
+
+13. FILE MAP (FOR A FUTURE IMPLEMENTER)
+---------------------------------------
+  src/qmail/screens/EmailListPane.css   — item, hover, selected, list
+  src/qmail/screens/EmailListPane.jsx   — map index → style/CSS vars
+  src/qmail/screens/EmailListItem.jsx   — article class names, a11y
+  src/qmail/screens/QMailDashboard.css  — --email-list-width, panes
+  src/styles/tokens.css                 — --space-*, --secondary-bg,
+                                          --card-hover, --accent-*,
+                                          --motion-scale, shadows
+  src/styles/themes.css                 — light/dark overrides
+  docs/stacking.png                     — visual reference of density
+
+================================================================================
+END OF REPORT
+================================================================================
