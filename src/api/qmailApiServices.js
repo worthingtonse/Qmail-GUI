@@ -15,6 +15,7 @@ import {
 } from "../qmail/supportLogsFlow";
 import { normalizeTransferError } from "../qmail/transferErrors";
 import { BUILD_DATE, BUILD_NUMBER } from "../version";
+import { detectPlatformKey } from "../platform";
 
 // Port resolution priority:
 //   1. ?backendPort=N in the URL — set by Electron at boot to support
@@ -2995,52 +2996,146 @@ export const REMOTE_VERSION_URLS = [2, 5, 8, 14, 17, 20, 23].map(
   (n) => `https://raida${n}.cloudcoin.global/service/qmail_client_version`,
 );
 
+// PER-PLATFORM MANIFEST (preferred source)
+//
+// The legacy file above publishes ONE date for every platform, but Windows,
+// Linux and macOS builds ship on different days — a Mac user was told to
+// update the moment Windows shipped. The manifest fixes that by publishing
+// a date per platform.
+//
+// It is a SEPARATE endpoint (…_versions.php, plural) rather than extra
+// lines appended to the legacy file, because the legacy parser below
+// anchors ISO_DATE_PATTERN against the entire response body. Appending
+// anything to the old file makes every fielded client fail its version
+// check — and since that check is how clients learn an update exists, the
+// break would be self-sealing. A new URL cannot affect a client that never
+// requests it.
+export const REMOTE_VERSION_MANIFEST_URLS = REMOTE_VERSION_URLS.map((url) =>
+  url.replace("/qmail_client_version", "/qmail_client_versions"),
+);
+
 const VERSION_FETCH_TIMEOUT_MS = 8000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Checks whether a newer client build is available by fetching the remote
- * version date from several RAIDA mirrors and comparing the majority answer
- * to the local BUILD_DATE. Does NOT touch the local backend. YYYY-MM-DD
- * strings compare correctly with plain ordering (lexicographic ==
- * chronological for zero-padded ISO dates).
+ * Extracts the JSON object from a manifest response.
+ *
+ * The served file keeps a bare ISO date on its first line so that anything
+ * pointed at it still reads a usable version, with the JSON object on the
+ * lines after. We therefore parse from the first "{" rather than treating
+ * the whole body as JSON.
+ *
+ * @returns {Object|null} Parsed object, or null if the body has no valid
+ *   JSON object — callers fall back to the legacy endpoint.
+ */
+const parseVersionManifest = (body) => {
+  const text = String(body || "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Fetches one date from every mirror and returns the majority answer.
+ *
+ * Mirrors that fail, time out, or return something that isn't a bare ISO
+ * date are dropped before the tally, so a single broken server cannot
+ * decide the vote. The newest date breaks ties.
+ *
+ * @param {string[]} urls Mirrors to poll.
+ * @param {(body: string, url: string) => string|null} extract Pulls the
+ *   date out of a response body; returns null to discard that mirror.
+ * @returns {Promise<string|null>} Winning date, or null if no mirror
+ *   produced a usable one.
+ */
+const pollVersionMirrors = async (urls, extract) => {
+  const results = await Promise.allSettled(
+    urls.map(async (url) => {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error(`Version endpoint returned ${response.status}`);
+      }
+      const date = extract(await response.text(), url);
+      if (!date || !ISO_DATE_PATTERN.test(date)) {
+        // Defensive: don't count a malformed response toward the vote.
+        throw new Error(`Unexpected version format from ${url}`);
+      }
+      return date;
+    }),
+  );
+
+  const dates = results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value);
+  if (dates.length === 0) return null;
+
+  const tally = new Map();
+  dates.forEach((date) => tally.set(date, (tally.get(date) || 0) + 1));
+  const [winner] = [...tally.entries()].sort(
+    (a, b) => b[1] - a[1] || (b[0] > a[0] ? 1 : -1),
+  )[0];
+  return winner;
+};
+
+/**
+ * Checks whether a newer client build is available for THIS platform.
+ *
+ * Prefers the per-platform manifest so a Windows release doesn't nag Mac
+ * and Linux users, and falls back to the legacy single-date endpoint when
+ * the manifest is unreachable (old mirror, not yet deployed) or when the
+ * platform can't be identified. Does NOT touch the local backend.
+ *
+ * YYYY-MM-DD strings compare correctly with plain ordering (lexicographic
+ * == chronological for zero-padded ISO dates).
  *
  * @returns {Promise<{success: boolean, data?: {update_available: boolean,
- *   current_version: string, latest_version: string, message: string},
- *   error?: string}>}
+ *   current_version: string, latest_version: string, platform: string|null,
+ *   source: "manifest"|"legacy", message: string}, error?: string}>}
  */
 export const checkVersion = async () => {
   try {
-    const results = await Promise.allSettled(
-      REMOTE_VERSION_URLS.map(async (url) => {
-        const response = await fetch(url, {
-          method: "GET",
-          signal: AbortSignal.timeout(VERSION_FETCH_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          throw new Error(`Version endpoint returned ${response.status}`);
-        }
-        const text = (await response.text()).trim();
-        if (!ISO_DATE_PATTERN.test(text)) {
-          // Defensive: don't count a malformed response toward the vote.
-          throw new Error(`Unexpected version format: "${text}"`);
-        }
-        return text;
-      }),
-    );
+    const platform = detectPlatformKey();
+    let latestVersion = null;
+    let source = "manifest";
 
-    const dates = results
-      .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value);
-    if (dates.length === 0) {
-      throw new Error("No version mirror responded with a valid date");
+    if (platform) {
+      latestVersion = await pollVersionMirrors(
+        REMOTE_VERSION_MANIFEST_URLS,
+        (body) => {
+          const manifest = parseVersionManifest(body);
+          const value = manifest?.[platform];
+          // A manifest that omits this platform is not an error — that
+          // platform simply has no published build yet. Discard the mirror
+          // rather than falling back to a date meant for another OS.
+          return typeof value === "string" ? value.trim() : null;
+        },
+      );
     }
 
-    const tally = new Map();
-    dates.forEach((date) => tally.set(date, (tally.get(date) || 0) + 1));
-    const [latestVersion] = [...tally.entries()].sort(
-      (a, b) => b[1] - a[1] || (b[0] > a[0] ? 1 : -1),
-    )[0];
+    if (!latestVersion) {
+      // Manifest unavailable or platform unknown — the legacy endpoint is
+      // still correct, just not platform-aware.
+      source = "legacy";
+      latestVersion = await pollVersionMirrors(REMOTE_VERSION_URLS, (body) =>
+        String(body || "").trim(),
+      );
+    }
+
+    if (!latestVersion) {
+      throw new Error("No version mirror responded with a valid date");
+    }
 
     const updateAvailable = latestVersion > BUILD_DATE;
     return {
@@ -3049,6 +3144,8 @@ export const checkVersion = async () => {
         update_available: updateAvailable,
         current_version: BUILD_DATE,
         latest_version: latestVersion,
+        platform,
+        source,
         message: updateAvailable
           ? "A newer version of QMail is available."
           : "QMail is up to date.",

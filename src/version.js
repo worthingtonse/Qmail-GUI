@@ -9,9 +9,13 @@
 //  the renderer and main process can never drift.
 //
 //  BUILD_DATE is compared against the remote version files
-//  (https://raida<N>.cloudcoin.global/service/qmail_client_version,
-//  majority vote across the mirrors in qmailApiServices.REMOTE_VERSION_URLS)
-//  to decide whether an update is available.
+//  (https://raida<N>.cloudcoin.global/service/qmail_client_versions,
+//  majority vote across the mirrors in
+//  qmailApiServices.REMOTE_VERSION_MANIFEST_URLS) to decide whether an
+//  update is available. That manifest publishes one date per platform, so
+//  the comparison uses only this build's own platform key — see
+//  src/platform.js. Mirrors that don't serve the manifest yet fall back to
+//  the legacy single-date qmail_client_version endpoint.
 //
 //  FORMAT: "YYYY-MM-DD" (zero-padded). Both this value and the remote file
 //  use this exact format, which compares correctly with plain string
