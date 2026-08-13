@@ -47,22 +47,40 @@ node ci/stamp_ci_version.cjs
 npx vite build
 
 # --- 4) electron-builder (universal .app; we build the dmg ourselves) -------
-CSC_IDENTITY_AUTO_DISCOVERY=false \
-  npx electron-builder --config electron-builder.config.cjs --mac --universal --dir --publish=never
+#
+# WHO SIGNS THE APP: electron-builder, not us — but only when a Developer ID
+# is available. An Electron .app contains nested helper apps and dylibs
+# (libEGL, libGLESv2, libvk_swiftshader, the Helper (GPU|Renderer|Plugin)
+# bundles) which must each be signed inside-out, in order. `codesign --deep`
+# does NOT do that correctly: it produces an app that passes a local
+# --verify but comes back from Apple as Invalid. electron-builder knows the
+# right order, so when signing for real we let it drive and only sign the
+# bundled core ourselves first (it is an extraResource, not part of the app
+# bundle electron-builder walks).
+if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
+  echo "[package_mac] Developer ID signing: $MAC_SIGN_IDENTITY"
+  # The core is a bare Mach-O we ship as a resource. Sign it BEFORE
+  # electron-builder runs so it is already valid when the app is sealed.
+  codesign --force --timestamp --options runtime \
+    --entitlements "$ENTITLEMENTS" --sign "$MAC_SIGN_IDENTITY" backend/core
+  CSC_IDENTITY_AUTO_DISCOVERY=true CSC_NAME="$MAC_SIGN_IDENTITY" \
+    npx electron-builder --config electron-builder.config.cjs \
+      --mac --universal --dir --publish=never
+else
+  echo "[package_mac] no MAC_SIGN_IDENTITY -> ad-hoc signing (NOT notarizable)"
+  CSC_IDENTITY_AUTO_DISCOVERY=false \
+    npx electron-builder --config electron-builder.config.cjs \
+      --mac --universal --dir --publish=never
+fi
+
 APP="release/mac-universal/$APP_NAME"
 [[ -d "$APP" ]] || { echo "$APP not produced" >&2; exit 1; }
 echo "[package_mac] app arches: $(lipo -archs "$APP/Contents/MacOS/QMail")"
 
-# --- 5) sign ----------------------------------------------------------------
-if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
-  echo "[package_mac] signing with Developer ID: $MAC_SIGN_IDENTITY"
-  codesign --force --deep --timestamp --options runtime \
-    --entitlements "$ENTITLEMENTS" --sign "$MAC_SIGN_IDENTITY" \
-    "$APP/Contents/Resources/backend/core"
-  codesign --force --deep --timestamp --options runtime \
-    --entitlements "$ENTITLEMENTS" --sign "$MAC_SIGN_IDENTITY" "$APP"
-else
-  echo "[package_mac] no MAC_SIGN_IDENTITY -> ad-hoc signing"
+# --- 5) sign (ad-hoc fallback only) -----------------------------------------
+# With a real identity electron-builder already signed everything above.
+# Without one, ad-hoc sign so the app at least runs on the build machine.
+if [[ -z "${MAC_SIGN_IDENTITY:-}" ]]; then
   codesign --force --sign - "$APP/Contents/Resources/backend/core"
   codesign --force --deep --sign - --options runtime \
     --entitlements "$ENTITLEMENTS" "$APP"
@@ -77,6 +95,53 @@ mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "QMail" -srcfolder "$STAGE" -ov -format ULFO release/QMail.dmg
+
+# --- 6b) sign, notarize and staple the dmg ----------------------------------
+#
+# Without this a downloaded dmg is Gatekeeper-blocked on every Mac but the
+# one that built it, which is indistinguishable from "the app is broken" to
+# a user. Notarization is what makes the public download openable.
+#
+# CREDENTIALS STAY ON THE RUNNER. Apple credentials are NOT CI variables:
+# the build Mac already holds the Developer ID in its keychain and a stored
+# notarytool profile (default name qmail-notary, override with
+# MAC_NOTARY_PROFILE). CI passes no secrets; it just asks the machine that
+# already has them to use them.
+#
+# Skipped, loudly, when either piece is missing — an unsigned build is still
+# useful for smoke-testing a packaging change, and failing the job would
+# make a config gap look like a code break. publish_mac_bin.sh is what must
+# refuse to publish a non-notarized dmg; see the check there.
+NOTARY_PROFILE="${MAC_NOTARY_PROFILE:-qmail-notary}"
+
+if [[ -z "${MAC_SIGN_IDENTITY:-}" ]]; then
+  echo "[package_mac] WARNING: ad-hoc signed, skipping notarization."
+  echo "[package_mac] WARNING: this dmg is Gatekeeper-blocked off this machine."
+elif ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  echo "[package_mac] WARNING: no usable notarytool profile '$NOTARY_PROFILE'." >&2
+  echo "[package_mac] WARNING: dmg is signed but NOT notarized." >&2
+  echo "[package_mac] create one with: xcrun notarytool store-credentials $NOTARY_PROFILE" >&2
+else
+  # The dmg is a container and is signed separately from the app inside it.
+  echo "[package_mac] signing dmg"
+  codesign --force --timestamp --sign "$MAC_SIGN_IDENTITY" release/QMail.dmg
+
+  echo "[package_mac] submitting to Apple for notarization (this can take minutes)"
+  # --wait blocks until Apple returns a verdict; without it the staple below
+  # races the submission and fails.
+  xcrun notarytool submit release/QMail.dmg \
+    --keychain-profile "$NOTARY_PROFILE" --wait
+
+  # Staple the ticket into the dmg so Gatekeeper accepts it offline. This is
+  # the step whose absence only shows up on a machine with no network.
+  xcrun stapler staple release/QMail.dmg
+  xcrun stapler validate release/QMail.dmg
+
+  # Final proof, and the one line worth reading in the job log: this must say
+  # "source=Notarized Developer ID".
+  spctl -a -vv -t install release/QMail.dmg 2>&1 | sed 's/^/[package_mac] spctl: /'
+  echo "[package_mac] notarized + stapled OK"
+fi
 
 # --- 7) sidecars ------------------------------------------------------------
 dmg_sha="$(shasum -a 256 release/QMail.dmg | awk '{print $1}')"

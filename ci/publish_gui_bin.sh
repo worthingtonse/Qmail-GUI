@@ -78,7 +78,9 @@ sudo mv "\$BIN_DIR/.\$LATEST.tmp" "\$BIN_DIR/\$LATEST"
 sudo mkdir -p "\$BIN_DIR/archive/\$DATE"
 sudo cp -p "\$BIN_DIR/\$DATED" "\$BIN_DIR/archive/\$DATE/"
 cd "\$BIN_DIR"
-ls -1 | grep -v '^archive\$' | grep -v '^SHA256SUMS\$' | xargs sha256sum | sudo tee SHA256SUMS >/dev/null
+# Exclude *.sh — bin/ is public; a helper script left there should not be
+# served or listed as a release artifact. See publish_mac_bin.sh.
+ls -1 | grep -v '^archive\$' | grep -v '^SHA256SUMS\$' | grep -v '\.sh\$' | xargs sha256sum | sudo tee SHA256SUMS >/dev/null
 rm -rf "\$REMOTE_DIR"
 echo "published: \$DATED + \$LATEST + archive/\$DATE/ + SHA256SUMS"
 EOF

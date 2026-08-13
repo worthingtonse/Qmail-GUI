@@ -67,6 +67,8 @@ if [[ -f "\$CANON" ]]; then
 fi
 
 sudo install -m "\$MODE" "\$DATED" "\$CANON"
-ls -1 | grep -v '^archive\$' | grep -v '^SHA256SUMS\$' | xargs sha256sum | sudo tee SHA256SUMS >/dev/null
+# Exclude *.sh — bin/ is public; a helper script left there should not be
+# served or listed as a release artifact. See publish_mac_bin.sh.
+ls -1 | grep -v '^archive\$' | grep -v '^SHA256SUMS\$' | grep -v '\.sh\$' | xargs sha256sum | sudo tee SHA256SUMS >/dev/null
 echo "promoted: \$CANON <- \$DATED (previous kept as \$CANON.old); SHA256SUMS regenerated"
 EOF
