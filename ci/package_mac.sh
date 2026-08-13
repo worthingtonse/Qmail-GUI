@@ -18,7 +18,19 @@
 #
 # Signing env (optional; absent => ad-hoc, Gatekeeper-blocked off-machine):
 #   MAC_SIGN_IDENTITY   e.g. "Developer ID Application: Sean Worthington (9M3DA6YP8B)"
-#   (notarization gets its own env — notarytool + ASC key / app pw — when wired)
+#   MAC_KEYCHAIN        file keychain holding that identity; pinned into the
+#                       search list and into CSC_KEYCHAIN when set
+#   MAC_KEYCHAIN_PW     unlock password for MAC_KEYCHAIN (masked CI variable)
+#
+# Notarization env (optional; absent => signed but NOT notarized, and
+# publish_mac_bin.sh will then refuse to publish):
+#   MAC_NOTARY_KEY_P8   App Store Connect .p8 — a FILE-type CI variable, so
+#                       this is a PATH. Preferred: no keychain, so it works
+#                       while the Mac is locked.
+#   MAC_NOTARY_KEY_ID   the key id
+#   MAC_NOTARY_ISSUER   the issuer uuid
+#   MAC_NOTARY_PROFILE  fallback stored profile name (default qmail-notary);
+#                       only works while the GUI session is unlocked
 # =============================================================================
 set -euo pipefail
 
@@ -59,6 +71,24 @@ npx vite build
 # bundle electron-builder walks).
 if [[ -n "${MAC_SIGN_IDENTITY:-}" ]]; then
   echo "[package_mac] Developer ID signing: $MAC_SIGN_IDENTITY"
+
+  # The Developer ID lives in a FILE keychain. codesign only finds it if
+  # that keychain is in the user search list, and a malformed search list
+  # makes find-identity come up empty with no useful error — reproduced on
+  # the runner in MAC-18. Pin the list when we know which keychain to use.
+  if [[ -n "${MAC_KEYCHAIN:-}" ]]; then
+    echo "[package_mac] pinning keychain search list: $MAC_KEYCHAIN"
+    security list-keychains -d user -s "$MAC_KEYCHAIN" \
+      "$HOME/Library/Keychains/login.keychain-db"
+    # Unlock only if a password was provided; the keychain may already be
+    # unlocked, and an empty -p would fail the job for no reason.
+    if [[ -n "${MAC_KEYCHAIN_PW:-}" ]]; then
+      security unlock-keychain -p "$MAC_KEYCHAIN_PW" "$MAC_KEYCHAIN"
+    fi
+    # Pin it for electron-builder too, so it signs from the same keychain.
+    export CSC_KEYCHAIN="$MAC_KEYCHAIN"
+  fi
+
   # The core is a bare Mach-O we ship as a resource. Sign it BEFORE
   # electron-builder runs so it is already valid when the app is sealed.
   # codesign --sign wants the FULL identity string.
@@ -110,26 +140,62 @@ hdiutil create -volname "QMail" -srcfolder "$STAGE" -ov -format ULFO release/QMa
 # one that built it, which is indistinguishable from "the app is broken" to
 # a user. Notarization is what makes the public download openable.
 #
-# CREDENTIALS STAY ON THE RUNNER. Apple credentials are NOT CI variables:
-# the build Mac already holds the Developer ID in its keychain and a stored
-# notarytool profile (default name qmail-notary, override with
-# MAC_NOTARY_PROFILE). CI passes no secrets; it just asks the machine that
-# already has them to use them.
+# HOW THE CREDENTIALS ARE SUPPLIED — two ways, API key preferred.
 #
-# Skipped, loudly, when either piece is missing — an unsigned build is still
-# useful for smoke-testing a packaging change, and failing the job would
-# make a config gap look like a code break. publish_mac_bin.sh is what must
-# refuse to publish a non-notarized dmg; see the check there.
+# 1. App Store Connect API key (MAC_NOTARY_KEY_P8 / _KEY_ID / _ISSUER).
+#    MAC_NOTARY_KEY_P8 is a GitLab FILE variable, so CI drops the .p8 on
+#    disk and hands us the path. Nothing is read from any keychain, so this
+#    keeps working while the Mac is locked or logged out.
+#
+# 2. A stored notarytool keychain profile (MAC_NOTARY_PROFILE, default
+#    qmail-notary) — the fallback.
+#
+# WHY THE KEY IS PREFERRED: the profile created by a plain
+# `notarytool store-credentials` lands in the DATA-PROTECTION keychain,
+# which unlocks and locks with the GUI login session — not with
+# `security unlock-keychain`, which only reaches file keychains. The runner
+# is a LaunchAgent in the Aqua session, so notarization succeeded while
+# someone was logged in and failed the moment the screen locked (#1531
+# notarized, #1533 nine minutes later did not, same code, same machine).
+# App signing was unaffected because the Developer ID lives in a FILE
+# keychain — which is why a build could sign perfectly and still fail to
+# notarize. Diagnosed on the machine in MAC-18.
+#
+# Skipped, loudly, when no credential is available — an unsigned build is
+# still useful for smoke-testing a packaging change, and failing the job
+# would make a config gap look like a code break. publish_mac_bin.sh is
+# what refuses to publish a non-notarized dmg; see the check there.
 NOTARY_PROFILE="${MAC_NOTARY_PROFILE:-qmail-notary}"
+
+# Resolve which credential we have, newest-first. notary_args is passed
+# unquoted below, so no value may contain whitespace — paths and ids here
+# are CI-generated and do not.
+notary_args=""
+notary_kind=""
+if [[ -n "${MAC_NOTARY_KEY_P8:-}" && -n "${MAC_NOTARY_KEY_ID:-}" && -n "${MAC_NOTARY_ISSUER:-}" ]]; then
+  if [[ -s "$MAC_NOTARY_KEY_P8" ]]; then
+    notary_args="--key $MAC_NOTARY_KEY_P8 --key-id $MAC_NOTARY_KEY_ID --issuer $MAC_NOTARY_ISSUER"
+    notary_kind="App Store Connect API key ($MAC_NOTARY_KEY_ID)"
+  else
+    echo "[package_mac] WARNING: MAC_NOTARY_KEY_P8 is set but empty/missing: $MAC_NOTARY_KEY_P8" >&2
+    echo "[package_mac] WARNING: it must be a FILE-type CI variable, not a plain one." >&2
+  fi
+fi
+if [[ -z "$notary_args" ]] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  notary_args="--keychain-profile $NOTARY_PROFILE"
+  notary_kind="keychain profile '$NOTARY_PROFILE' (locks with the GUI session)"
+fi
 
 if [[ -z "${MAC_SIGN_IDENTITY:-}" ]]; then
   echo "[package_mac] WARNING: ad-hoc signed, skipping notarization."
   echo "[package_mac] WARNING: this dmg is Gatekeeper-blocked off this machine."
-elif ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
-  echo "[package_mac] WARNING: no usable notarytool profile '$NOTARY_PROFILE'." >&2
+elif [[ -z "$notary_args" ]]; then
+  echo "[package_mac] WARNING: no usable notarization credential." >&2
   echo "[package_mac] WARNING: dmg is signed but NOT notarized." >&2
-  echo "[package_mac] create one with: xcrun notarytool store-credentials $NOTARY_PROFILE" >&2
+  echo "[package_mac] set MAC_NOTARY_KEY_P8 (file) + MAC_NOTARY_KEY_ID + MAC_NOTARY_ISSUER," >&2
+  echo "[package_mac] or store a profile: xcrun notarytool store-credentials $NOTARY_PROFILE" >&2
 else
+  echo "[package_mac] notarizing via $notary_kind"
   # The dmg is a container and is signed separately from the app inside it.
   echo "[package_mac] signing dmg"
   codesign --force --timestamp --sign "$MAC_SIGN_IDENTITY" release/QMail.dmg
@@ -137,8 +203,8 @@ else
   echo "[package_mac] submitting to Apple for notarization (this can take minutes)"
   # --wait blocks until Apple returns a verdict; without it the staple below
   # races the submission and fails.
-  xcrun notarytool submit release/QMail.dmg \
-    --keychain-profile "$NOTARY_PROFILE" --wait
+  # shellcheck disable=SC2086  # notary_args is deliberately word-split
+  xcrun notarytool submit release/QMail.dmg $notary_args --wait
 
   # Staple the ticket into the dmg so Gatekeeper accepts it offline. This is
   # the step whose absence only shows up on a machine with no network.
