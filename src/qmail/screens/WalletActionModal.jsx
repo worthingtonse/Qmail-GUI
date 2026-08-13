@@ -31,6 +31,8 @@ import {
   countFromTotals,
   depositAddedNothing,
   getDepositWarnings,
+  getImportedFilesNotice,
+  getImportMoveWarning,
   getTaskProgressLabel,
   getTotalsFromResult,
 } from "./depositReceipts";
@@ -717,21 +719,29 @@ const WalletActionModal = ({
       const nextReceiptFilename = getReceiptFilenameFromResult(result, receiptTaskId);
       const totals = getTotalsFromResult(result);
       const warnings = getDepositWarnings(totals);
+      // A deposit that banked nothing (all counterfeit, all limbo, empty
+      // source) leaves Default with no QMail-eligible coin. Provisioning
+      // would fail with a 422 "Default has no QMail identity coin worth at
+      // least 1 CC", and because depositCompleted locks the import controls
+      // and swaps the footer to "Retry Identity Setup", the user would be
+      // stranded re-POSTing the same doomed call. Keep onboarding in the
+      // import step instead so they can try different coins.
+      const addedNothing = depositAddedNothing(totals);
       await refreshWallet();
       setStatusMessage("");
       setReceiptFilename(nextReceiptFilename);
       setReceiptWalletPath(getReceiptWalletPathFromResult(result));
       setDepositWarnings(warnings);
       setSuccessMessage(
-        depositAddedNothing(totals)
-          ? "No funds were added to the Default wallet."
+        addedNothing
+          ? `No funds were added to the Default wallet. ${getImportedFilesNotice(totals)}`
           : "Funds added to the Default wallet.",
       );
-      setDepositCompleted(true);
+      setDepositCompleted(!(onboardingMode && addedNothing));
       setSelectedFiles([]);
       setSelectedFolder(null);
       setLockerCode("");
-      if (onboardingMode) {
+      if (onboardingMode && !addedNothing) {
         await provisionIdentity();
       }
     } catch (err) {
@@ -874,6 +884,16 @@ const WalletActionModal = ({
   // or RAIDA errors) should read as a problem, not a plain success.
   const depositHadIssues = mode === "add" && depositWarnings.length > 0;
 
+  // Shown BEFORE the deposit runs, whenever the selection lives outside
+  // Client_Data: importing moves the files out of wherever they are now.
+  const importMoveWarning =
+    mode === "add" && !depositCompleted
+      ? getImportMoveWarning(
+          addMethod,
+          addMethod === "files" ? selectedFiles : selectedFolder,
+        )
+      : "";
+
   const lockerInputValid = onboardingMode
     ? lockerCode.trim().length > 0
     : validateLockerCode(lockerCode);
@@ -981,6 +1001,15 @@ const WalletActionModal = ({
                     {selectedFolder?.name || "No folder selected"}
                   </span>
                 </div>
+              )}
+
+              {importMoveWarning && (
+                <p
+                  className="wallet-action-modal__move-warning"
+                  role="status"
+                >
+                  {importMoveWarning}
+                </p>
               )}
 
               {addMethod === "locker" && (

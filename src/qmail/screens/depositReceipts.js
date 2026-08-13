@@ -37,6 +37,53 @@ export const depositAddedNothing = (totals) => {
   return countFromTotals(totals, ["bank_count", "fracked_count"]) <= 0;
 };
 
+// Deposit MOVES the files it imports — core's deposit_phase_move relocates
+// them into <wallet>/Import before the RAIDA is even asked whether they are
+// authentic. That is deliberate (a coin must never exist in two places at
+// once), but it means importing from another program's folder takes the
+// coins OUT of that program. Users have reported this as coins "disappearing"
+// from CloudCoin Desktop, so say it plainly before the deposit runs.
+//
+// Returns "" when nothing external is selected, so callers can render the
+// warning conditionally without their own emptiness check.
+export const getImportMoveWarning = (method, selection) => {
+  if (method === "locker") return "";
+
+  if (method === "files") {
+    const files = Array.isArray(selection) ? selection : [];
+    const external = files.filter((file) => file?.external);
+    if (external.length === 0) return "";
+    const noun = external.length === 1 ? "file" : "files";
+    return `${external.length.toLocaleString()} selected ${noun} will be MOVED into QMail, not copied. ` +
+      `They will no longer be in their current location — if another wallet program uses them, they will leave it.`;
+  }
+
+  if (method === "folder") {
+    if (!selection?.external) return "";
+    return `Coins in "${selection.name || selection.path}" will be MOVED into QMail, not copied. ` +
+      `They will no longer be in that folder — if another wallet program uses it, they will leave it.`;
+  }
+
+  return "";
+};
+
+// Where the files actually went, for a deposit that banked nothing.
+//
+// The source files are never destroyed: unpack moves each one to
+// <wallet>/Imported for an audit trail, and rejected notes land in
+// <wallet>/Counterfeit. Neither location is surfaced anywhere in the UI, so
+// a user whose import failed has no way to know their coins still exist.
+// This is the recovery path — name it.
+export const getImportedFilesNotice = (totals, walletName = "Default") => {
+  const counterfeit = countFromTotals(totals, ["counterfeit_count", "legacy_counterfeit_count"]);
+  const base =
+    `Your original files were moved into ${walletName}\\Imported and are still there.`;
+  if (counterfeit > 0) {
+    return `${base} The notes the RAIDA rejected are in ${walletName}\\Counterfeit.`;
+  }
+  return base;
+};
+
 // Build human-readable warnings for a completed deposit. Each condition is
 // independent, so more than one may apply and they stack.
 export const getDepositWarnings = (totals) => {

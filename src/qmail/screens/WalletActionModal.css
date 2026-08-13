@@ -202,6 +202,19 @@
   color: var(--status-warning);
 }
 
+/* Pre-deposit notice: the selected files live outside Client_Data and will
+   be MOVED out of their current location by the import. */
+.wallet-action-modal__move-warning {
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-sm);
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 /* Per-issue detail lines, shown beneath the red banner. */
 .wallet-action-modal__deposit-warnings {
   margin-top: var(--space-xs);

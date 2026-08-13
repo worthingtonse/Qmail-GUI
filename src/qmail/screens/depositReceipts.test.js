@@ -4,6 +4,8 @@ import {
   countFromTotals,
   depositAddedNothing,
   getDepositWarnings,
+  getImportedFilesNotice,
+  getImportMoveWarning,
   getTaskProgressLabel,
   getTotalsFromResult,
 } from "./depositReceipts";
@@ -77,6 +79,75 @@ describe("getDepositWarnings", () => {
       legacy_counterfeit_count: 2,
     });
     expect(warnings).toEqual(["3 notes were counterfeit"]);
+  });
+});
+
+describe("getImportMoveWarning", () => {
+  it("warns when selected files are outside Client_Data", () => {
+    const warning = getImportMoveWarning("files", [
+      { name: "a.bin", external: true },
+      { name: "b.bin", external: true },
+    ]);
+    expect(warning).toContain("2 selected files");
+    expect(warning).toContain("MOVED");
+  });
+
+  it("counts only the external files in a mixed selection", () => {
+    const warning = getImportMoveWarning("files", [
+      { name: "a.bin", external: true },
+      { name: "b.bin", external: false },
+    ]);
+    expect(warning).toContain("1 selected file");
+    expect(warning).not.toContain("2 selected");
+  });
+
+  it("stays silent when every file is already inside Client_Data", () => {
+    expect(
+      getImportMoveWarning("files", [{ name: "a.bin", external: false }]),
+    ).toBe("");
+  });
+
+  it("names the folder when an external folder is chosen", () => {
+    const warning = getImportMoveWarning("folder", {
+      name: "Bank",
+      path: "C:/CloudCoin/Bank",
+      external: true,
+    });
+    expect(warning).toContain('"Bank"');
+    expect(warning).toContain("MOVED");
+  });
+
+  it("stays silent for internal folders and for locker imports", () => {
+    expect(getImportMoveWarning("folder", { name: "Bank", external: false })).toBe("");
+    expect(getImportMoveWarning("locker", null)).toBe("");
+  });
+
+  it("handles an empty or missing selection without throwing", () => {
+    expect(getImportMoveWarning("files", [])).toBe("");
+    expect(getImportMoveWarning("files", null)).toBe("");
+    expect(getImportMoveWarning("folder", null)).toBe("");
+  });
+});
+
+describe("getImportedFilesNotice", () => {
+  it("points at the Imported folder", () => {
+    expect(getImportedFilesNotice({})).toContain("Default\\Imported");
+  });
+
+  it("also points at Counterfeit when notes were rejected", () => {
+    const notice = getImportedFilesNotice({ counterfeit_count: 11 });
+    expect(notice).toContain("Default\\Imported");
+    expect(notice).toContain("Default\\Counterfeit");
+  });
+
+  it("counts legacy counterfeits toward the Counterfeit hint", () => {
+    expect(getImportedFilesNotice({ legacy_counterfeit_count: 3 })).toContain(
+      "Default\\Counterfeit",
+    );
+  });
+
+  it("honours a non-default wallet name", () => {
+    expect(getImportedFilesNotice({}, "Savings")).toContain("Savings\\Imported");
   });
 });
 

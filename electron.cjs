@@ -1452,6 +1452,32 @@ function resolvePickerStartLocation(preferredLocation, recentLocations) {
   return null;
 }
 
+// Is this path outside QMail's own Client_Data tree?
+//
+// Deposit MOVES source files into <wallet>/Import (deposit_phase_move ->
+// fs_move_file), so importing from another program's folder — a CloudCoin
+// Desktop Bank, a USB stick, Downloads — takes the coins OUT of there. That
+// is deliberate: a coin must never exist in two places at once. But the user
+// has to be told before it happens, which is what this flag drives.
+//
+// Unresolvable paths return true (treat as external): warning about a file
+// that turns out to be internal is harmless, staying silent about one that
+// is genuinely external is not.
+function isPathOutsideClientData(targetPath) {
+  if (!targetPath) return false;
+  if (!backendDataDir) return true;
+  try {
+    const clientData = path.resolve(path.join(backendDataDir, 'Client_Data'));
+    const resolved = path.resolve(targetPath);
+    const rel = path.relative(clientData, resolved);
+    // Inside iff the relative path stays put and never climbs out.
+    return rel === '' ? false : rel.startsWith('..') || path.isAbsolute(rel);
+  } catch (error) {
+    log('isPathOutsideClientData failed for ' + targetPath + ': ' + error.message);
+    return true;
+  }
+}
+
 async function pickCoinFilesFromDisk(defaultLocation = null) {
   const dialogOptions = {
     title: 'Choose CloudCoin files',
@@ -1483,6 +1509,7 @@ async function pickCoinFilesFromDisk(defaultLocation = null) {
           path: filePath,
           name: path.basename(filePath),
           size: stat.size,
+          external: isPathOutsideClientData(filePath),
         };
       } catch (error) {
         log('wallet:pickCoinFiles stat failed for ' + filePath + ': ' + error.message);
@@ -1519,6 +1546,7 @@ async function pickCoinFolderFromDisk(defaultLocation = null) {
   return {
     path: folderPath,
     name: path.basename(folderPath) || folderPath,
+    external: isPathOutsideClientData(folderPath),
   };
 }
 
