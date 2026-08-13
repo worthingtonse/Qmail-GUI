@@ -3,62 +3,55 @@ import { describe, expect, it } from "vitest";
 import {
   buildWindowTitle,
   formatTitleQmailAddress,
-  TITLE_ADDRESS_SEPARATOR,
-  TITLE_ADDRESS_SEPARATOR_COUNT,
+  TITLE_SEPARATOR,
 } from "./windowTitle";
 
-const TITLE_PREFIX =
-  "QMail Beta . . . . . . . Version: ";
-
 describe("buildWindowTitle", () => {
-  it("uses the stable version/address format with 10 spaced periods", () => {
+  it("joins app, date, folder and address with tildes", () => {
     const title = buildWindowTitle({
-      qmailAddress: "15:33@mega",
-      buildDate: "2026-06-26",
-      buildNumber: 7,
+      qmailAddress: "23.25@giga",
+      buildDate: "2026-08-09",
+      appDir: "C:/Users/User/",
     });
 
-    expect(title).toBe(
-      `${TITLE_PREFIX}June 26, 2026 (build 7) ${".  ".repeat(9)}. Your Qmail Address: 15:33@mega`,
-    );
-    expect(TITLE_ADDRESS_SEPARATOR_COUNT).toBe(10);
-    expect(TITLE_ADDRESS_SEPARATOR).toBe(`${".  ".repeat(9)}.`);
+    expect(title).toBe("QMail ~ August 9, 2026 ~ C:/Users/User/ ~ 23.25@giga");
+    expect(TITLE_SEPARATOR).toBe(" ~ ");
   });
 
-  it("omits the gap while the address is unavailable", () => {
-    expect(buildWindowTitle({ buildDate: "2026-06-26", buildNumber: 7 })).toBe(
-      `${TITLE_PREFIX}June 26, 2026 (build 7)`,
-    );
-  });
-
-  it("shows the program folder when provided", () => {
+  it("omits the build number", () => {
     const title = buildWindowTitle({
       qmailAddress: "15:33@mega",
       buildDate: "2026-06-26",
-      buildNumber: 7,
       appDir: "D:\\Apps\\QMail",
     });
 
-    expect(title).toBe(
-      `${TITLE_PREFIX}June 26, 2026 (build 7) . . . . . . . Folder: D:\\Apps\\QMail ${".  ".repeat(9)}. Your Qmail Address: 15:33@mega`,
-    );
+    expect(title).not.toContain("build");
+    expect(title).not.toMatch(/\(\s*build/i);
   });
 
-  it("omits the folder segment when the path is unavailable", () => {
-    const title = buildWindowTitle({
-      buildDate: "2026-06-26",
-      buildNumber: 7,
-      appDir: "   ",
-    });
+  it("drops the address segment while the identity is still loading", () => {
+    expect(
+      buildWindowTitle({ buildDate: "2026-06-26", appDir: "D:\\Apps\\QMail" }),
+    ).toBe("QMail ~ June 26, 2026 ~ D:\\Apps\\QMail");
+  });
 
-    expect(title).toBe(`${TITLE_PREFIX}June 26, 2026 (build 7)`);
+  it("drops the folder segment when the path is unavailable", () => {
+    expect(
+      buildWindowTitle({ qmailAddress: "15:33@mega", buildDate: "2026-06-26", appDir: "   " }),
+    ).toBe("QMail ~ June 26, 2026 ~ 15:33@mega");
+  });
+
+  it("leaves no dangling separator when only the date is known", () => {
+    const title = buildWindowTitle({ buildDate: "2026-06-26" });
+
+    expect(title).toBe("QMail ~ June 26, 2026");
+    expect(title.endsWith(TITLE_SEPARATOR.trimEnd())).toBe(false);
   });
 
   it("does not vary with obsolete folder or unread-count inputs", () => {
     const title = buildWindowTitle({
       qmailAddress: "127.103@Kilo",
       buildDate: "2026-06-26",
-      buildNumber: 7,
       folder: "trash",
       unread: 42,
     });
