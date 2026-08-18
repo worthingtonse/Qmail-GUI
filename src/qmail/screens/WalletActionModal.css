@@ -372,6 +372,18 @@
   font-size: var(--font-size-sm);
 }
 
+/* Consecutive receipt tables (legacy CCv1/CCv2/CCv3 detail) need breathing
+   room between them; the first table keeps its existing flow spacing. */
+.wallet-action-modal__receipt-table + .wallet-action-modal__receipt-table {
+  margin-top: var(--space-md);
+}
+
+.wallet-action-modal__receipt-note {
+  margin-top: var(--space-sm);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
 .wallet-action-modal__receipt-table th,
 .wallet-action-modal__receipt-table td {
   padding: var(--space-xs) var(--space-sm);

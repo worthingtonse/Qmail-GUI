@@ -2,19 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildWindowTitle,
+  formatTitlePort,
   formatTitleQmailAddress,
   TITLE_SEPARATOR,
 } from "./windowTitle";
 
 describe("buildWindowTitle", () => {
-  it("joins app, date, folder and address with tildes", () => {
+  it("joins app, date, port, folder and address with tildes", () => {
     const title = buildWindowTitle({
       qmailAddress: "23.25@giga",
       buildDate: "2026-08-09",
       appDir: "C:/Users/User/",
+      port: 3784,
     });
 
-    expect(title).toBe("QMail ~ August 9, 2026 ~ C:/Users/User/ ~ 23.25@giga");
+    expect(title).toBe(
+      "QMail ~ August 9, 2026 ~ port:3784 ~ C:/Users/User/ ~ 23.25@giga",
+    );
     expect(TITLE_SEPARATOR).toBe(" ~ ");
   });
 
@@ -58,6 +62,26 @@ describe("buildWindowTitle", () => {
 
     expect(title).not.toContain("Trash");
     expect(title).not.toContain("42");
+  });
+
+  it("omits the port segment when the listen port is unknown", () => {
+    expect(
+      buildWindowTitle({ buildDate: "2026-06-26", appDir: "D:\\Apps\\QMail" }),
+    ).toBe("QMail ~ June 26, 2026 ~ D:\\Apps\\QMail");
+  });
+});
+
+describe("formatTitlePort", () => {
+  it("labels a valid listen port", () => {
+    expect(formatTitlePort(3784)).toBe("port:3784");
+    expect(formatTitlePort("8080")).toBe("port:8080");
+  });
+
+  it("drops missing or out-of-range values", () => {
+    expect(formatTitlePort("")).toBe("");
+    expect(formatTitlePort(0)).toBe("");
+    expect(formatTitlePort(70000)).toBe("");
+    expect(formatTitlePort("abc")).toBe("");
   });
 });
 

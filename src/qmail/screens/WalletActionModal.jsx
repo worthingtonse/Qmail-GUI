@@ -178,12 +178,19 @@ const RECEIPT_TYPE_LABELS = {
 // Sum one or more receipt total fields, treating missing/non-numeric as 0.
 const sumTotals = countFromTotals;
 
+// True when the receipt carries per-shard legacy conversion detail (written
+// by cores from 2026-08-15 on). Presence-checked, not summed: a legacy
+// import where every note failed still has the keys, with zero counts.
+const hasLegacyDetail = (t) =>
+  t != null && ("ccv1_converted_count" in t || "ccv2_converted_count" in t);
+
 // "Authentic" is every coin that passed authentication, i.e. Bank + Fracked.
 // Fracked coins are authentic too — they are just stored in the Fracked folder
 // because not all 25 RAIDA agreed — so they are a SUBSET of Authentic. We show
 // Authentic as the computed total (Bank + Fracked) and keep a separate Fracked
-// row as the subset breakdown. (Backend already counts both toward
-// total_deposited, so this is a display-only correction.)
+// row as the subset breakdown, but only when it actually breaks the total down
+// (see hideWhen below). (Backend already counts both toward total_deposited, so
+// this is a display-only correction.)
 const RECEIPT_TOTAL_ROWS = [
   {
     key: "authentic",
@@ -192,15 +199,33 @@ const RECEIPT_TOTAL_ROWS = [
     count: (t) => sumTotals(t, ["bank_count", "fracked_count"]),
     value: (t) => sumTotals(t, ["value_bank", "value_fracked"]),
   },
-  { key: "fracked", label: "Fracked", count: (t) => sumTotals(t, ["fracked_count"]), value: (t) => sumTotals(t, ["value_fracked"]) },
+  {
+    key: "fracked",
+    label: "Fracked",
+    count: (t) => sumTotals(t, ["fracked_count"]),
+    value: (t) => sumTotals(t, ["value_fracked"]),
+    // Fracked is a SUBSET of Authentic, so it only earns a row when it is a
+    // partial one. When every authentic coin is fracked (bank_count == 0) the
+    // two rows carry identical numbers, which reads as double-counting — the
+    // deposit looks twice as large as it was.
+    hideWhen: (t) => sumTotals(t, ["bank_count"]) === 0,
+  },
   { key: "limbo", label: "Limbo", count: (t) => sumTotals(t, ["limbo_count"]), value: (t) => sumTotals(t, ["value_limbo"]) },
   { key: "counterfeit", label: "Counterfeit", count: (t) => sumTotals(t, ["counterfeit_count"]), value: (t) => sumTotals(t, ["value_counterfeit"]) },
-  { key: "duplicate", label: "Duplicates", count: (t) => sumTotals(t, ["duplicate_count"]) },
-  { key: "error", label: "Errors", count: (t) => sumTotals(t, ["error_count"]) },
-  { key: "converted", label: "Converted", count: (t) => sumTotals(t, ["converted_count"]) },
+  // "Duplicates" reads as an error; these coins were simply already owned.
+  // They are filed in the wallet's Duplicates folder, not lost.
+  { key: "duplicate", label: "Already in your wallet", count: (t) => sumTotals(t, ["duplicate_count"]) },
+  // Files that could not be read as coin data; unpack moves them to Trash.
+  // noValue: a file we could not parse has no knowable worth.
+  { key: "corrupted", label: "Unreadable files", count: (t) => sumTotals(t, ["corrupted_count"]), noValue: true },
+  { key: "error", label: "Errors", count: (t) => sumTotals(t, ["error_count"]), noValue: true },
+  // The flat Converted / Legacy Counterfeit rows predate the per-shard
+  // detail (ccv1_*/ccv2_* keys). When the detail is present the dedicated
+  // legacy tables below render instead — showing both would double-report.
+  { key: "converted", label: "Converted", count: (t) => sumTotals(t, ["converted_count"]), hideWhen: hasLegacyDetail },
   { key: "expired", label: "Expired", count: (t) => sumTotals(t, ["expired_count"]) },
-  { key: "legacy_counterfeit", label: "Legacy Counterfeit", count: (t) => sumTotals(t, ["legacy_counterfeit_count"]) },
-  { key: "move_failures", label: "Move Failures", count: (t) => sumTotals(t, ["move_failures"]) },
+  { key: "legacy_counterfeit", label: "Legacy Counterfeit", count: (t) => sumTotals(t, ["legacy_counterfeit_count"]), hideWhen: hasLegacyDetail },
+  { key: "move_failures", label: "Move Failures", count: (t) => sumTotals(t, ["move_failures"]), noValue: true },
 ];
 
 const formatReceiptDate = (value) => {
@@ -230,7 +255,9 @@ const ReceiptDetails = ({ receipt }) => {
   const typeLabel = RECEIPT_TYPE_LABELS[receipt.type] || "Wallet Operation";
   const dateLabel = formatReceiptDate(receipt.date);
   const totalRows = RECEIPT_TOTAL_ROWS.filter(
-    (row) => row.alwaysShow || row.count(totals) > 0,
+    (row) =>
+      (row.alwaysShow || row.count(totals) > 0) &&
+      !(row.hideWhen && row.hideWhen(totals)),
   );
 
   return (
@@ -281,7 +308,20 @@ const ReceiptDetails = ({ receipt }) => {
             <tr key={row.key}>
               <th scope="row">{row.label}</th>
               <td>{row.count(totals).toLocaleString()}</td>
-              <td>{row.value ? formatCcAmount(row.value(totals)) : "—"}</td>
+              {/* A row with no `value` function is one of two things, and they
+                  must not look alike. Rows the backend simply does not price
+                  yet (converted/expired/legacy) show 0 rather than an em-dash,
+                  because a dash reads as "unknown" when the honest answer is
+                  "no value recorded". Rows that are not quantities of money at
+                  all (Errors, Move Failures, Unreadable files) get a blank
+                  cell — printing 0.00 CC there would invent a monetary claim. */}
+              <td>
+                {row.value
+                  ? formatCcAmount(row.value(totals))
+                  : row.noValue
+                    ? ""
+                    : formatCcAmount(0)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -293,6 +333,87 @@ const ReceiptDetails = ({ receipt }) => {
           </tr>
         </tfoot>
       </table>
+
+      {/* Per-shard legacy conversion tables. One table per legacy format
+          actually present, plus one for the CCv3 coins created. The legacy
+          VALUE column is exact face value (a CCv2 note is 85.125 CC), while
+          the CCv3 table shows what was actually minted — slightly lower by
+          design, because the conversion target is floored to whole CC. */}
+      {hasLegacyDetail(totals) && (
+        <>
+          {(totals.ccv1_converted_count > 0 || totals.ccv1_counterfeit_count > 0) && (
+            <table className="wallet-action-modal__receipt-table">
+              <thead>
+                <tr>
+                  <th scope="col">CloudCoin v1</th>
+                  <th scope="col">Count</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Converted</th>
+                  <td>{Number(totals.ccv1_converted_count || 0).toLocaleString()}</td>
+                  <td>{formatCcAmount(totals.ccv1_converted_value || 0)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Counterfeit</th>
+                  <td>{Number(totals.ccv1_counterfeit_count || 0).toLocaleString()}</td>
+                  <td>{formatCcAmount(totals.ccv1_counterfeit_value || 0)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {(totals.ccv2_converted_count > 0 || totals.ccv2_counterfeit_count > 0) && (
+            <table className="wallet-action-modal__receipt-table">
+              <thead>
+                <tr>
+                  <th scope="col">CloudCoin v2</th>
+                  <th scope="col">Count</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Converted</th>
+                  <td>{Number(totals.ccv2_converted_count || 0).toLocaleString()}</td>
+                  <td>{formatCcAmount(totals.ccv2_converted_value || 0)}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Counterfeit</th>
+                  <td>{Number(totals.ccv2_counterfeit_count || 0).toLocaleString()}</td>
+                  <td>{formatCcAmount(totals.ccv2_counterfeit_value || 0)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {totals.ccv3_minted_count > 0 && (
+            <table className="wallet-action-modal__receipt-table">
+              <thead>
+                <tr>
+                  <th scope="col">CloudCoin v3</th>
+                  <th scope="col">Count</th>
+                  <th scope="col">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Created</th>
+                  <td>{Number(totals.ccv3_minted_count || 0).toLocaleString()}</td>
+                  <td>{formatCcAmount(totals.ccv3_minted_value || 0)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {(totals.ccv3_minted_value || 0) <
+            (totals.ccv1_converted_value || 0) + (totals.ccv2_converted_value || 0) && (
+            <p className="wallet-action-modal__receipt-note">
+              CloudCoin v3 value is slightly lower than the legacy face value
+              because conversion rounds down to whole CloudCoins.
+            </p>
+          )}
+        </>
+      )}
 
       {coins.length > 0 && (
         <details className="wallet-action-modal__receipt-coins">
@@ -621,6 +742,7 @@ const WalletActionModal = ({
 
     setStatusMessage("Depositing...");
     return waitForTaskCompletion(taskId, {
+      timeoutMs: 12 * 60 * 60 * 1000,
       onUpdate: (task) => setStatusMessage(getTaskProgressLabel(task)),
     });
   };
@@ -718,7 +840,7 @@ const WalletActionModal = ({
 
       const nextReceiptFilename = getReceiptFilenameFromResult(result, receiptTaskId);
       const totals = getTotalsFromResult(result);
-      const warnings = getDepositWarnings(totals);
+      const warnings = getDepositWarnings(totals, result);
       // A deposit that banked nothing (all counterfeit, all limbo, empty
       // source) leaves Default with no QMail-eligible coin. Provisioning
       // would fail with a 422 "Default has no QMail identity coin worth at
@@ -1288,7 +1410,10 @@ const WalletActionModal = ({
                   className="wallet-action-modal__receipt-raw-toggle"
                   onClick={() => setShowRawReceipt((show) => !show)}
                 >
-                  {showRawReceipt ? "Formatted" : "Raw JSON"}
+                  {/* Not "Raw JSON": the alternate view is the receipt's JSON
+                      re-indented by formatReceiptContent, never the bytes as
+                      stored. Calling it raw promised something we do not show. */}
+                  {showRawReceipt ? "Summary" : "JSON"}
                 </button>
               )}
               <button

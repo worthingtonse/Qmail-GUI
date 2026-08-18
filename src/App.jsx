@@ -11,6 +11,7 @@ import { clearSkipAutoRestore } from "./qmail/skipAutoRestore";
 import { NotificationProvider } from "./components/common/notifications/NotificationContext";
 import NotificationContainer from "./components/common/notifications/NotificationContainer";
 import {
+  API_PORT,
   checkVersion,
   getIdentity,
   hasId,
@@ -19,6 +20,7 @@ import {
   shutdownCore,
 } from "./api/qmailApiServices";
 import { formatBuildDateForDisplay } from "./version";
+import { buildWindowTitle } from "./qmail/screens/windowTitle";
 
 // Where all QMail software downloads live. The "Download Update" button
 // opens this page in the user's default browser.
@@ -61,6 +63,13 @@ function App() {
   // Guards prewarmInbox() so the background beacon check fires at most once,
   // even if both the fast path and the backend identity check confirm QMAIL.
   const inboxPrewarmedRef = useRef(false);
+
+  // Show the listen port as soon as the renderer mounts, including on
+  // the loading and service-selection screens. QMailDashboard replaces
+  // this with the fuller title once identity and the app folder are known.
+  useEffect(() => {
+    document.title = buildWindowTitle({ port: API_PORT });
+  }, []);
 
   const openTitleBarColorPicker = useCallback(async (initial = {}) => {
     if (

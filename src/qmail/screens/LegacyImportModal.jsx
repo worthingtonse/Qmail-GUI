@@ -29,8 +29,10 @@ const formatCcAmount = (value) => {
 };
 
 // One deposit can take a while on a slow RAIDA day; a legacy Bank folder can
-// hold thousands of coins, so give each folder task a generous ceiling.
-const FOLDER_TASK_TIMEOUT_MS = 15 * 60 * 1000;
+// hold thousands of coins (1411-coin convert batches plus backoff pauses),
+// so give each folder task a ceiling that a mass CCv1/CCv2 import can finish
+// behind. The GUI used to time out at 15 minutes while core was still working.
+const FOLDER_TASK_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 
 const folderDisplayName = (folder) => `${folder.wallet}\\${folder.kind}`;
 
@@ -120,7 +122,7 @@ const LegacyImportModal = ({ request, onClose, onWalletUpdated }) => {
           updateFolder(index, {
             status: "done",
             totals,
-            warnings: getDepositWarnings(totals),
+            warnings: getDepositWarnings(totals, result),
           });
         } catch (error) {
           // One bad folder (locked files, backend hiccup) must not strand the

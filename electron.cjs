@@ -1298,6 +1298,12 @@ function rememberRecentLocation(fileName, location) {
   buildApplicationMenu();
 }
 
+// Menus only list locations that still exist on disk: a recent folder can
+// vanish after import (deposit moves the coins out and cleanup removes the
+// folder), and clicking a dead entry would open somewhere unrelated. Missing
+// entries stay in the file so e.g. a re-plugged USB drive comes back.
+const existingLocations = (locations) => locations.filter((location) => fs.existsSync(location));
+
 const readRecentDepositLocations = () => readRecentLocations(DEPOSIT_LOCATIONS_FILE);
 const rememberDepositLocation = (location) =>
   rememberRecentLocation(DEPOSIT_LOCATIONS_FILE, location);
@@ -1453,11 +1459,19 @@ const getCoinFileStateLabel = (state) => {
   return 'Coin Files: Mixed/Unknown';
 };
 
-// Where a picker should open when the caller did not name a location: the
+// Where a picker should open: the caller's chosen location if it still
+// exists — or its nearest existing ancestor, so a just-deleted folder opens
+// next to where it was rather than in an unrelated recent — otherwise the
 // most recently used location from the given list that still exists on disk.
 function resolvePickerStartLocation(preferredLocation, recentLocations) {
-  const candidates = [preferredLocation, ...recentLocations];
-  for (const candidate of candidates) {
+  let preferred = String(preferredLocation || '').trim();
+  while (preferred) {
+    if (fs.existsSync(preferred)) return preferred;
+    const parent = path.dirname(preferred);
+    if (parent === preferred) break;
+    preferred = parent;
+  }
+  for (const candidate of recentLocations) {
     const location = String(candidate || '').trim();
     if (location && fs.existsSync(location)) return location;
   }
@@ -1611,7 +1625,7 @@ async function addFundsFromMenu(method, location = null) {
 // deposit locations (most recent first), then "Choose New Location…" which
 // opens the picker in the last-used folder.
 function buildDepositLocationMenuItems(method) {
-  const items = readRecentDepositLocations().map((location) => ({
+  const items = existingLocations(readRecentDepositLocations()).map((location) => ({
     label: location,
     click: () => addFundsFromMenu(method, location),
   }));
@@ -1843,7 +1857,7 @@ async function withdrawToBinFromMenu(location = null) {
 // Submenu for ".bin File": recent withdraw destinations (most recent first),
 // then "Choose New Location…" which opens the picker in the last-used folder.
 function buildWithdrawLocationMenuItems() {
-  const items = readRecentWithdrawLocations().map((location) => ({
+  const items = existingLocations(readRecentWithdrawLocations()).map((location) => ({
     label: location,
     click: () => withdrawToBinFromMenu(location),
   }));
@@ -1903,7 +1917,7 @@ async function backupWalletFromMenu(wallet, location = null) {
 // Per-wallet submenu of recent backup destinations, then "Choose New
 // Location…". Note: core rejects destinations inside Client_Data.
 function buildBackupLocationMenuItems(wallet) {
-  const items = readRecentBackupLocations().map((location) => ({
+  const items = existingLocations(readRecentBackupLocations()).map((location) => ({
     label: location,
     click: () => backupWalletFromMenu(wallet, location),
   }));
@@ -2254,6 +2268,9 @@ function createMainWindow(port) {
     width: 1200,
     height: 800,
     icon: windowIconPath,
+    title: ['QMail', formatBuildDateForDisplay(), `port:${port}`]
+      .filter(Boolean)
+      .join(' ~ '),
     show: false, // Don't flash an empty window — splash is handling that.
     webPreferences: {
       nodeIntegration: false,

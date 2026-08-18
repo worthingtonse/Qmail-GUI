@@ -54,8 +54,9 @@ export const getImportMoveWarning = (method, selection) => {
     const external = files.filter((file) => file?.external);
     if (external.length === 0) return "";
     const noun = external.length === 1 ? "file" : "files";
-    return `${external.length.toLocaleString()} selected ${noun} will be MOVED into QMail, not copied. ` +
-      `They will no longer be in their current location — if another wallet program uses them, they will leave it.`;
+    return `These ${external.length.toLocaleString()} ${noun} will be moved into QMail, not copied. ` +
+      `Check the Imported or Trash folder if you need them. ` +
+      `Check Import/CCv1 or Import/CCv2 if they are legacy coins.`;
   }
 
   if (method === "folder") {
@@ -86,7 +87,7 @@ export const getImportedFilesNotice = (totals, walletName = "Default") => {
 
 // Build human-readable warnings for a completed deposit. Each condition is
 // independent, so more than one may apply and they stack.
-export const getDepositWarnings = (totals) => {
+export const getDepositWarnings = (totals, result) => {
   const warnings = [];
 
   const counterfeit = countFromTotals(totals, ["counterfeit_count", "legacy_counterfeit_count"]);
@@ -106,6 +107,16 @@ export const getDepositWarnings = (totals) => {
 
   if (countFromTotals(totals, ["error_count"]) > 0) {
     warnings.push("Some RAIDA servers returned errors");
+  }
+
+  const pending =
+    result?.data?.result?.recovery_pending ??
+    result?.data?.recovery_pending ??
+    totals?.recovery_pending;
+  if (pending === true || pending === "true") {
+    warnings.push(
+      "Some legacy batches were parked for automatic completion. Do not retry those files",
+    );
   }
 
   return warnings;

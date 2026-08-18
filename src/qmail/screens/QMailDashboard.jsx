@@ -1167,7 +1167,7 @@ const QMailDashboard = ({
 
   // Keep the native window title stable across folder and unread-count changes.
   useEffect(() => {
-    document.title = buildWindowTitle({ qmailAddress, appDir });
+    document.title = buildWindowTitle({ qmailAddress, appDir, port: API_PORT });
   }, [qmailAddress, appDir]);
 
   const loadInitialData = async () => {

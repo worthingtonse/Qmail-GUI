@@ -80,6 +80,16 @@ describe("getDepositWarnings", () => {
     });
     expect(warnings).toEqual(["3 notes were counterfeit"]);
   });
+
+  it("warns when legacy batches were parked for completion", () => {
+    const warnings = getDepositWarnings(
+      { bank_count: 4 },
+      { data: { result: { recovery_pending: "true" } } },
+    );
+    expect(warnings).toEqual([
+      "Some legacy batches were parked for automatic completion. Do not retry those files",
+    ]);
+  });
 });
 
 describe("getImportMoveWarning", () => {
@@ -88,8 +98,12 @@ describe("getImportMoveWarning", () => {
       { name: "a.bin", external: true },
       { name: "b.bin", external: true },
     ]);
-    expect(warning).toContain("2 selected files");
-    expect(warning).toContain("MOVED");
+    expect(warning).toContain("These 2 files");
+    expect(warning).toContain("moved into QMail, not copied");
+    // The recovery locations are the whole point of the warning: a user who
+    // imports from another wallet needs to know where their files went.
+    expect(warning).toContain("Imported or Trash");
+    expect(warning).toContain("Import/CCv1 or Import/CCv2");
   });
 
   it("counts only the external files in a mixed selection", () => {
@@ -97,8 +111,8 @@ describe("getImportMoveWarning", () => {
       { name: "a.bin", external: true },
       { name: "b.bin", external: false },
     ]);
-    expect(warning).toContain("1 selected file");
-    expect(warning).not.toContain("2 selected");
+    expect(warning).toContain("These 1 file");
+    expect(warning).not.toContain("These 2");
   });
 
   it("stays silent when every file is already inside Client_Data", () => {
