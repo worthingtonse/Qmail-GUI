@@ -33,6 +33,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
 const { parseTransactionCsv } = require('./transaction-log.cjs');
+const upgrade = require('./upgrade.cjs');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -3095,6 +3096,109 @@ ipcMain.handle('open-external', async (_event, url) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// In-place upgrade (see upgrade.cjs for the download/verify/swap pipeline).
+// The renderer drives the flow: upgrade-supported decides whether the
+// "Upgrade Now" button appears at all, upgrade-start runs the pipeline with
+// progress streamed back over qmail:upgrade-progress, and upgrade-restart
+// relaunches into the freshly swapped launcher.
+// ---------------------------------------------------------------------------
+
+// Upgrade steps also append to Client_Data\upgrade.log, because log()
+// goes to stdout and a double-clicked GUI app has no stdout — the first
+// field failure (2026-08-20) left zero recoverable evidence. Client_Data
+// is where all QMail data lives (Sean's convention), so support finds it
+// with everything else.
+function upgradeLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  log(line);
+  try {
+    const dir = path.join(backendDataDir || getProgramDir(), 'Client_Data');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'upgrade.log'), line + '\n');
+  } catch {
+    /* logging must never break the upgrade */
+  }
+}
+
+ipcMain.handle('qmail:upgrade-supported', () => {
+  const target = upgrade.resolveUpgradeTarget();
+  return {
+    supported: target.supported,
+    reason: target.reason,
+    executablePath: target.targetPath || getQmailExecutablePath(),
+  };
+});
+
+ipcMain.handle('qmail:upgrade-start', async (_event, latestVersion) => {
+  upgradeLog(`upgrade requested: latest=${latestVersion} build=${QMAIL_BUILD_DATE}`);
+  const result = await upgrade.performUpgrade({
+    latestVersion,
+    log: upgradeLog,
+    onProgress: (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('qmail:upgrade-progress', progress);
+      }
+    },
+  });
+  upgradeLog(`upgrade result: ${JSON.stringify(result)}`);
+  return result;
+});
+
+ipcMain.handle('qmail:upgrade-cancel', () => upgrade.cancelUpgrade());
+
+ipcMain.handle('qmail:upgrade-restart', async () => {
+  const target = upgrade.resolveUpgradeTarget();
+  if (!target.supported) return false;
+
+  // Only after a verified swap/staging. Without this latch the IPC would
+  // be a free kill-the-backend-and-relaunch primitive for anything that
+  // can reach the preload API.
+  if (!upgrade.consumeInstalledLatch()) {
+    upgradeLog('upgrade-restart refused: no completed upgrade to restart into');
+    return false;
+  }
+
+  if (upgrade.hasPendingDeferredSwap()) {
+    // Windows: the swap could not happen while running (the portable stub
+    // holds its own file). Hand the install to the helper, then quit —
+    // the helper waits for this process to release QMail.exe, swaps, and
+    // relaunches the new build itself.
+    const launched = await upgrade.launchPendingHelper(upgradeLog);
+    if (launched !== true) {
+      // 'declined' (UAC refused) or spawn failure: nothing has changed;
+      // .new stays staged and the latch is re-armed by trying again.
+      return launched;
+    }
+    upgradeLog('upgrade-restart: quitting so the install helper can swap');
+    killBackend('upgrade-restart');
+    app.quit();
+    return true;
+  }
+
+  upgradeLog(`upgrade-restart: relaunching ${target.targetPath}`);
+
+  // Linux (swap already done in-place): spawn the swapped launcher
+  // explicitly instead of app.relaunch() — relaunch's default execPath is
+  // the portable build's TEMP-UNPACKED binary. The backend is stopped
+  // first so the new instance never races the old core.exe for the data
+  // dir. CLI flags (e.g. -port) ride along; argv[0] is the executable.
+  killBackend('upgrade-restart');
+  try {
+    const child = spawn(target.targetPath, process.argv.slice(1), {
+      cwd: path.dirname(target.targetPath),
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch (e) {
+    upgradeLog('upgrade-restart spawn failed: ' + e.message);
+    return false;
+  }
+  app.quit();
+  return true;
+});
+
 ipcMain.handle('reveal-path', async (_event, targetPath) => {
   try {
     const requestedPath = String(targetPath || '').trim();
@@ -3148,6 +3252,16 @@ ipcMain.handle('list-sound-files', async () => {
 //   5. Splash closes when the main window's first paint fires.
 //   6. Frontend receives backend-ready signal when core.exe is listening.
 async function boot() {
+  // First thing: sweep upgrade leftovers. The previous instance could not
+  // delete its renamed-away launcher (".old" was still the running,
+  // OS-locked file when the swap happened) or an interrupted download may
+  // have stranded a ".new". Both live next to the launcher, never near
+  // Client_Data.
+  const upgradeTarget = upgrade.resolveUpgradeTarget();
+  if (upgradeTarget.supported) {
+    upgrade.cleanupLeftovers(upgradeTarget.targetPath, upgradeLog);
+  }
+
   if (qmailArgs.port !== null) {
     backendPort = qmailArgs.port;
     log('Using explicit port: ' + backendPort);

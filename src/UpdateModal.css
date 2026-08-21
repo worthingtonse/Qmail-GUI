@@ -224,3 +224,42 @@
     font-size: var(--font-size-xl);
   }
 }
+
+/* In-place upgrade: download progress bar and the failure notice shown in
+   the manual-instructions modal when the automatic path gives up. */
+.update-modal__progress {
+  margin: 0 0 var(--space-lg);
+}
+
+.update-modal__progress-track {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border-radius: var(--radius-md);
+  height: 10px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.update-modal__progress-fill {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+  border-radius: var(--radius-md);
+  height: 100%;
+  transition: width 0.2s ease;
+}
+
+.update-modal__upgrade-failure {
+  color: var(--warning, #e0a030);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 0 0 var(--space-md);
+}
+
+.update-modal__failure-detail {
+  color: var(--text-secondary);
+  display: block;
+  font-family: "Courier New", monospace;
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-md);
+  overflow-wrap: anywhere;
+  user-select: text;
+}

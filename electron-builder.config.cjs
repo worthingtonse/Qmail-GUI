@@ -19,12 +19,18 @@ const config = {
   // What goes into the asar. The previous config bundled
   // node_modules/**/* indiscriminately (including devDependencies).
   // electron-builder already cherry-picks production deps; let it.
+  //
+  // NOTE: this is an explicit ALLOWLIST — electron-builder does NOT walk
+  // require()s. Any new top-level module electron.cjs requires MUST be
+  // added here, or the packaged app dies at startup with MODULE_NOT_FOUND
+  // while the dev run (which reads the source tree) works fine.
   files: [
     "dist/**/*",
     "electron.cjs",
     "preload.cjs",
     "coin-file-state.cjs",
     "transaction-log.cjs",
+    "upgrade.cjs",
     "version.json",
   ],
 
