@@ -593,14 +593,45 @@ async function launchPendingHelper(log = noop) {
     return true;
   }
 
+  // LAUNCH MECHANISM (hard-won, field-verified 2026-08-20): a plain
+  // detached spawn does NOT work here. Node's detached mode on Windows
+  // uses DETACHED_PROCESS, which starts powershell with no console at
+  // all — and powershell dies before executing its first statement (the
+  // helper produced zero log lines). The helper must also outlive this
+  // process tree (the portable stub takes its descendants down with it).
+  // Both problems disappear by asking WMI to create the process: the
+  // helper's parent is the WMI provider service, fully outside our tree,
+  // with a normal (hidden) console. The launcher powershell below is
+  // AWAITED — it returns as soon as Win32_Process.Create has run — so we
+  // know the helper exists before the caller quits the app.
+  const helperCommandLine =
+    `powershell.exe -NoProfile -WindowStyle Hidden -EncodedCommand ${encoded}`;
+  const cimLauncher =
+    '$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create ' +
+    `-Arguments @{ CommandLine = '${helperCommandLine}' }; ` +
+    'if ($r -and $r.ReturnValue -eq 0) { exit 0 } else { exit 7 }';
+  const status = await runProcess(
+    'powershell.exe',
+    ['-NoProfile', '-Command', cimLauncher],
+    { windowsHide: true, stdio: 'ignore' },
+  );
+  if (status === 0) {
+    log('upgrade: install helper launched via WMI');
+    return true;
+  }
+  log(`upgrade: WMI helper launch failed (exit=${status}); trying plain spawn`);
+
+  // Fallback: a normal (NOT detached) hidden-console spawn. Windows does
+  // not kill children on parent exit by itself; this only loses if the
+  // app runs inside a kill-on-close job object.
   try {
     const child = spawn(
       'powershell.exe',
-      ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
-      { detached: true, stdio: 'ignore', windowsHide: true },
+      ['-NoProfile', '-EncodedCommand', encoded],
+      { stdio: 'ignore', windowsHide: true },
     );
     child.unref();
-    log('upgrade: install helper launched');
+    log('upgrade: install helper launched (plain spawn fallback)');
     return true;
   } catch (e) {
     log(`upgrade: could not launch install helper: ${e.message}`);
