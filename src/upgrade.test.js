@@ -212,6 +212,32 @@ describe.runIf(process.platform === "win32")("performUpgrade pipeline", () => {
     expect(fs.existsSync(targetPath + ".old")).toBe(false);
   });
 
+  it("refuses to download when free space is too low", async () => {
+    const targetPath = makeTempTarget();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (String(url).endsWith("/SHA256SUMS")) {
+          return new Response(`${sha256(NEW_BYTES)}  QMail.exe\n`, {
+            status: 200,
+          });
+        }
+        // An announced size no disk can hold twice over.
+        return new Response(NEW_BYTES, {
+          status: 200,
+          headers: { "content-length": String(2 ** 53) },
+        });
+      }),
+    );
+
+    const result = await performUpgrade({ latestVersion: NEW_VERSION });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("no-space");
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+    expect(fs.existsSync(targetPath + ".new")).toBe(false);
+  });
+
   it("fails cleanly when SHA256SUMS is unreachable", async () => {
     const targetPath = makeTempTarget();
     stubFetch(() => undefined);

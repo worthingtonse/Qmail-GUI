@@ -663,19 +663,14 @@ function App() {
       .catch((error) => ({ ok: false, code: "ipc", error: error?.message }));
 
     if (result?.ok) {
-      // Auto-restart (decision: Sean 2026-08-20 — "Restart now is
-      // customary"). Compose drafts are autosaved by the drafts subsystem,
-      // so restarting immediately does not discard user work.
-      setUpgradeProgress({ phase: "restarting" });
-      const restarted = await window.electronAPI
-        ?.restartAfterUpgrade?.()
-        .catch(() => false);
-      if (restarted !== true) {
-        // The swap DID happen; only the relaunch failed. Tell the user to
-        // finish by hand instead of leaving the modal stuck on
-        // "Restarting…" with every button hidden.
-        setUpgradeProgress({ phase: "installed" });
-      }
+      // Ask before restarting (D7's fallback clause, invoked per Opus
+      // review F1): compose drafts are EXPLICIT-only — there is no
+      // autosave — so an automatic restart would silently destroy a
+      // half-written message, an in-flight send, or a running coin
+      // operation, none of which this component can see. The swap is
+      // already done either way; "Later" just means the next launch runs
+      // the new build.
+      setUpgradeProgress({ phase: "installed-prompt" });
       return;
     }
 
@@ -691,6 +686,25 @@ function App() {
 
   const handleCancelUpgrade = () => {
     window.electronAPI?.cancelUpgrade?.();
+  };
+
+  const handleRestartNow = async () => {
+    setUpgradeProgress({ phase: "restarting" });
+    const restarted = await window.electronAPI
+      ?.restartAfterUpgrade?.()
+      .catch(() => false);
+    if (restarted !== true) {
+      // The swap DID happen; only the relaunch failed. Tell the user to
+      // finish by hand instead of leaving the modal stuck on
+      // "Restarting…" with every button hidden.
+      setUpgradeProgress({ phase: "installed" });
+    }
+  };
+
+  const handleRestartLater = () => {
+    // The swapped file stays on disk; the next launch runs the new build.
+    setUpgradeProgress(null);
+    setShowUpdateModal(false);
   };
 
   const upgradePhaseLabel = () => {
@@ -975,7 +989,14 @@ function App() {
                   </div>
                 </div>
 
-                {upgradeProgress?.phase === "installed" ? (
+                {upgradeProgress?.phase === "installed-prompt" ? (
+                  <p className="update-modal__description">
+                    The new version is installed. Restart QMail now to start
+                    using it? If you are writing a message or a transfer is
+                    still running, choose Later and restart when you are
+                    done — the update is already in place.
+                  </p>
+                ) : upgradeProgress?.phase === "installed" ? (
                   <p className="update-modal__description">
                     The new version is installed, but QMail could not restart
                     itself. Close QMail and start it again to finish the
@@ -1021,7 +1042,22 @@ function App() {
               </div>
 
               <div className="update-modal__actions">
-                {upgradeProgress?.phase === "installed" ? (
+                {upgradeProgress?.phase === "installed-prompt" ? (
+                  <>
+                    <button
+                      className="update-modal__download-button"
+                      onClick={handleRestartNow}
+                    >
+                      Restart Now
+                    </button>
+                    <button
+                      className="update-modal__later-button"
+                      onClick={handleRestartLater}
+                    >
+                      Later
+                    </button>
+                  </>
+                ) : upgradeProgress?.phase === "installed" ? (
                   <button
                     className="update-modal__download-button"
                     onClick={() => window.electronAPI?.quitApp?.()}
