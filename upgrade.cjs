@@ -30,7 +30,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const { buildDate: LOCAL_BUILD_DATE } = require('./version.json');
 
@@ -325,17 +325,49 @@ async function swapInPlace(targetPath, log) {
 // PowerShell single-quoted literal: only ' needs escaping (doubled).
 const psQuote = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
+/** spawn() as a promise resolving to the exit code (null on error/timeout). */
+function runProcess(command, args, options) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(command, args, options);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+    }, 180_000);
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+}
+
 /**
  * Elevated swap fallback for launchers in unwritable places (Program
  * Files, some USB configurations). Writes a throwaway script that does
- * both moves and runs it through the OS elevation prompt; the caller
- * verifies the result by re-hashing the target, so this function's own
- * exit-status blindness (Start-Process hides it) is harmless.
+ * both moves — restoring the original launcher itself if the second move
+ * fails, since only the elevated context can write that directory — and
+ * runs it through the OS elevation prompt. Async on purpose: a blocking
+ * wait here would freeze the main process for as long as the UAC prompt
+ * sits on screen. The caller verifies the outcome by re-hashing the
+ * target, so this function's exit-status blindness (Start-Process hides
+ * the script's own status) is harmless.
  *
- * @returns {boolean} true if the elevated process was launched and
- *   finished; false if elevation was declined or unavailable.
+ * @returns {Promise<boolean>} true if the elevated process ran to
+ *   completion; false if elevation was declined or unavailable.
  */
-function elevatedSwap(targetPath, log) {
+async function elevatedSwap(targetPath, log) {
   const oldPath = targetPath + '.old';
   const stagedPath = targetPath + '.new';
 
@@ -344,21 +376,22 @@ function elevatedSwap(targetPath, log) {
     const script =
       '@echo off\r\n' +
       `if exist "${oldPath}" del /f /q "${oldPath}"\r\n` +
-      `move /y "${targetPath}" "${oldPath}"\r\n` +
-      `move /y "${stagedPath}" "${targetPath}"\r\n`;
+      `move /y "${targetPath}" "${oldPath}" || exit /b 1\r\n` +
+      `move /y "${stagedPath}" "${targetPath}"\r\n` +
+      `if errorlevel 1 move /y "${oldPath}" "${targetPath}"\r\n`;
     try {
       fs.writeFileSync(scriptPath, script);
-      const result = spawnSync(
+      const status = await runProcess(
         'powershell.exe',
         [
           '-NoProfile',
           '-Command',
           `Start-Process -FilePath ${psQuote(scriptPath)} -Verb RunAs -Wait -WindowStyle Hidden`,
         ],
-        { windowsHide: true, timeout: 120_000 },
+        { windowsHide: true, stdio: 'ignore' },
       );
       // A declined UAC prompt makes Start-Process itself fail (exit != 0).
-      return result.status === 0;
+      return status === 0;
     } catch (e) {
       log(`upgrade: elevated swap failed to launch: ${e.message}`);
       return false;
@@ -375,17 +408,13 @@ function elevatedSwap(targetPath, log) {
     const shellCmd =
       `rm -f "${oldPath}" && ` +
       `mv "${targetPath}" "${oldPath}" && ` +
-      `mv "${stagedPath}" "${targetPath}" && ` +
-      `chmod 755 "${targetPath}"`;
-    try {
-      const result = spawnSync('pkexec', ['sh', '-c', shellCmd], {
-        timeout: 120_000,
-      });
-      return result.status === 0;
-    } catch (e) {
-      log(`upgrade: pkexec unavailable: ${e.message}`);
-      return false;
-    }
+      `if mv "${stagedPath}" "${targetPath}"; then chmod 755 "${targetPath}"; ` +
+      `else mv "${oldPath}" "${targetPath}"; exit 1; fi`;
+    const status = await runProcess('pkexec', ['sh', '-c', shellCmd], {
+      stdio: 'ignore',
+    });
+    if (status === null) log('upgrade: pkexec unavailable');
+    return status === 0;
   }
 
   return false;
@@ -522,7 +551,7 @@ async function performUpgrade({ latestVersion, onProgress = noop, log = noop }) 
         return fail('swap', e.message);
       }
       log('upgrade: swap needs elevation, prompting');
-      const elevated = elevatedSwap(targetPath, log);
+      const elevated = await elevatedSwap(targetPath, log);
       const installedHash = elevated ? await hashFile(targetPath).catch(() => null) : null;
       if (!elevated || !acceptable.has(installedHash)) {
         await fs.promises.unlink(stagedPath).catch(noop);
