@@ -4,6 +4,7 @@ import {
   checkVersion,
   REMOTE_VERSION_MANIFEST_URLS,
   REMOTE_VERSION_URLS,
+  VERSIONS_HTML_URL,
 } from "./qmailApiServices.js";
 import { BUILD_DATE } from "../version.js";
 
@@ -43,11 +44,15 @@ afterEach(() => {
   delete globalThis.fetch;
 });
 
-// Legacy-only responder: the manifest 404s everywhere, as it does on a
-// mirror that hasn't been updated, forcing the fallback path.
+// Every URL polled in the preferred (manifest-format) tier.
+const MANIFEST_TIER_URLS = [VERSIONS_HTML_URL, ...REMOTE_VERSION_MANIFEST_URLS];
+
+// Legacy-only responder: the manifest tier 404s everywhere (RAIDA mirrors
+// that haven't been updated, HTML page not deployed), forcing the
+// fallback path.
 const legacyOnly = (responder) =>
   mockFetchByUrl((url) =>
-    REMOTE_VERSION_MANIFEST_URLS.includes(url) ? undefined : responder(url),
+    MANIFEST_TIER_URLS.includes(url) ? undefined : responder(url),
   );
 
 describe("checkVersion", () => {
@@ -68,8 +73,15 @@ describe("checkVersion", () => {
     });
   });
 
-  it("takes the majority answer over a stale minority", async () => {
-    // Two stale mirrors (the raida0/1/11 scenario), the rest current.
+  it("polls raida11, where CI publishes first", () => {
+    // r11 is the origin of every version bump; excluding it (as the list
+    // did before 2026-08) meant the freshest data was never consulted.
+    expect(REMOTE_VERSION_URLS).toContain(
+      "https://raida11.cloudcoin.global/service/qmail_client_version",
+    );
+  });
+
+  it("takes the newest answer over stale mirrors", async () => {
     legacyOnly((url) =>
       REMOTE_VERSION_URLS.indexOf(url) < 2 ? "2026-03-24" : "2099-07-24",
     );
@@ -82,18 +94,19 @@ describe("checkVersion", () => {
     expect(result.data.current_version).toBe(BUILD_DATE);
   });
 
-  it("breaks a tie toward the newest date", async () => {
-    // 6 valid answers (one mirror down): 3 old vs 3 new.
-    legacyOnly((url) => {
-      const index = REMOTE_VERSION_URLS.indexOf(url);
-      if (index === 0) return new Error("down");
-      return index <= 3 ? "2026-01-01" : "2099-01-01";
-    });
+  it("a single fresher mirror is enough (the release-day r11 scenario)", async () => {
+    // Right after a publish, only r11 carries the new date; every other
+    // mirror is stale until replication runs. The stale majority must not
+    // suppress the release.
+    legacyOnly((url) =>
+      REMOTE_VERSION_URLS.indexOf(url) === 3 ? "2099-08-20" : "2026-08-08",
+    );
 
     const result = await checkVersion();
 
     expect(result.success).toBe(true);
-    expect(result.data.latest_version).toBe("2099-01-01");
+    expect(result.data.latest_version).toBe("2099-08-20");
+    expect(result.data.update_available).toBe(true);
   });
 
   it("ignores malformed responses when tallying", async () => {
@@ -224,6 +237,45 @@ describe("checkVersion per-platform manifest", () => {
 
     expect(result.data.source).toBe("manifest");
     expect(result.data.latest_version).toBe("2099-03-03");
+  });
+
+  it("reads the same-host HTML page as a manifest source", async () => {
+    // qmail-versions.html lives next to the binaries on
+    // cloudcoinconsortium.com and wraps the same date+JSON block in HTML.
+    // It alone must be able to carry the check when every RAIDA mirror
+    // 404s the manifest.
+    mockFetchByUrl((url) => {
+      if (url === VERSIONS_HTML_URL) {
+        return `<html><body><pre id="qmail-versions">\n2099-06-06\n${JSON.stringify(
+          { windows: "2099-06-06" },
+        )}\n</pre></body></html>`;
+      }
+      if (REMOTE_VERSION_MANIFEST_URLS.includes(url)) return undefined;
+      return "2001-01-01";
+    });
+
+    const result = await checkVersion();
+
+    expect(result.success).toBe(true);
+    expect(result.data.source).toBe("manifest");
+    expect(result.data.latest_version).toBe("2099-06-06");
+    expect(result.data.update_available).toBe(true);
+  });
+
+  it("takes the newest date when manifest mirrors disagree", async () => {
+    // Release-day skew: one mirror already replicated, the rest are a day
+    // behind. The newer date must win without any quorum.
+    mockFetchByUrl((url) => {
+      if (!REMOTE_VERSION_MANIFEST_URLS.includes(url)) return "2001-01-01";
+      return REMOTE_VERSION_MANIFEST_URLS.indexOf(url) === 0
+        ? manifestBody({ windows: "2099-09-09" })
+        : manifestBody({ windows: "2099-09-08" });
+    });
+
+    const result = await checkVersion();
+
+    expect(result.data.source).toBe("manifest");
+    expect(result.data.latest_version).toBe("2099-09-09");
   });
 
   it("falls back to legacy when the platform is unidentifiable", async () => {

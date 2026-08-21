@@ -2988,11 +2988,14 @@ export const convertSnToEmail = async (sn, denomination = null) => {
 // version check does NOT depend on core.exe being up. The local build date
 // it is compared against lives in src/version.js (BUILD_DATE).
 //
-// Several mirrors are polled and tallied because individual servers go
-// stale — when this list was chosen (2026-07-03), raida0/1/11 were four
-// months behind the other 21 and raida19 was down. The majority answer
-// wins; the newest date breaks ties.
-export const REMOTE_VERSION_URLS = [2, 5, 8, 14, 17, 20, 23].map(
+// Several mirrors are polled because individual servers go stale — when
+// this list was first chosen (2026-07-03), raida0/1/11 were four months
+// behind the other 21 and raida19 was down. raida11 was later ADDED BACK
+// on purpose: CI publishes the version files to r11 first and the rest of
+// the fleet catches up by replication, so r11 is now the freshest mirror,
+// and the check takes the newest valid answer rather than a majority vote
+// (see pollVersionMirrors for why).
+export const REMOTE_VERSION_URLS = [2, 5, 8, 11, 14, 17, 20, 23].map(
   (n) => `https://raida${n}.cloudcoin.global/service/qmail_client_version`,
 );
 
@@ -3013,6 +3016,19 @@ export const REMOTE_VERSION_URLS = [2, 5, 8, 14, 17, 20, 23].map(
 export const REMOTE_VERSION_MANIFEST_URLS = REMOTE_VERSION_URLS.map((url) =>
   url.replace("/qmail_client_version", "/qmail_client_versions"),
 );
+
+// SAME-HOST MANIFEST PAGE (additional preferred source)
+//
+// The binaries live under cloudcoinconsortium.com/bin/. CI also writes a
+// human-readable qmail-versions.html next to them carrying the same
+// date-on-line-1 + JSON block as the RAIDA manifest, so the version data
+// and the download share one host with no RAIDA replication delay.
+// parseVersionManifest() reads the JSON out of the HTML unchanged (it
+// scans from the first "{" to the last "}"). Until CI ships that page the
+// URL 404s, which pollVersionMirrors treats as one more dead mirror —
+// harmless by design.
+export const VERSIONS_HTML_URL =
+  "https://cloudcoinconsortium.com/bin/qmail-versions.html";
 
 const VERSION_FETCH_TIMEOUT_MS = 8000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -3045,16 +3061,27 @@ const parseVersionManifest = (body) => {
 };
 
 /**
- * Fetches one date from every mirror and returns the majority answer.
+ * Fetches one date from every mirror and returns the NEWEST valid answer.
  *
  * Mirrors that fail, time out, or return something that isn't a bare ISO
- * date are dropped before the tally, so a single broken server cannot
- * decide the vote. The newest date breaks ties.
+ * date are dropped, so a broken server cannot poison the result. One
+ * usable mirror is enough.
+ *
+ * WHY NEWEST-WINS AND NOT A MAJORITY VOTE: releases reach r11 first and
+ * replicate to the rest of the fleet later, so around release time the
+ * freshest mirror is by definition a minority of one. A majority vote
+ * silently hides real releases behind stale mirrors — exactly how fielded
+ * clients spent August 2026 believing 2026-08-08 was current while
+ * 2026-08-20 had shipped. The failure modes are asymmetric: a mirror
+ * serving a wrongly-new date can only cause an unnecessary prompt (the
+ * actual download is SHA-256-verified separately, and a date <= the local
+ * build never prompts at all), while a stale majority suppresses updates
+ * entirely. (Decision: Sean, 2026-08-20 — no consensus required.)
  *
  * @param {string[]} urls Mirrors to poll.
  * @param {(body: string, url: string) => string|null} extract Pulls the
  *   date out of a response body; returns null to discard that mirror.
- * @returns {Promise<string|null>} Winning date, or null if no mirror
+ * @returns {Promise<string|null>} Newest date, or null if no mirror
  *   produced a usable one.
  */
 const pollVersionMirrors = async (urls, extract) => {
@@ -3081,12 +3108,8 @@ const pollVersionMirrors = async (urls, extract) => {
     .map((result) => result.value);
   if (dates.length === 0) return null;
 
-  const tally = new Map();
-  dates.forEach((date) => tally.set(date, (tally.get(date) || 0) + 1));
-  const [winner] = [...tally.entries()].sort(
-    (a, b) => b[1] - a[1] || (b[0] > a[0] ? 1 : -1),
-  )[0];
-  return winner;
+  // Zero-padded ISO dates: lexicographic order == chronological order.
+  return dates.sort().at(-1);
 };
 
 /**
@@ -3111,8 +3134,13 @@ export const checkVersion = async () => {
     let source = "manifest";
 
     if (platform) {
+      // Manifest tier: the same-host HTML page plus the RAIDA mirrors.
+      // Legacy stays a strictly LOWER tier (not mixed into this poll):
+      // its single date describes the latest desktop/Windows release, so
+      // letting it compete under newest-wins would re-create the very bug
+      // the manifest fixed — a Mac being prompted because Windows shipped.
       latestVersion = await pollVersionMirrors(
-        REMOTE_VERSION_MANIFEST_URLS,
+        [VERSIONS_HTML_URL, ...REMOTE_VERSION_MANIFEST_URLS],
         (body) => {
           const manifest = parseVersionManifest(body);
           const value = manifest?.[platform];
