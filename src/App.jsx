@@ -56,6 +56,13 @@ function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeExecutablePath, setUpgradeExecutablePath] = useState("");
+  // In-place upgrade: whether this build can replace its own launcher
+  // (Windows portable / Linux AppImage — asked once from the main process),
+  // live progress of a running upgrade, and the failure text shown in the
+  // manual-instructions modal when the automatic path gives up.
+  const [upgradeSupport, setUpgradeSupport] = useState(null);
+  const [upgradeProgress, setUpgradeProgress] = useState(null);
+  const [upgradeFailureMessage, setUpgradeFailureMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
@@ -407,12 +414,50 @@ function App() {
       );
   }, []);
 
+  // Help > Upgrade menu item. When we already know an update exists and
+  // this build can self-replace, open the Upgrade Now modal; otherwise the
+  // manual-instructions modal (which shows the exact launcher path).
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const unsubscribe = window.electronAPI?.onUpgradeRequested?.((data) => {
-      setUpgradeExecutablePath(String(data?.executablePath || ""));
-      setShowUpdateModal(false);
-      setShowUpgradeModal(true);
+      if (data?.executablePath) {
+        setUpgradeExecutablePath(String(data.executablePath));
+      }
+      if (updateAvailable?.update_available && upgradeSupport?.supported) {
+        setShowUpgradeModal(false);
+        setShowUpdateModal(true);
+      } else {
+        setShowUpdateModal(false);
+        setShowUpgradeModal(true);
+      }
+    });
+    return typeof unsubscribe === "function" ? unsubscribe : undefined;
+  }, [updateAvailable, upgradeSupport]);
+
+  // Ask the main process once whether in-place upgrade is possible here.
+  // Also seeds the launcher path shown by the manual modal.
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let cancelled = false;
+    window.electronAPI
+      ?.upgradeSupported?.()
+      .then((support) => {
+        if (cancelled || !support) return;
+        setUpgradeSupport(support);
+        if (support.executablePath) {
+          setUpgradeExecutablePath(String(support.executablePath));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const unsubscribe = window.electronAPI?.onUpgradeProgress?.((progress) => {
+      setUpgradeProgress(progress || null);
     });
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
   }, []);
@@ -534,6 +579,78 @@ function App() {
     setShowUpdateModal(false);
   };
 
+  // One human sentence per upgrade failure code (upgrade.cjs). The exact
+  // code also lands in the main-process log for support.
+  const friendlyUpgradeError = (result) => {
+    switch (result?.code) {
+      case "permission":
+        return "QMail could not replace its own program file (the folder is not writable, and elevation was declined). Please update manually:";
+      case "no-space":
+        return "There is not enough free disk space next to QMail to download the update. Free some space or update manually:";
+      case "hash":
+        return "The downloaded update failed its integrity check and was discarded. Please update manually:";
+      case "download":
+      case "sums":
+        return "The update could not be downloaded (network problem or the download server is unreachable). Please try again later or update manually:";
+      default:
+        return "The automatic upgrade could not complete. Please update manually:";
+    }
+  };
+
+  const upgradeBusy =
+    upgradeProgress != null &&
+    ["checking", "downloading", "verifying", "installing", "restarting"].includes(
+      upgradeProgress.phase,
+    );
+
+  const handleUpgradeNow = async () => {
+    if (!updateAvailable || upgradeBusy) return;
+    setUpgradeFailureMessage("");
+    setUpgradeProgress({ phase: "checking" });
+
+    const result = await window.electronAPI
+      ?.startUpgrade?.(updateAvailable.latest_version)
+      .catch((error) => ({ ok: false, code: "ipc", error: error?.message }));
+
+    if (result?.ok) {
+      // Auto-restart (decision: Sean 2026-08-20 — "Restart now is
+      // customary"). Compose drafts are autosaved by the drafts subsystem,
+      // so restarting immediately does not discard user work.
+      setUpgradeProgress({ phase: "restarting" });
+      await window.electronAPI?.restartAfterUpgrade?.();
+      return;
+    }
+
+    setUpgradeProgress(null);
+    if (result?.code === "cancelled") return; // user aborted; stay quiet
+
+    // Every other failure lands on the manual path with the reason named.
+    console.error("In-place upgrade failed:", result);
+    setUpgradeFailureMessage(friendlyUpgradeError(result));
+    setShowUpdateModal(false);
+    setShowUpgradeModal(true);
+  };
+
+  const handleCancelUpgrade = () => {
+    window.electronAPI?.cancelUpgrade?.();
+  };
+
+  const upgradePhaseLabel = () => {
+    const phase = upgradeProgress?.phase;
+    if (phase === "downloading") {
+      const { received = 0, total = 0 } = upgradeProgress;
+      const percent = total > 0 ? Math.floor((received / total) * 100) : null;
+      const mb = (bytes) => (bytes / (1024 * 1024)).toFixed(1);
+      return percent === null
+        ? `Downloading… ${mb(received)} MB`
+        : `Downloading… ${percent}% (${mb(received)} of ${mb(total)} MB)`;
+    }
+    if (phase === "verifying") return "Verifying the download…";
+    if (phase === "installing") return "Installing…";
+    if (phase === "restarting") return "Restarting QMail…";
+    return "Checking for the latest version…";
+  };
+
   const renderUpgradeModal = () =>
     showUpgradeModal ? (
       <div className="update-modal__overlay" role="presentation">
@@ -557,6 +674,11 @@ function App() {
           </header>
 
           <div className="update-modal__content">
+            {upgradeFailureMessage && (
+              <p className="update-modal__upgrade-failure">
+                {upgradeFailureMessage}
+              </p>
+            )}
             <p className="update-modal__upgrade-instructions">
               Download the executable for your operating system{" "}
               <button
@@ -724,12 +846,14 @@ function App() {
               <div className="update-modal__header">
                 <AlertTriangle size={48} className="update-modal__icon" />
                 <h2>Update Available</h2>
-                <button
-                  className="update-modal__close"
-                  onClick={() => setShowUpdateModal(false)}
-                >
-                  <X size={20} />
-                </button>
+                {!upgradeBusy && (
+                  <button
+                    className="update-modal__close"
+                    onClick={() => setShowUpdateModal(false)}
+                  >
+                    <X size={20} />
+                  </button>
+                )}
               </div>
 
               <div className="update-modal__content">
@@ -750,27 +874,82 @@ function App() {
                   </div>
                 </div>
 
-                <p className="update-modal__description">
-                  A new version of QMail is available. Click below to open the
-                  downloads page in your browser, then download and install the
-                  latest version.
-                </p>
+                {upgradeBusy ? (
+                  <div className="update-modal__progress">
+                    <p className="update-modal__description">
+                      {upgradePhaseLabel()}
+                    </p>
+                    {upgradeProgress?.phase === "downloading" &&
+                      upgradeProgress.total > 0 && (
+                        <div
+                          className="update-modal__progress-track"
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.floor(
+                            (upgradeProgress.received / upgradeProgress.total) *
+                              100,
+                          )}
+                        >
+                          <div
+                            className="update-modal__progress-fill"
+                            style={{
+                              width: `${Math.floor(
+                                (upgradeProgress.received /
+                                  upgradeProgress.total) *
+                                  100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      )}
+                  </div>
+                ) : (
+                  <p className="update-modal__description">
+                    {upgradeSupport?.supported
+                      ? "Click Upgrade Now and QMail will download the new version, verify it, install it over the current program, and restart. Your wallets and mail are not touched."
+                      : "A new version of QMail is available. Click below to open the downloads page in your browser, then download and install the latest version."}
+                  </p>
+                )}
               </div>
 
               <div className="update-modal__actions">
-                <button
-                  className="update-modal__download-button"
-                  onClick={handleDownload}
-                >
-                  <Download size={20} />
-                  Download Update
-                </button>
-                <button
-                  className="update-modal__later-button"
-                  onClick={() => setShowUpdateModal(false)}
-                >
-                  Remind Me Later
-                </button>
+                {upgradeBusy ? (
+                  upgradeProgress?.phase === "downloading" && (
+                    <button
+                      className="update-modal__later-button"
+                      onClick={handleCancelUpgrade}
+                    >
+                      Cancel
+                    </button>
+                  )
+                ) : (
+                  <>
+                    {upgradeSupport?.supported ? (
+                      <button
+                        className="update-modal__download-button"
+                        onClick={handleUpgradeNow}
+                      >
+                        <Download size={20} />
+                        Upgrade Now
+                      </button>
+                    ) : (
+                      <button
+                        className="update-modal__download-button"
+                        onClick={handleDownload}
+                      >
+                        <Download size={20} />
+                        Download Update
+                      </button>
+                    )}
+                    <button
+                      className="update-modal__later-button"
+                      onClick={() => setShowUpdateModal(false)}
+                    >
+                      Remind Me Later
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>

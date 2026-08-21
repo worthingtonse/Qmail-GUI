@@ -33,6 +33,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
 const { parseTransactionCsv } = require('./transaction-log.cjs');
+const upgrade = require('./upgrade.cjs');
 
 process.stdout.write('[ELECTRON] Starting...\n');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -3095,6 +3096,63 @@ ipcMain.handle('open-external', async (_event, url) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// In-place upgrade (see upgrade.cjs for the download/verify/swap pipeline).
+// The renderer drives the flow: upgrade-supported decides whether the
+// "Upgrade Now" button appears at all, upgrade-start runs the pipeline with
+// progress streamed back over qmail:upgrade-progress, and upgrade-restart
+// relaunches into the freshly swapped launcher.
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('qmail:upgrade-supported', () => {
+  const target = upgrade.resolveUpgradeTarget();
+  return {
+    supported: target.supported,
+    reason: target.reason,
+    executablePath: target.targetPath || getQmailExecutablePath(),
+  };
+});
+
+ipcMain.handle('qmail:upgrade-start', async (_event, latestVersion) => {
+  return upgrade.performUpgrade({
+    latestVersion,
+    log,
+    onProgress: (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('qmail:upgrade-progress', progress);
+      }
+    },
+  });
+});
+
+ipcMain.handle('qmail:upgrade-cancel', () => upgrade.cancelUpgrade());
+
+ipcMain.handle('qmail:upgrade-restart', () => {
+  const target = upgrade.resolveUpgradeTarget();
+  if (!target.supported) return false;
+
+  // Spawn the swapped launcher explicitly instead of app.relaunch():
+  // relaunch's default execPath is the portable build's TEMP-UNPACKED
+  // binary, and even with an execPath override the portable stub's
+  // process tree makes its behavior murky — a detached spawn of the real
+  // on-disk file is deterministic. The backend is stopped first so the
+  // new instance never races the old core.exe for the data dir.
+  killBackend('upgrade-restart');
+  try {
+    const child = spawn(target.targetPath, [], {
+      cwd: path.dirname(target.targetPath),
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch (e) {
+    log('upgrade-restart spawn failed: ' + e.message);
+    return false;
+  }
+  app.quit();
+  return true;
+});
+
 ipcMain.handle('reveal-path', async (_event, targetPath) => {
   try {
     const requestedPath = String(targetPath || '').trim();
@@ -3148,6 +3206,16 @@ ipcMain.handle('list-sound-files', async () => {
 //   5. Splash closes when the main window's first paint fires.
 //   6. Frontend receives backend-ready signal when core.exe is listening.
 async function boot() {
+  // First thing: sweep upgrade leftovers. The previous instance could not
+  // delete its renamed-away launcher (".old" was still the running,
+  // OS-locked file when the swap happened) or an interrupted download may
+  // have stranded a ".new". Both live next to the launcher, never near
+  // Client_Data.
+  const upgradeTarget = upgrade.resolveUpgradeTarget();
+  if (upgradeTarget.supported) {
+    upgrade.cleanupLeftovers(upgradeTarget.targetPath, log);
+  }
+
   if (qmailArgs.port !== null) {
     backendPort = qmailArgs.port;
     log('Using explicit port: ' + backendPort);

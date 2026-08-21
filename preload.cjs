@@ -84,6 +84,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('qmail:upgrade-requested', handler);
     return () => ipcRenderer.removeListener('qmail:upgrade-requested', handler);
   },
+  // In-place upgrade (upgrade.cjs): whether this build can self-replace,
+  // start the download/verify/swap pipeline, cancel the in-flight
+  // download, and relaunch into the swapped launcher.
+  upgradeSupported: () => ipcRenderer.invoke('qmail:upgrade-supported'),
+  startUpgrade: (latestVersion) =>
+    ipcRenderer.invoke('qmail:upgrade-start', latestVersion),
+  cancelUpgrade: () => ipcRenderer.invoke('qmail:upgrade-cancel'),
+  restartAfterUpgrade: () => ipcRenderer.invoke('qmail:upgrade-restart'),
+  onUpgradeProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const handler = (_event, progress) => callback(progress);
+    ipcRenderer.on('qmail:upgrade-progress', handler);
+    return () => ipcRenderer.removeListener('qmail:upgrade-progress', handler);
+  },
   onTitleBarColorPick: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = (_event, data) => callback(data);
