@@ -3034,30 +3034,62 @@ const VERSION_FETCH_TIMEOUT_MS = 8000;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Extracts the JSON object from a manifest response.
+ * Extracts the version-manifest JSON object from a response body.
  *
- * The served file keeps a bare ISO date on its first line so that anything
- * pointed at it still reads a usable version, with the JSON object on the
- * lines after. We therefore parse from the first "{" rather than treating
- * the whole body as JSON.
+ * The RAIDA .php files keep a bare ISO date on line 1 with the JSON after
+ * it, so first-"{"-to-last-"}" finds the object there. The same-host HTML
+ * page (VERSIONS_HTML_URL) is a normal web page that may carry OTHER brace
+ * pairs — inline CSS, a script — before or after the version block, so
+ * that single span is not enough: this walks every "{" and tries each
+ * balanced span until one parses into an object that actually looks like a
+ * version manifest (at least one YYYY-MM-DD value). Anything that does not
+ * parse is discarded, never trusted.
  *
- * @returns {Object|null} Parsed object, or null if the body has no valid
- *   JSON object — callers fall back to the legacy endpoint.
+ * @returns {Object|null} Parsed manifest, or null if the body contains no
+ *   recognizable one — callers drop that mirror / fall back to legacy.
  */
+const looksLikeVersionManifest = (candidate) =>
+  candidate != null &&
+  typeof candidate === "object" &&
+  !Array.isArray(candidate) &&
+  Object.values(candidate).some(
+    (value) => typeof value === "string" && ISO_DATE_PATTERN.test(value.trim()),
+  );
+
 const parseVersionManifest = (body) => {
   const text = String(body || "");
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first === -1 || last <= first) return null;
 
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed
-      : null;
-  } catch {
-    return null;
+  // The whole-span candidate first (the plain .php fast path), then each
+  // balanced {...} span in document order, bounded so a pathological page
+  // cannot burn cycles.
+  const candidates = [text.slice(first, last + 1)];
+  for (
+    let i = first;
+    i !== -1 && candidates.length < 32;
+    i = text.indexOf("{", i + 1)
+  ) {
+    let depth = 0;
+    for (let j = i; j <= last; j++) {
+      if (text[j] === "{") depth++;
+      else if (text[j] === "}" && --depth === 0) {
+        candidates.push(text.slice(i, j + 1));
+        break;
+      }
+    }
   }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (looksLikeVersionManifest(parsed)) return parsed;
+    } catch {
+      /* not JSON — try the next span */
+    }
+  }
+  return null;
 };
 
 /**

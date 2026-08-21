@@ -262,6 +262,32 @@ describe("checkVersion per-platform manifest", () => {
     expect(result.data.update_available).toBe(true);
   });
 
+  it("reads the HTML page even when styling adds other braces", async () => {
+    // A realistically styled page: CSS braces before the version block and
+    // a script after it. The parser must find the manifest object among
+    // them instead of swallowing first-{-to-last-} as one span — otherwise
+    // the one same-host source dies the moment CI styles the page, and
+    // clients fall back to the frozen legacy date.
+    mockFetchByUrl((url) => {
+      if (url === VERSIONS_HTML_URL) {
+        return (
+          "<html><head><style>body { margin: 0; } pre { color: #eee; }</style></head>" +
+          '<body><h1>QMail Releases</h1><pre id="qmail-versions">\n2099-06-07\n' +
+          `${JSON.stringify({ windows: "2099-06-07" })}\n</pre>` +
+          "<script>window.x = { legacy: false };</script></body></html>"
+        );
+      }
+      if (REMOTE_VERSION_MANIFEST_URLS.includes(url)) return undefined;
+      return "2001-01-01";
+    });
+
+    const result = await checkVersion();
+
+    expect(result.success).toBe(true);
+    expect(result.data.source).toBe("manifest");
+    expect(result.data.latest_version).toBe("2099-06-07");
+  });
+
   it("takes the newest date when manifest mirrors disagree", async () => {
     // Release-day skew: one mirror already replicated, the rest are a day
     // behind. The newer date must win without any quorum.

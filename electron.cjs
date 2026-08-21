@@ -3131,15 +3131,25 @@ ipcMain.handle('qmail:upgrade-restart', () => {
   const target = upgrade.resolveUpgradeTarget();
   if (!target.supported) return false;
 
+  // Only after a verified swap. Without this latch the IPC would be a
+  // free kill-the-backend-and-relaunch primitive for anything that can
+  // reach the preload API.
+  if (!upgrade.consumeInstalledLatch()) {
+    log('upgrade-restart refused: no completed upgrade to restart into');
+    return false;
+  }
+
   // Spawn the swapped launcher explicitly instead of app.relaunch():
   // relaunch's default execPath is the portable build's TEMP-UNPACKED
   // binary, and even with an execPath override the portable stub's
   // process tree makes its behavior murky — a detached spawn of the real
   // on-disk file is deterministic. The backend is stopped first so the
-  // new instance never races the old core.exe for the data dir.
+  // new instance never races the old core.exe for the data dir. CLI
+  // flags (e.g. -port) ride along so a scripted launch comes back with
+  // the same configuration; argv[0] is the executable itself.
   killBackend('upgrade-restart');
   try {
-    const child = spawn(target.targetPath, [], {
+    const child = spawn(target.targetPath, process.argv.slice(1), {
       cwd: path.dirname(target.targetPath),
       detached: true,
       stdio: 'ignore',

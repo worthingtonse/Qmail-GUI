@@ -16,6 +16,8 @@ import {
   resolveUpgradeTarget,
   performUpgrade,
   cleanupLeftovers,
+  cancelUpgrade,
+  consumeInstalledLatch,
 } from "../upgrade.cjs";
 import { buildDate as LOCAL_BUILD_DATE } from "../version.json";
 
@@ -42,6 +44,8 @@ afterEach(() => {
   if (savedAppImage === undefined) delete process.env.APPIMAGE;
   else process.env.APPIMAGE = savedAppImage;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  consumeInstalledLatch(); // clear module state a successful run leaves behind
   if (tempDir) {
     fs.rmSync(tempDir, { recursive: true, force: true });
     tempDir = null;
@@ -217,6 +221,152 @@ describe.runIf(process.platform === "win32")("performUpgrade pipeline", () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe("sums");
     expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+  });
+});
+
+describe.runIf(process.platform === "win32")("performUpgrade swap failures", () => {
+  const NEW_BYTES = Buffer.from("NEW LAUNCHER BYTES v2");
+
+  const stubGoodDownload = () =>
+    stubFetch((url) => {
+      if (url.endsWith("/SHA256SUMS")) return `${sha256(NEW_BYTES)}  QMail.exe\n`;
+      if (url.endsWith("/QMail.exe")) return NEW_BYTES;
+      return undefined;
+    });
+
+  const errWithCode = (code) => {
+    const error = new Error(code);
+    error.code = code;
+    return error;
+  };
+
+  it(
+    "EBUSY on the swap fails to manual without elevating, launcher restored",
+    async () => {
+      const targetPath = makeTempTarget();
+      stubGoodDownload();
+
+      const realRename = fs.promises.rename.bind(fs.promises);
+      vi.spyOn(fs.promises, "rename").mockImplementation((from, to) => {
+        // The install rename (staged -> target) is persistently EBUSY, as
+        // under an antivirus scan; everything else behaves normally.
+        if (String(from).endsWith(".new")) throw errWithCode("EBUSY");
+        return realRename(from, to);
+      });
+
+      const result = await performUpgrade({ latestVersion: NEW_VERSION });
+
+      expect(result.ok).toBe(false);
+      // EBUSY is a transient lock, not "needs admin rights": the code must
+      // be 'swap' (manual fallback), never 'permission' (UAC prompt).
+      expect(result.code).toBe("swap");
+      expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+      expect(fs.existsSync(targetPath + ".new")).toBe(false);
+      expect(consumeInstalledLatch()).toBe(false);
+    },
+    30_000,
+  );
+
+  it(
+    "a stranded swap keeps .old and .new as the only remaining copies",
+    async () => {
+      const targetPath = makeTempTarget();
+      stubGoodDownload();
+
+      const realRename = fs.promises.rename.bind(fs.promises);
+      vi.spyOn(fs.promises, "rename").mockImplementation((from, to) => {
+        // Second rename (staged -> target) fails AND the rollback
+        // (old -> target) fails: the worst case the review flagged. The
+        // pipeline must not "clean up" the user's only two copies, and
+        // must not walk into an elevation prompt over a half-done swap.
+        if (String(from).endsWith(".new")) throw errWithCode("EPERM");
+        if (String(from).endsWith(".old")) throw errWithCode("EPERM");
+        return realRename(from, to);
+      });
+
+      const result = await performUpgrade({ latestVersion: NEW_VERSION });
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("swap");
+      expect(fs.existsSync(targetPath)).toBe(false); // renamed away
+      expect(fs.readFileSync(targetPath + ".old", "utf8")).toBe(
+        "OLD LAUNCHER BYTES",
+      );
+      expect(fs.readFileSync(targetPath + ".new")).toEqual(NEW_BYTES);
+    },
+    60_000,
+  );
+
+  it("cancel during the download deletes .new and keeps the launcher", async () => {
+    const targetPath = makeTempTarget();
+    let sawFirstChunk;
+    const firstChunk = new Promise((resolve) => {
+      sawFirstChunk = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (String(url).endsWith("/SHA256SUMS")) {
+          return new Response(`${sha256(NEW_BYTES)}  QMail.exe\n`, {
+            status: 200,
+            headers: { "content-length": "100" },
+          });
+        }
+        // A download that sends one chunk and then hangs until aborted.
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(16));
+              sawFirstChunk();
+            },
+          }),
+          { status: 200, headers: { "content-length": "1000000" } },
+        );
+      }),
+    );
+
+    const resultPromise = performUpgrade({ latestVersion: NEW_VERSION });
+    await firstChunk;
+    expect(cancelUpgrade()).toBe(true);
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("cancelled");
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+    expect(fs.existsSync(targetPath + ".new")).toBe(false);
+  });
+
+  it("refuses a download with no announced size", async () => {
+    const targetPath = makeTempTarget();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (String(url).endsWith("/SHA256SUMS")) {
+          return new Response(`${sha256(NEW_BYTES)}  QMail.exe\n`, {
+            status: 200,
+          });
+        }
+        return new Response(NEW_BYTES, { status: 200 }); // no content-length
+      }),
+    );
+
+    const result = await performUpgrade({ latestVersion: NEW_VERSION });
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("download");
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+  });
+
+  it("arms the restart latch only after a completed swap", async () => {
+    makeTempTarget();
+    stubGoodDownload();
+
+    expect(consumeInstalledLatch()).toBe(false);
+    const result = await performUpgrade({ latestVersion: NEW_VERSION });
+    expect(result.ok).toBe(true);
+    // One-shot: armed by the swap, cleared by the first consume.
+    expect(consumeInstalledLatch()).toBe(true);
+    expect(consumeInstalledLatch()).toBe(false);
   });
 });
 

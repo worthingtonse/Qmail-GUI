@@ -62,6 +62,18 @@ const RENAME_RETRY_DELAYS_MS = [0, 250, 500, 1000, 2000];
 
 let activeAbort = null; // AbortController of the in-flight download, if any
 
+// Set only when performUpgrade completed a verified swap. The restart IPC
+// is a no-op without it, so a renderer (or injected script) can never use
+// "restart" as a free kill-the-backend-and-respawn primitive.
+let installedAwaitingRestart = false;
+
+/** One-shot check-and-clear of the "a swap actually happened" latch. */
+function consumeInstalledLatch() {
+  const was = installedAwaitingRestart;
+  installedAwaitingRestart = false;
+  return was;
+}
+
 const noop = () => {};
 
 /**
@@ -137,13 +149,23 @@ function parseSha256Sums(text) {
 }
 
 async function fetchSha256Sums(signal) {
-  const response = await fetch(`${DOWNLOAD_BASE_URL}SHA256SUMS`, {
-    signal: anySignal(signal, AbortSignal.timeout(SUMS_FETCH_TIMEOUT_MS)),
-  });
-  if (!response.ok) {
-    throw upgradeError('sums', `SHA256SUMS returned HTTP ${response.status}`);
+  let response;
+  let text;
+  try {
+    response = await fetch(`${DOWNLOAD_BASE_URL}SHA256SUMS`, {
+      signal: anySignal(signal, AbortSignal.timeout(SUMS_FETCH_TIMEOUT_MS)),
+    });
+    if (response.status !== 200) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    text = await response.text();
+  } catch (e) {
+    // Preserve a user cancel; label everything else (timeout, network,
+    // bad status) as a 'sums' failure rather than a generic 'download'.
+    if (e && e.upgradeCode === 'cancelled') throw e;
+    throw upgradeError('sums', `Could not fetch SHA256SUMS: ${e.message || e}`);
   }
-  const sums = parseSha256Sums(await response.text());
+  const sums = parseSha256Sums(text);
   if (sums.size === 0) {
     throw upgradeError('sums', 'SHA256SUMS is empty or unparseable');
   }
@@ -213,21 +235,26 @@ async function downloadTo(url, stagedPath, { signal, onProgress, log }) {
   let handle = null;
   try {
     const response = await fetch(url, { signal: combined });
-    if (!response.ok) {
+    if (response.status !== 200) {
       throw upgradeError('download', `Download returned HTTP ${response.status}`);
     }
 
+    // A 60-80 MB artifact with no announced size cannot be checked against
+    // free space (a real risk on the USB sticks QMail runs from), and the
+    // static file server always sends Content-Length — its absence means
+    // something is off. Refuse rather than stream blind.
     const total = Number(response.headers.get('content-length')) || 0;
-    if (total > 0) {
-      const free = await freeBytesIn(path.dirname(stagedPath));
-      // 2x: the .new file plus headroom for the filesystem and the moment
-      // both old and new launchers exist side by side.
-      if (free !== null && free < total * 2) {
-        throw upgradeError(
-          'no-space',
-          `Not enough free space: need ~${Math.ceil((total * 2) / 1e6)} MB`,
-        );
-      }
+    if (total <= 0) {
+      throw upgradeError('download', 'Server did not report a download size');
+    }
+    const free = await freeBytesIn(path.dirname(stagedPath));
+    // 2x: the .new file plus headroom for the filesystem and the moment
+    // both old and new launchers exist side by side.
+    if (free !== null && free < total * 2) {
+      throw upgradeError(
+        'no-space',
+        `Not enough free space: need ~${Math.ceil((total * 2) / 1e6)} MB`,
+      );
     }
 
     const hash = crypto.createHash('sha256');
@@ -244,7 +271,7 @@ async function downloadTo(url, stagedPath, { signal, onProgress, log }) {
     await handle.close();
     handle = null;
 
-    if (total > 0 && received !== total) {
+    if (received !== total) {
       throw upgradeError(
         'download',
         `Truncated download: got ${received} of ${total} bytes`,
@@ -289,12 +316,21 @@ async function renameWithRetry(from, to, log) {
   throw lastError;
 }
 
+// Elevation is for genuinely unwritable locations (Program Files,
+// write-protected media). EBUSY is a transient lock — an antivirus scan —
+// that the retry loop already waited out; a UAC prompt cannot fix it and
+// showing one would mislead the user, so it fails to the manual path.
 const isPermissionError = (e) =>
-  e && (e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'EBUSY');
+  e && (e.code === 'EPERM' || e.code === 'EACCES');
 
 /**
- * The unelevated swap. On any failure after the first rename, rolls the
- * original launcher back into place before rethrowing.
+ * The unelevated swap. On a failure after the first rename, rolls the
+ * original launcher back into place (with the same retry the forward
+ * renames get — the failure cause is usually a scanner that is still
+ * around) before rethrowing. If even the rollback fails, the thrown error
+ * carries `stranded: true`: the launcher sits at .old, the new bytes at
+ * .new, and the caller must neither elevate (the swap already half
+ * happened) nor delete either file.
  */
 async function swapInPlace(targetPath, log) {
   const oldPath = targetPath + '.old';
@@ -311,12 +347,11 @@ async function swapInPlace(targetPath, log) {
     await renameWithRetry(stagedPath, targetPath, log);
   } catch (e) {
     try {
-      await fs.promises.rename(oldPath, targetPath); // roll back
+      await renameWithRetry(oldPath, targetPath, log); // roll back
       log('upgrade: second rename failed; original launcher restored');
     } catch (rollbackError) {
-      // Launcher is renamed-away and could not be restored. The .old file
-      // still runs if double-clicked; surface loudly.
       log(`upgrade: ROLLBACK FAILED: ${rollbackError.message}`);
+      e.stranded = true;
     }
     throw e;
   }
@@ -355,14 +390,28 @@ function runProcess(command, args, options) {
 
 /**
  * Elevated swap fallback for launchers in unwritable places (Program
- * Files, some USB configurations). Writes a throwaway script that does
- * both moves — restoring the original launcher itself if the second move
- * fails, since only the elevated context can write that directory — and
- * runs it through the OS elevation prompt. Async on purpose: a blocking
- * wait here would freeze the main process for as long as the UAC prompt
- * sits on screen. The caller verifies the outcome by re-hashing the
- * target, so this function's exit-status blindness (Start-Process hides
- * the script's own status) is harmless.
+ * Files, some USB configurations). Async on purpose: a blocking wait here
+ * would freeze the main process for as long as the elevation prompt sits
+ * on screen.
+ *
+ * The elevated commands are built to be safe against every state and
+ * every path:
+ * - Paths are NEVER interpolated into a shell-parsed string. On Linux
+ *   they ride as positional arguments after `sh -c '<fixed script>'`; a
+ *   directory named `$(reboot)` is just a directory. On Windows the
+ *   script (paths embedded as PowerShell single-quoted literals via
+ *   psQuote) is passed base64-as-UTF-16 through -EncodedCommand, which
+ *   also survives non-ASCII user paths and leaves no on-disk temp script
+ *   for same-user malware to swap under the UAC prompt.
+ * - .old is never deleted: when the target is already missing (a partial
+ *   unelevated swap got the launcher renamed away), .old IS the original
+ *   and the script skips straight to installing .new.
+ * - If installing .new fails, the script itself restores .old — only the
+ *   elevated context can write that directory.
+ *
+ * The caller confirms success by re-hashing the target; the exit code
+ * (surfaced via -PassThru on Windows) only distinguishes "ran" from
+ * "declined/unavailable".
  *
  * @returns {Promise<boolean>} true if the elevated process ran to
  *   completion; false if elevation was declined or unavailable.
@@ -372,47 +421,46 @@ async function elevatedSwap(targetPath, log) {
   const stagedPath = targetPath + '.new';
 
   if (process.platform === 'win32') {
-    const scriptPath = path.join(os.tmpdir(), `qmail-upgrade-${process.pid}.cmd`);
-    const script =
-      '@echo off\r\n' +
-      `if exist "${oldPath}" del /f /q "${oldPath}"\r\n` +
-      `move /y "${targetPath}" "${oldPath}" || exit /b 1\r\n` +
-      `move /y "${stagedPath}" "${targetPath}"\r\n` +
-      `if errorlevel 1 move /y "${oldPath}" "${targetPath}"\r\n`;
-    try {
-      fs.writeFileSync(scriptPath, script);
-      const status = await runProcess(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          `Start-Process -FilePath ${psQuote(scriptPath)} -Verb RunAs -Wait -WindowStyle Hidden`,
-        ],
-        { windowsHide: true, stdio: 'ignore' },
-      );
-      // A declined UAC prompt makes Start-Process itself fail (exit != 0).
-      return status === 0;
-    } catch (e) {
-      log(`upgrade: elevated swap failed to launch: ${e.message}`);
-      return false;
-    } finally {
-      try {
-        fs.unlinkSync(scriptPath);
-      } catch {
-        /* best effort */
-      }
-    }
+    const inner =
+      "$ErrorActionPreference='Stop'\n" +
+      `$t=${psQuote(targetPath)}; $o=${psQuote(oldPath)}; $s=${psQuote(stagedPath)}\n` +
+      'try {\n' +
+      '  if (Test-Path -LiteralPath $t) { Move-Item -LiteralPath $t -Destination $o -Force }\n' +
+      '  Move-Item -LiteralPath $s -Destination $t -Force\n' +
+      '  exit 0\n' +
+      '} catch {\n' +
+      '  if (-not (Test-Path -LiteralPath $t) -and (Test-Path -LiteralPath $o)) {\n' +
+      '    try { Move-Item -LiteralPath $o -Destination $t -Force } catch {}\n' +
+      '  }\n' +
+      '  exit 1\n' +
+      '}\n';
+    const encoded = Buffer.from(inner, 'utf16le').toString('base64');
+    const outer =
+      'try { ' +
+      "$p = Start-Process -FilePath 'powershell.exe' -ArgumentList " +
+      `'-NoProfile','-WindowStyle','Hidden','-EncodedCommand','${encoded}' ` +
+      '-Verb RunAs -Wait -PassThru; exit $p.ExitCode ' +
+      '} catch { exit 5 }'; // 5 = UAC declined / failed to launch
+    const status = await runProcess(
+      'powershell.exe',
+      ['-NoProfile', '-Command', outer],
+      { windowsHide: true, stdio: 'ignore' },
+    );
+    if (status !== 0) log(`upgrade: elevated swap exit=${status}`);
+    return status === 0;
   }
 
   if (process.platform === 'linux') {
-    const shellCmd =
-      `rm -f "${oldPath}" && ` +
-      `mv "${targetPath}" "${oldPath}" && ` +
-      `if mv "${stagedPath}" "${targetPath}"; then chmod 755 "${targetPath}"; ` +
-      `else mv "${oldPath}" "${targetPath}"; exit 1; fi`;
-    const status = await runProcess('pkexec', ['sh', '-c', shellCmd], {
-      stdio: 'ignore',
-    });
+    const script =
+      'o="$1"; t="$2"; s="$3"; ' +
+      'if [ -e "$t" ]; then mv -f "$t" "$o" || exit 1; fi; ' +
+      'if mv -f "$s" "$t"; then chmod 755 "$t"; ' +
+      'else if [ ! -e "$t" ] && [ -e "$o" ]; then mv -f "$o" "$t"; fi; exit 1; fi';
+    const status = await runProcess(
+      'pkexec',
+      ['sh', '-c', script, 'sh', oldPath, targetPath, stagedPath],
+      { stdio: 'ignore' },
+    );
     if (status === null) log('upgrade: pkexec unavailable');
     return status === 0;
   }
@@ -476,10 +524,24 @@ async function performUpgrade({ latestVersion, onProgress = noop, log = noop }) 
   const controller = new AbortController();
   activeAbort = controller;
 
+  // No 'failed' progress event on purpose: the renderer drives its failure
+  // UI solely off this function's return value. A failure event racing the
+  // IPC result briefly un-busied the modal and let Upgrade Now be
+  // double-clicked (Grok review 2026-08-20).
   const fail = (code, message) => {
     log(`upgrade: FAILED (${code}): ${message}`);
-    onProgress({ phase: 'failed', code, message });
     return { ok: false, code, error: message };
+  };
+
+  // The staged download is discarded on failure ONLY while the launcher
+  // itself is intact. If the target is gone (a stranded partial swap),
+  // .new and .old are the user's only remaining copies — keep both.
+  const discardStaged = async () => {
+    if (fs.existsSync(targetPath)) {
+      await fs.promises.unlink(stagedPath).catch(noop);
+    } else {
+      log(`upgrade: target missing — keeping ${stagedPath} for recovery`);
+    }
   };
 
   try {
@@ -539,31 +601,44 @@ async function performUpgrade({ latestVersion, onProgress = noop, log = noop }) 
     }
 
     if (process.platform !== 'win32') {
-      await fs.promises.chmod(stagedPath, 0o755).catch(noop);
+      try {
+        await fs.promises.chmod(stagedPath, 0o755);
+      } catch (e) {
+        // Swapping in a non-executable AppImage would make the relaunch
+        // (and every later double-click) fail — stop before the swap.
+        await discardStaged();
+        return fail('permission', `Could not make the update executable: ${e.message}`);
+      }
     }
 
     onProgress({ phase: 'installing' });
     try {
       await swapInPlace(targetPath, log);
     } catch (e) {
-      if (!isPermissionError(e)) {
-        await fs.promises.unlink(stagedPath).catch(noop);
+      if (e.stranded || !isPermissionError(e)) {
+        // stranded: the launcher is at .old, the update at .new, and even
+        // the retried rollback failed — do NOT elevate (the swap already
+        // half-happened outside the elevated context's view) and do NOT
+        // delete either file. discardStaged() keeps both when the target
+        // is missing.
+        await discardStaged();
         return fail('swap', e.message);
       }
       log('upgrade: swap needs elevation, prompting');
       const elevated = await elevatedSwap(targetPath, log);
       const installedHash = elevated ? await hashFile(targetPath).catch(() => null) : null;
       if (!elevated || !acceptable.has(installedHash)) {
-        await fs.promises.unlink(stagedPath).catch(noop);
+        await discardStaged();
         return fail('permission', 'The launcher folder is not writable and elevation was declined or failed');
       }
     }
 
     log(`upgrade: installed ${version} at ${targetPath}`);
+    installedAwaitingRestart = true;
     onProgress({ phase: 'ready' });
     return { ok: true, targetPath };
   } catch (e) {
-    await fs.promises.unlink(stagedPath).catch(noop);
+    await discardStaged();
     const code =
       e.upgradeCode ||
       (controller.signal.aborted ? 'cancelled' : 'download');
@@ -579,6 +654,7 @@ module.exports = {
   cleanupLeftovers,
   performUpgrade,
   cancelUpgrade,
+  consumeInstalledLatch,
   // exported for tests
   parseSha256Sums,
 };

@@ -63,6 +63,9 @@ function App() {
   const [upgradeSupport, setUpgradeSupport] = useState(null);
   const [upgradeProgress, setUpgradeProgress] = useState(null);
   const [upgradeFailureMessage, setUpgradeFailureMessage] = useState("");
+  // Help > Upgrade on a current install: a small "you're up to date"
+  // notice instead of instructions to overwrite a working program.
+  const [upToDateInfo, setUpToDateInfo] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState("Starting QMail…");
   const [hasAcceptedDisclaimer, setHasAcceptedDisclaimer] = useState(false);
@@ -414,25 +417,64 @@ function App() {
       );
   }, []);
 
-  // Help > Upgrade menu item. When we already know an update exists and
-  // this build can self-replace, open the Upgrade Now modal; otherwise the
-  // manual-instructions modal (which shows the exact launcher path).
+  // Help > Upgrade menu item. Three-way: a known update on a build that
+  // can self-replace opens the Upgrade Now modal; a known update on
+  // mac/dev (or after a failed automatic attempt) opens the manual
+  // copy-over modal; an up-to-date install says so instead of telling the
+  // user to overwrite a working program. Support/version data is fetched
+  // on demand when the click beats the startup checks.
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const unsubscribe = window.electronAPI?.onUpgradeRequested?.((data) => {
-      if (data?.executablePath) {
-        setUpgradeExecutablePath(String(data.executablePath));
-      }
-      if (updateAvailable?.update_available && upgradeSupport?.supported) {
-        setShowUpgradeModal(false);
-        setShowUpdateModal(true);
-      } else {
-        setShowUpdateModal(false);
-        setShowUpgradeModal(true);
-      }
-    });
+    const unsubscribe = window.electronAPI?.onUpgradeRequested?.(
+      async (data) => {
+        if (data?.executablePath) {
+          setUpgradeExecutablePath(String(data.executablePath));
+        }
+
+        if (upgradeFailureMessage) {
+          // The automatic path already failed this session — manual is the
+          // honest answer, with the failure reason still shown.
+          setShowUpdateModal(false);
+          setShowUpgradeModal(true);
+          return;
+        }
+
+        let support = upgradeSupport;
+        if (!support) {
+          support = await window.electronAPI?.upgradeSupported?.().catch(() => null);
+          if (support) setUpgradeSupport(support);
+        }
+
+        let info = updateAvailable;
+        if (!info) {
+          const result = await checkVersion().catch(() => null);
+          if (result?.success) {
+            info = result.data;
+            if (result.data.update_available) setUpdateAvailable(result.data);
+          }
+        }
+
+        if (info?.update_available) {
+          if (support?.supported) {
+            setShowUpgradeModal(false);
+            setUpdateAvailable(info);
+            setShowUpdateModal(true);
+          } else {
+            setShowUpdateModal(false);
+            setShowUpgradeModal(true);
+          }
+        } else if (info) {
+          setUpToDateInfo(info);
+        } else {
+          // The version check itself failed — the manual modal at least
+          // gives the user the download page and their launcher path.
+          setShowUpdateModal(false);
+          setShowUpgradeModal(true);
+        }
+      },
+    );
     return typeof unsubscribe === "function" ? unsubscribe : undefined;
-  }, [updateAvailable, upgradeSupport]);
+  }, [updateAvailable, upgradeSupport, upgradeFailureMessage]);
 
   // Ask the main process once whether in-place upgrade is possible here.
   // Also seeds the launcher path shown by the manual modal.
@@ -625,7 +667,15 @@ function App() {
       // customary"). Compose drafts are autosaved by the drafts subsystem,
       // so restarting immediately does not discard user work.
       setUpgradeProgress({ phase: "restarting" });
-      await window.electronAPI?.restartAfterUpgrade?.();
+      const restarted = await window.electronAPI
+        ?.restartAfterUpgrade?.()
+        .catch(() => false);
+      if (restarted !== true) {
+        // The swap DID happen; only the relaunch failed. Tell the user to
+        // finish by hand instead of leaving the modal stuck on
+        // "Restarting…" with every button hidden.
+        setUpgradeProgress({ phase: "installed" });
+      }
       return;
     }
 
@@ -658,6 +708,46 @@ function App() {
     if (phase === "ready" || phase === "restarting") return "Restarting QMail…";
     return "Checking for the latest version…";
   };
+
+  const renderUpToDateModal = () =>
+    upToDateInfo ? (
+      <div className="update-modal__overlay" role="presentation">
+        <section
+          className="update-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="qmail-uptodate-title"
+        >
+          <header className="update-modal__header">
+            <CheckCircle size={48} className="update-modal__icon" />
+            <h2 id="qmail-uptodate-title">QMail Is Up to Date</h2>
+            <button
+              type="button"
+              className="update-modal__close"
+              onClick={() => setUpToDateInfo(null)}
+              aria-label="Close"
+            >
+              <X size={20} />
+            </button>
+          </header>
+          <div className="update-modal__content">
+            <p className="update-modal__description">
+              You are running the latest version for this platform (
+              {formatBuildDateForDisplay(upToDateInfo.current_version)}).
+            </p>
+          </div>
+          <div className="update-modal__actions">
+            <button
+              type="button"
+              className="update-modal__later-button"
+              onClick={() => setUpToDateInfo(null)}
+            >
+              Close
+            </button>
+          </div>
+        </section>
+      </div>
+    ) : null;
 
   const renderUpgradeModal = () =>
     showUpgradeModal ? (
@@ -803,6 +893,7 @@ function App() {
     return (
       <div className="app-shell">
         {renderUpgradeModal()}
+        {renderUpToDateModal()}
         <section
           className="app-shell__disclaimer"
           aria-labelledby="qmail-disclaimer-title"
@@ -833,6 +924,7 @@ function App() {
     return (
       <div className="app-shell">
         {renderUpgradeModal()}
+        {renderUpToDateModal()}
         <div className="app-shell__loading">
           <Loader2 className="app-shell__loading-icon spinning" size={64} />
           <div className="app-shell__loading-message">
@@ -847,6 +939,7 @@ function App() {
     <NotificationProvider>
       <div className="app-shell">
         {renderUpgradeModal()}
+        {renderUpToDateModal()}
         {/* Update Modal */}
         {showUpdateModal && updateAvailable && (
           <div className="update-modal__overlay">
@@ -882,7 +975,13 @@ function App() {
                   </div>
                 </div>
 
-                {upgradeBusy ? (
+                {upgradeProgress?.phase === "installed" ? (
+                  <p className="update-modal__description">
+                    The new version is installed, but QMail could not restart
+                    itself. Close QMail and start it again to finish the
+                    upgrade.
+                  </p>
+                ) : upgradeBusy ? (
                   <div className="update-modal__progress">
                     <p className="update-modal__description">
                       {upgradePhaseLabel()}
@@ -922,7 +1021,14 @@ function App() {
               </div>
 
               <div className="update-modal__actions">
-                {upgradeBusy ? (
+                {upgradeProgress?.phase === "installed" ? (
+                  <button
+                    className="update-modal__download-button"
+                    onClick={() => window.electronAPI?.quitApp?.()}
+                  >
+                    Close QMail
+                  </button>
+                ) : upgradeBusy ? (
                   upgradeProgress?.phase === "downloading" && (
                     <button
                       className="update-modal__later-button"
@@ -948,6 +1054,14 @@ function App() {
                       >
                         <Download size={20} />
                         Download Update
+                      </button>
+                    )}
+                    {upgradeSupport?.supported && (
+                      <button
+                        className="update-modal__later-button"
+                        onClick={openDownloadPage}
+                      >
+                        Open Download Page
                       </button>
                     )}
                     <button
