@@ -3104,6 +3104,22 @@ ipcMain.handle('open-external', async (_event, url) => {
 // relaunches into the freshly swapped launcher.
 // ---------------------------------------------------------------------------
 
+// Upgrade steps also append to upgrade.log NEXT TO THE LAUNCHER, because
+// log() goes to stdout and a double-clicked GUI app has no stdout — the
+// first field failure (2026-08-20) left zero recoverable evidence. The
+// file sits beside QMail.exe (never inside Client_Data, which belongs to
+// core) so support can ask the user to send one obvious file.
+function upgradeLog(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  log(line);
+  try {
+    const dir = backendDataDir || getProgramDir();
+    fs.appendFileSync(path.join(dir, 'upgrade.log'), line + '\n');
+  } catch {
+    /* logging must never break the upgrade */
+  }
+}
+
 ipcMain.handle('qmail:upgrade-supported', () => {
   const target = upgrade.resolveUpgradeTarget();
   return {
@@ -3114,15 +3130,18 @@ ipcMain.handle('qmail:upgrade-supported', () => {
 });
 
 ipcMain.handle('qmail:upgrade-start', async (_event, latestVersion) => {
-  return upgrade.performUpgrade({
+  upgradeLog(`upgrade requested: latest=${latestVersion} build=${QMAIL_BUILD_DATE}`);
+  const result = await upgrade.performUpgrade({
     latestVersion,
-    log,
+    log: upgradeLog,
     onProgress: (progress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('qmail:upgrade-progress', progress);
       }
     },
   });
+  upgradeLog(`upgrade result: ${JSON.stringify(result)}`);
+  return result;
 });
 
 ipcMain.handle('qmail:upgrade-cancel', () => upgrade.cancelUpgrade());
@@ -3135,9 +3154,10 @@ ipcMain.handle('qmail:upgrade-restart', () => {
   // free kill-the-backend-and-relaunch primitive for anything that can
   // reach the preload API.
   if (!upgrade.consumeInstalledLatch()) {
-    log('upgrade-restart refused: no completed upgrade to restart into');
+    upgradeLog('upgrade-restart refused: no completed upgrade to restart into');
     return false;
   }
+  upgradeLog(`upgrade-restart: relaunching ${target.targetPath}`);
 
   // Spawn the swapped launcher explicitly instead of app.relaunch():
   // relaunch's default execPath is the portable build's TEMP-UNPACKED
@@ -3156,7 +3176,7 @@ ipcMain.handle('qmail:upgrade-restart', () => {
     });
     child.unref();
   } catch (e) {
-    log('upgrade-restart spawn failed: ' + e.message);
+    upgradeLog('upgrade-restart spawn failed: ' + e.message);
     return false;
   }
   app.quit();
@@ -3223,7 +3243,7 @@ async function boot() {
   // Client_Data.
   const upgradeTarget = upgrade.resolveUpgradeTarget();
   if (upgradeTarget.supported) {
-    upgrade.cleanupLeftovers(upgradeTarget.targetPath, log);
+    upgrade.cleanupLeftovers(upgradeTarget.targetPath, upgradeLog);
   }
 
   if (qmailArgs.port !== null) {

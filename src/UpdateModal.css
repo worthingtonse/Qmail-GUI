@@ -253,3 +253,13 @@
   line-height: 1.5;
   margin: 0 0 var(--space-md);
 }
+
+.update-modal__failure-detail {
+  color: var(--text-secondary);
+  display: block;
+  font-family: "Courier New", monospace;
+  font-size: var(--font-size-sm);
+  margin: 0 0 var(--space-md);
+  overflow-wrap: anywhere;
+  user-select: text;
+}

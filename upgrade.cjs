@@ -57,7 +57,12 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const SUMS_FETCH_TIMEOUT_MS = 30_000;
 const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
 const DOWNLOAD_TOTAL_TIMEOUT_MS = 15 * 60_000;
-const RENAME_RETRY_DELAYS_MS = [0, 250, 500, 1000, 2000];
+// ~16s total. The long tail is deliberate: Windows Defender scans a
+// freshly written 60+ MB unsigned executable on close, and holds it as
+// EBUSY for well over the few seconds a short backoff covers (observed in
+// acceptance testing 2026-08-20). File-sync tools (OneDrive) behave the
+// same on synced folders like Desktop.
+const RENAME_RETRY_DELAYS_MS = [0, 250, 500, 1000, 2000, 4000, 8000];
 
 let activeAbort = null; // AbortController of the in-flight download, if any
 

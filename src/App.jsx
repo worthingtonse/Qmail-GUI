@@ -63,6 +63,9 @@ function App() {
   const [upgradeSupport, setUpgradeSupport] = useState(null);
   const [upgradeProgress, setUpgradeProgress] = useState(null);
   const [upgradeFailureMessage, setUpgradeFailureMessage] = useState("");
+  // Raw "code: error" from the failed attempt, shown as a technical detail
+  // line in the manual modal (the same text lands in upgrade.log).
+  const [upgradeFailureDetail, setUpgradeFailureDetail] = useState("");
   // Help > Upgrade on a current install: a small "you're up to date"
   // notice instead of instructions to overwrite a working program.
   const [upToDateInfo, setUpToDateInfo] = useState(null);
@@ -630,21 +633,35 @@ function App() {
     setShowUpdateModal(false);
   };
 
-  // One human sentence per upgrade failure code (upgrade.cjs). The exact
-  // code also lands in the main-process log for support.
+  // One human sentence per upgrade failure code (upgrade.cjs), each naming
+  // what the user can actually DO about it. Every code must have a branch:
+  // the first field test failed with an unmapped 'swap' and the generic
+  // fallback told the user nothing. The raw code+error are shown as a
+  // detail line and persisted to upgrade.log next to QMail.exe.
   const friendlyUpgradeError = (result) => {
     switch (result?.code) {
       case "permission":
-        return "QMail could not replace its own program file (the folder is not writable, and elevation was declined). Please update manually:";
+        return "QMail is in a folder it is not allowed to write to, and the administrator prompt was declined or failed. Move QMail to a folder you own (Desktop, Documents, a USB stick), or try again and accept the administrator prompt. Otherwise update manually:";
       case "no-space":
-        return "There is not enough free disk space next to QMail to download the update. Free some space or update manually:";
+        return "There is not enough free disk space next to QMail to download the update. Free some space (about 150 MB) and try again, or update manually:";
       case "hash":
-        return "The downloaded update failed its integrity check and was discarded. Please update manually:";
+        return "The downloaded update failed its integrity check and was discarded — nothing was changed. This can be a corrupted download or a tampered file; try again, and if it keeps failing update manually:";
       case "download":
       case "sums":
-        return "The update could not be downloaded (network problem or the download server is unreachable). Please try again later or update manually:";
+        return "The update could not be downloaded — a network problem, or the download server is unreachable. Check your connection and try again, or update manually:";
+      case "swap":
+        return "The update was downloaded and verified, but QMail could not swap it into place because another program was holding the file — usually an antivirus scanning the fresh download, or a sync tool like OneDrive or Dropbox. Wait a minute and press Try Again, or update manually:";
+      case "busy":
+        return "An upgrade is already running. Let it finish before starting another.";
+      case "unsupported":
+        return "This copy of QMail is not running as the packaged program, so it cannot replace itself. Please update manually:";
+      case "not-newer":
+      case "bad-version":
+        return "The update server did not offer a version newer than this one. If you believe a newer build exists, update manually:";
       default:
-        return "The automatic upgrade could not complete. Please update manually:";
+        return `The automatic upgrade could not complete (${
+          result?.code || "unknown error"
+        }). Please update manually:`;
     }
   };
 
@@ -665,6 +682,7 @@ function App() {
   const handleUpgradeNow = async () => {
     if (!updateAvailable || upgradeBusy) return;
     setUpgradeFailureMessage("");
+    setUpgradeFailureDetail("");
     setUpgradeProgress({ phase: "checking" });
 
     const result = await window.electronAPI
@@ -689,8 +707,20 @@ function App() {
     // Every other failure lands on the manual path with the reason named.
     console.error("In-place upgrade failed:", result);
     setUpgradeFailureMessage(friendlyUpgradeError(result));
+    setUpgradeFailureDetail(
+      `${result?.code || "unknown"}: ${result?.error || "no detail"}`,
+    );
     setShowUpdateModal(false);
     setShowUpgradeModal(true);
+  };
+
+  // A transient failure (antivirus lock, network blip) should not dead-end
+  // in manual mode: reopen the Upgrade Now modal for another attempt.
+  const handleRetryUpgrade = () => {
+    setUpgradeFailureMessage("");
+    setUpgradeFailureDetail("");
+    setShowUpgradeModal(false);
+    setShowUpdateModal(true);
   };
 
   const handleCancelUpgrade = () => {
@@ -800,6 +830,12 @@ function App() {
                 {upgradeFailureMessage}
               </p>
             )}
+            {upgradeFailureDetail && (
+              <code className="update-modal__failure-detail">
+                {upgradeFailureDetail}
+                {" — also saved to upgrade.log next to QMail"}
+              </code>
+            )}
             <p className="update-modal__upgrade-instructions">
               Download the executable for your operating system{" "}
               <button
@@ -818,6 +854,17 @@ function App() {
           </div>
 
           <div className="update-modal__actions">
+            {upgradeFailureMessage &&
+              upgradeSupport?.supported &&
+              updateAvailable?.update_available && (
+                <button
+                  type="button"
+                  className="update-modal__download-button"
+                  onClick={handleRetryUpgrade}
+                >
+                  Try Again
+                </button>
+              )}
             <button
               type="button"
               className="update-modal__download-button"
