@@ -173,6 +173,27 @@ describe("getTaskProgressLabel", () => {
     expect(getTaskProgressLabel({ percent: 120 })).toBe("Depositing... 100%");
   });
 
+  it("appends the live task message when progress and a message are both present", () => {
+    expect(
+      getTaskProgressLabel(
+        {
+          progress: 83,
+          message:
+            "Converting legacy coins: 2822 of 10240 in this pass, 1411 accepted so far",
+        },
+        "Importing",
+      ),
+    ).toBe(
+      "Importing... 83% — Converting legacy coins: 2822 of 10240 in this pass, 1411 accepted so far",
+    );
+  });
+
+  it("ignores a blank message so the percent line stays clean", () => {
+    expect(getTaskProgressLabel({ progress: 10, message: "   " })).toBe(
+      "Depositing... 10%",
+    );
+  });
+
   it("falls back to the task message, status, then the verb", () => {
     expect(getTaskProgressLabel({ message: "Scanning folder" })).toBe(
       "Scanning folder",

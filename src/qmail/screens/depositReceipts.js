@@ -4,10 +4,20 @@
 
 export const getTaskProgressLabel = (task, verb = "Depositing") => {
   const progress = Number(task?.progress ?? task?.percent ?? task?.percentage);
-  if (Number.isFinite(progress) && progress >= 0) {
-    return `${verb}... ${Math.min(100, Math.round(progress))}%`;
+  const hasProgress = Number.isFinite(progress) && progress >= 0;
+  const percentText = hasProgress
+    ? `${verb}... ${Math.min(100, Math.round(progress))}%`
+    : "";
+  const message =
+    typeof task?.message === "string" ? task.message.trim() : "";
+
+  if (percentText && message) {
+    return `${percentText} — ${message}`;
   }
-  return task?.message || task?.status || `${verb}...`;
+  if (percentText) {
+    return percentText;
+  }
+  return message || task?.status || `${verb}...`;
 };
 
 // The deposit receipt's `totals` may sit on result.data directly, under
