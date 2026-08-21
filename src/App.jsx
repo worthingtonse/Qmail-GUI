@@ -434,6 +434,7 @@ function App() {
         if (upgradeFailureMessage) {
           // The automatic path already failed this session — manual is the
           // honest answer, with the failure reason still shown.
+          setUpToDateInfo(null);
           setShowUpdateModal(false);
           setShowUpgradeModal(true);
           return;
@@ -454,7 +455,12 @@ function App() {
           }
         }
 
+        // Exactly one of the three overlays (update / manual / up-to-date)
+        // may be open after a menu click — each branch closes the others,
+        // or a copy-over modal left from an earlier failed check would
+        // stack under the up-to-date dialog.
         if (info?.update_available) {
+          setUpToDateInfo(null);
           if (support?.supported) {
             setShowUpgradeModal(false);
             setUpdateAvailable(info);
@@ -464,10 +470,13 @@ function App() {
             setShowUpgradeModal(true);
           }
         } else if (info) {
+          setShowUpdateModal(false);
+          setShowUpgradeModal(false);
           setUpToDateInfo(info);
         } else {
           // The version check itself failed — the manual modal at least
           // gives the user the download page and their launcher path.
+          setUpToDateInfo(null);
           setShowUpdateModal(false);
           setShowUpgradeModal(true);
         }
