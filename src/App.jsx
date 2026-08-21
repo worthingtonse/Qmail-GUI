@@ -745,17 +745,18 @@ function App() {
 
     if (deferred) {
       // Nothing has been installed yet — the helper never launched
-      // ('declined' = the UAC prompt was refused). The download stays
-      // staged; the failure path offers Try Again.
-      const pseudo =
-        restarted === "declined"
-          ? { code: "permission", error: "administrator prompt declined" }
-          : { code: "helper", error: "install helper could not be started" };
-      setUpgradeProgress(null);
-      setUpgradeFailureMessage(friendlyUpgradeError(pseudo));
-      setUpgradeFailureDetail(`${pseudo.code}: ${pseudo.error}`);
-      setShowUpdateModal(false);
-      setShowUpgradeModal(true);
+      // ('declined' = the UAC prompt was refused). Everything stays
+      // armed in the main process, so return to the Install and Restart
+      // prompt with the reason inline: retrying is one click and does
+      // NOT re-download.
+      setUpgradeProgress({
+        phase: "installed-prompt",
+        deferred: true,
+        notice:
+          restarted === "declined"
+            ? "The administrator prompt was declined, so nothing was installed. Click Install and Restart to try again."
+            : "The install step could not be started. Click Install and Restart to try again, or use Open Download Page to update manually.",
+      });
       return;
     }
 
@@ -766,8 +767,14 @@ function App() {
   };
 
   const handleRestartLater = () => {
-    // The swapped file stays on disk; the next launch runs the new build.
-    setUpgradeProgress(null);
+    // Keep the installed-prompt state: reopening the update modal (Help >
+    // Upgrade) goes straight back to Install and Restart / Restart Now
+    // with one click and no re-download.
+    // Deferred (Windows): nothing is installed yet — if the user closes
+    // QMail without installing, the staged download is discarded at the
+    // next start and offered again.
+    // Linux: the swap is already done; the next launch runs the new build
+    // regardless.
     setShowUpdateModal(false);
   };
 
@@ -1071,11 +1078,18 @@ function App() {
                 </div>
 
                 {upgradeProgress?.phase === "installed-prompt" ? (
-                  <p className="update-modal__description">
-                    {upgradeProgress.deferred
-                      ? "The update is downloaded and verified. QMail will close for a few seconds while the update is installed, then open again by itself. If you are writing a message or a transfer is still running, choose Later and upgrade when you are done."
-                      : "The new version is installed. Restart QMail now to start using it? If you are writing a message or a transfer is still running, choose Later and restart when you are done — the update is already in place."}
-                  </p>
+                  <>
+                    {upgradeProgress.notice && (
+                      <p className="update-modal__upgrade-failure">
+                        {upgradeProgress.notice}
+                      </p>
+                    )}
+                    <p className="update-modal__description">
+                      {upgradeProgress.deferred
+                        ? "The update is downloaded and verified. Click Install and Restart — QMail will close for a few seconds while the update is installed, then open again by itself. If you are writing a message or a transfer is still running, choose Later and come back through Help > Upgrade. Closing QMail without installing discards the download (the update will be offered again)."
+                        : "The new version is installed. Restart QMail now to start using it? If you are writing a message or a transfer is still running, choose Later and restart when you are done — the update is already in place."}
+                    </p>
+                  </>
                 ) : upgradeProgress?.phase === "installed" ? (
                   <p className="update-modal__description">
                     The new version is installed, but QMail could not restart
@@ -1131,6 +1145,12 @@ function App() {
                       {upgradeProgress.deferred
                         ? "Install and Restart"
                         : "Restart Now"}
+                    </button>
+                    <button
+                      className="update-modal__later-button"
+                      onClick={openDownloadPage}
+                    >
+                      Open Download Page
                     </button>
                     <button
                       className="update-modal__later-button"

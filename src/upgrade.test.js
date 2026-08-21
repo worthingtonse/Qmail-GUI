@@ -333,19 +333,37 @@ describe.runIf(process.platform === "win32")("performUpgrade swap failures", () 
     // The characters that broke (or would break) shell transports: %VAR%
     // expansion in cmd, $() in sh, apostrophes in PowerShell literals.
     const target = "C:\\Users\\Bob's PC\\100%USERNAME%\\$(reboot)\\QMail.exe";
-    const { inner, encoded } = buildWindowsHelperScript(target);
+    const { inner, encoded } = buildWindowsHelperScript(target, {
+      extraArgs: ["-port", "8085"],
+    });
 
     // Apostrophes must be doubled inside the single-quoted literals.
     expect(inner).toContain("Bob''s PC");
     // The path rides inside single quotes — never bare in the script.
     expect(inner).toContain(`'${target.replace(/'/g, "''")}'`);
+    // CLI flags ride along, each as a quoted literal.
+    expect(inner).toContain("@('-port','8085')");
     // The transport is UTF-16 base64 that decodes back byte-for-byte, so
     // no shell (cmd/sh) ever parses the script text.
     expect(Buffer.from(encoded, "base64").toString("utf16le")).toBe(inner);
-    // The helper must wait for release, restore on failure, and clean up.
-    expect(inner).toContain("Move-Item");
+    // The helper must wait for release, retry the restore, gate the .old
+    // delete on a launcher existing, and log.
+    expect(inner).toContain("MoveRetry $o $t");
+    expect(inner).toContain("if(-not (Test-Path -LiteralPath $t)){ break }");
     expect(inner).toContain("restoring the original");
     expect(inner).toContain("upgrade.log");
+  });
+
+  it("buildWindowsHelperScript quotes the explorer relaunch argument when elevated", () => {
+    // Start-Process passes a single-string -ArgumentList verbatim: an
+    // unquoted "C:\Program Files\...\QMail.exe" reaches explorer as two
+    // tokens and the relaunch after an elevated install silently fails.
+    const target = "C:\\Program Files\\QMail\\QMail.exe";
+    const { inner } = buildWindowsHelperScript(target, { viaExplorer: true });
+
+    expect(inner).toContain(
+      "Start-Process -FilePath explorer.exe -ArgumentList ('\"' + $t + '\"')",
+    );
   });
 
   it("cancel during the download deletes .new and keeps the launcher", async () => {
@@ -422,17 +440,19 @@ describe.runIf(process.platform === "win32")("performUpgrade swap failures", () 
 });
 
 describe("cleanupLeftovers", () => {
-  it("removes .old and .new next to the target", () => {
+  it("removes .old, .new, and .probe next to the target", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "qmail-upgrade-test-"));
     const target = path.join(tempDir, "QMail.exe");
     fs.writeFileSync(target, "current");
     fs.writeFileSync(target + ".old", "previous");
     fs.writeFileSync(target + ".new", "orphaned download");
+    fs.writeFileSync(target + ".probe", "");
 
     cleanupLeftovers(target);
 
     expect(fs.existsSync(target)).toBe(true);
     expect(fs.existsSync(target + ".old")).toBe(false);
     expect(fs.existsSync(target + ".new")).toBe(false);
+    expect(fs.existsSync(target + ".probe")).toBe(false);
   });
 });

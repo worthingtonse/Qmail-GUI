@@ -511,7 +511,10 @@ async function elevatedSwap(targetPath, log) {
  *   4. Delete the .old leftover (the old process is gone, so it is
  *      finally deletable) and log every step to upgrade.log.
  */
-function buildWindowsHelperScript(targetPath, { viaExplorer = false } = {}) {
+function buildWindowsHelperScript(
+  targetPath,
+  { viaExplorer = false, extraArgs = [] } = {},
+) {
   const oldPath = targetPath + '.old';
   const stagedPath = targetPath + '.new';
   // Client_Data sits next to the portable launcher and holds all QMail
@@ -524,31 +527,56 @@ function buildWindowsHelperScript(targetPath, { viaExplorer = false } = {}) {
     'upgrade.log',
   );
 
+  // CLI flags (-port etc.) ride along on the unelevated relaunch so a
+  // scripted launch comes back with the same configuration. The elevated
+  // explorer.exe de-elevation trick cannot forward arguments — a
+  // documented limitation of that path. explorer's argument must be
+  // quoted explicitly: a single-string -ArgumentList is passed verbatim,
+  // so an unquoted "C:\Program Files\..." splits into two tokens.
+  const argsList = extraArgs
+    .map((a) => psQuote(String(a)))
+    .join(',');
   const relaunch = viaExplorer
-    ? 'Start-Process -FilePath explorer.exe -ArgumentList $t'
-    : 'Start-Process -FilePath $t -WorkingDirectory (Split-Path -Parent $t)';
+    ? "Start-Process -FilePath explorer.exe -ArgumentList ('\"' + $t + '\"')"
+    : argsList
+      ? `Start-Process -FilePath $t -WorkingDirectory (Split-Path -Parent $t) -ArgumentList @(${argsList})`
+      : 'Start-Process -FilePath $t -WorkingDirectory (Split-Path -Parent $t)';
 
+  // INVARIANTS (each has bitten once — see the reviews):
+  // - Every rename that must succeed gets the SAME patient retry loop;
+  //   a one-shot restore against the scanner locks that made the install
+  //   fail is how a launcher gets stranded.
+  // - .old is deleted ONLY while a launcher exists at $t; if the restore
+  //   failed, .old IS the launcher and must survive.
+  // - Relaunch only what exists.
   const inner =
     "$ErrorActionPreference='Stop'\n" +
     `$t=${psQuote(targetPath)}; $o=${psQuote(oldPath)}; $s=${psQuote(stagedPath)}; $lg=${psQuote(logPath)}\n` +
     'function L($m){ try { Add-Content -LiteralPath $lg -Value ("[{0}] helper: {1}" -f (Get-Date -Format o), $m) } catch {} }\n' +
+    'function MoveRetry($from,$dest){\n' +
+    '  for($i=0; $i -lt 120; $i++){\n' +
+    '    try { Move-Item -LiteralPath $from -Destination $dest -Force -ErrorAction Stop; return $true }\n' +
+    '    catch { Start-Sleep -Milliseconds 500 }\n' +
+    '  }\n' +
+    '  return $false\n' +
+    '}\n' +
     "L 'started; waiting for QMail to close and release its file'\n" +
-    '$moved=$false\n' +
-    'for($i=0; $i -lt 120; $i++){\n' +
-    '  try { Move-Item -LiteralPath $t -Destination $o -Force -ErrorAction Stop; $moved=$true; break }\n' +
-    '  catch { Start-Sleep -Milliseconds 500 }\n' +
+    'if(-not (MoveRetry $t $o)){\n' +
+    "  L 'gave up: QMail.exe was never released; nothing changed'; exit 1\n" +
     '}\n' +
-    "if(-not $moved){ L 'gave up: QMail.exe was never released; nothing changed'; exit 1 }\n" +
-    'try {\n' +
-    '  Move-Item -LiteralPath $s -Destination $t -Force -ErrorAction Stop\n' +
-    "  L 'swap complete'\n" +
-    '} catch {\n' +
-    '  L ("install failed: {0}; restoring the original" -f $_)\n' +
-    "  try { Move-Item -LiteralPath $o -Destination $t -Force } catch { L 'RESTORE FAILED — launcher is at .old' }\n" +
+    '$installed=$false\n' +
+    'try { Move-Item -LiteralPath $s -Destination $t -Force -ErrorAction Stop; $installed=$true; L \'swap complete\' }\n' +
+    'catch { L ("install failed: {0}; restoring the original" -f $_) }\n' +
+    'if(-not $installed){\n' +
+    '  if(MoveRetry $o $t){ L \'original restored\' }\n' +
+    "  else { L 'RESTORE FAILED — the launcher is at .old and the update at .new; leaving both'; exit 1 }\n" +
     '}\n' +
-    `try { ${relaunch}; L 'relaunched' } catch { L ("relaunch failed: {0}" -f $_) }\n` +
+    'if(Test-Path -LiteralPath $t){\n' +
+    `  try { ${relaunch}; L 'relaunched' } catch { L ("relaunch failed: {0}" -f $_) }\n` +
+    '}\n' +
     'for($i=0; $i -lt 20; $i++){\n' +
     '  if(-not (Test-Path -LiteralPath $o)){ break }\n' +
+    '  if(-not (Test-Path -LiteralPath $t)){ break }\n' +
     '  try { Remove-Item -LiteralPath $o -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 }\n' +
     '}\n' +
     "L 'done'\n";
@@ -574,6 +602,7 @@ async function launchPendingHelper(log = noop) {
   const { targetPath, elevate } = pending;
   const { encoded } = buildWindowsHelperScript(targetPath, {
     viaExplorer: elevate,
+    extraArgs: process.argv.slice(1),
   });
 
   if (elevate) {
@@ -629,26 +658,16 @@ async function launchPendingHelper(log = noop) {
     log('upgrade: install helper launched via WMI');
     return true;
   }
-  log(`upgrade: WMI helper launch failed (exit=${status}); trying plain spawn`);
 
-  // Fallback: a normal (NOT detached) hidden-console spawn. Windows does
-  // not kill children on parent exit by itself; this only loses if the
-  // app runs inside a kill-on-close job object.
-  try {
-    const child = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-EncodedCommand', encoded],
-      { stdio: 'ignore', windowsHide: true },
-    );
-    child.unref();
-    log('upgrade: install helper launched (plain spawn fallback)');
-    return true;
-  } catch (e) {
-    log(`upgrade: could not launch install helper: ${e.message}`);
-    pendingSwap = pending;
-    installedAwaitingRestart = true;
-    return false;
-  }
+  // No fallback spawn: any child WE create sits inside the portable
+  // stub's kill-on-close process tree — the very thing that forced the
+  // WMI route — so reporting success and quitting would silently lose
+  // the update (the staged .new is discarded at next start). Failing to
+  // the UI keeps everything armed for another attempt.
+  log(`upgrade: WMI helper launch failed (exit=${status})`);
+  pendingSwap = pending;
+  installedAwaitingRestart = true;
+  return false;
 }
 
 /**
