@@ -597,11 +597,19 @@ function App() {
     }
   };
 
+  // "ready" counts as busy: it fires between the swap finishing and the
+  // start-upgrade IPC promise resolving into the restart, and the buttons
+  // must not flash back during that gap.
   const upgradeBusy =
     upgradeProgress != null &&
-    ["checking", "downloading", "verifying", "installing", "restarting"].includes(
-      upgradeProgress.phase,
-    );
+    [
+      "checking",
+      "downloading",
+      "verifying",
+      "installing",
+      "ready",
+      "restarting",
+    ].includes(upgradeProgress.phase);
 
   const handleUpgradeNow = async () => {
     if (!updateAvailable || upgradeBusy) return;
@@ -647,7 +655,7 @@ function App() {
     }
     if (phase === "verifying") return "Verifying the download…";
     if (phase === "installing") return "Installing…";
-    if (phase === "restarting") return "Restarting QMail…";
+    if (phase === "ready" || phase === "restarting") return "Restarting QMail…";
     return "Checking for the latest version…";
   };
 
