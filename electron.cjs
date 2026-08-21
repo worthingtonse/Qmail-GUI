@@ -3104,16 +3104,17 @@ ipcMain.handle('open-external', async (_event, url) => {
 // relaunches into the freshly swapped launcher.
 // ---------------------------------------------------------------------------
 
-// Upgrade steps also append to upgrade.log NEXT TO THE LAUNCHER, because
-// log() goes to stdout and a double-clicked GUI app has no stdout — the
-// first field failure (2026-08-20) left zero recoverable evidence. The
-// file sits beside QMail.exe (never inside Client_Data, which belongs to
-// core) so support can ask the user to send one obvious file.
+// Upgrade steps also append to Client_Data\upgrade.log, because log()
+// goes to stdout and a double-clicked GUI app has no stdout — the first
+// field failure (2026-08-20) left zero recoverable evidence. Client_Data
+// is where all QMail data lives (Sean's convention), so support finds it
+// with everything else.
 function upgradeLog(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   log(line);
   try {
-    const dir = backendDataDir || getProgramDir();
+    const dir = path.join(backendDataDir || getProgramDir(), 'Client_Data');
+    fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(path.join(dir, 'upgrade.log'), line + '\n');
   } catch {
     /* logging must never break the upgrade */

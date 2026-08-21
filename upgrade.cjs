@@ -5,9 +5,11 @@
 //  Replaces the file the user double-clicked (portable QMail.exe on
 //  Windows, QMail.AppImage on Linux) with the latest published build from
 //  https://cloudcoinconsortium.com/bin/. User data is untouched by
-//  construction: wallets and mail live in sibling directories
-//  (Client_Data/ etc.), and this module only ever creates, renames, or
-//  deletes three paths — the target and its ".new" / ".old" siblings.
+//  construction: wallets and mail live under Client_Data/, and this
+//  module only ever creates, renames, or deletes three paths — the
+//  target and its ".new" / ".old" siblings. The single exception is
+//  APPEND-only: the helper adds lines to Client_Data/upgrade.log, and
+//  never opens any other file there.
 //
 //  HOW THE SWAP HAPPENS — two modes:
 //
@@ -512,7 +514,15 @@ async function elevatedSwap(targetPath, log) {
 function buildWindowsHelperScript(targetPath, { viaExplorer = false } = {}) {
   const oldPath = targetPath + '.old';
   const stagedPath = targetPath + '.new';
-  const logPath = path.join(path.dirname(targetPath), 'upgrade.log');
+  // Client_Data sits next to the portable launcher and holds all QMail
+  // data; the upgrade trail lives there with everything else. The
+  // directory always exists by upgrade time (core creates it at boot),
+  // and L() swallows the write if it somehow does not.
+  const logPath = path.join(
+    path.dirname(targetPath),
+    'Client_Data',
+    'upgrade.log',
+  );
 
   const relaunch = viaExplorer
     ? 'Start-Process -FilePath explorer.exe -ArgumentList $t'

@@ -858,7 +858,7 @@ function App() {
             {upgradeFailureDetail && (
               <code className="update-modal__failure-detail">
                 {upgradeFailureDetail}
-                {" — also saved to upgrade.log next to QMail"}
+                {" — also saved to Client_Data\\upgrade.log"}
               </code>
             )}
             <p className="update-modal__upgrade-instructions">
