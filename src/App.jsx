@@ -653,6 +653,8 @@ function App() {
         return "The update was downloaded and verified, but QMail could not swap it into place because another program was holding the file — usually an antivirus scanning the fresh download, or a sync tool like OneDrive or Dropbox. Wait a minute and press Try Again, or update manually:";
       case "busy":
         return "An upgrade is already running. Let it finish before starting another.";
+      case "helper":
+        return "The update is downloaded and verified, but QMail could not start its install helper. Try again, or update manually:";
       case "unsupported":
         return "This copy of QMail is not running as the packaged program, so it cannot replace itself. Please update manually:";
       case "not-newer":
@@ -694,10 +696,16 @@ function App() {
       // review F1): compose drafts are EXPLICIT-only — there is no
       // autosave — so an automatic restart would silently destroy a
       // half-written message, an in-flight send, or a running coin
-      // operation, none of which this component can see. The swap is
-      // already done either way; "Later" just means the next launch runs
-      // the new build.
-      setUpgradeProgress({ phase: "installed-prompt" });
+      // operation, none of which this component can see.
+      //
+      // deferred (Windows): only the verified download is staged; the
+      // actual swap happens via the install helper after QMail quits.
+      // Not deferred (Linux): the swap is already done and "Later" just
+      // means the next launch runs the new build.
+      setUpgradeProgress({
+        phase: "installed-prompt",
+        deferred: !!result.deferred,
+      });
       return;
     }
 
@@ -728,16 +736,33 @@ function App() {
   };
 
   const handleRestartNow = async () => {
-    setUpgradeProgress({ phase: "restarting" });
+    const deferred = !!upgradeProgress?.deferred;
+    setUpgradeProgress({ phase: "restarting", deferred });
     const restarted = await window.electronAPI
       ?.restartAfterUpgrade?.()
       .catch(() => false);
-    if (restarted !== true) {
-      // The swap DID happen; only the relaunch failed. Tell the user to
-      // finish by hand instead of leaving the modal stuck on
-      // "Restarting…" with every button hidden.
-      setUpgradeProgress({ phase: "installed" });
+    if (restarted === true) return; // the app is quitting under us
+
+    if (deferred) {
+      // Nothing has been installed yet — the helper never launched
+      // ('declined' = the UAC prompt was refused). The download stays
+      // staged; the failure path offers Try Again.
+      const pseudo =
+        restarted === "declined"
+          ? { code: "permission", error: "administrator prompt declined" }
+          : { code: "helper", error: "install helper could not be started" };
+      setUpgradeProgress(null);
+      setUpgradeFailureMessage(friendlyUpgradeError(pseudo));
+      setUpgradeFailureDetail(`${pseudo.code}: ${pseudo.error}`);
+      setShowUpdateModal(false);
+      setShowUpgradeModal(true);
+      return;
     }
+
+    // Linux: the swap DID happen; only the relaunch failed. Tell the user
+    // to finish by hand instead of leaving the modal stuck on
+    // "Restarting…" with every button hidden.
+    setUpgradeProgress({ phase: "installed" });
   };
 
   const handleRestartLater = () => {
@@ -1047,10 +1072,9 @@ function App() {
 
                 {upgradeProgress?.phase === "installed-prompt" ? (
                   <p className="update-modal__description">
-                    The new version is installed. Restart QMail now to start
-                    using it? If you are writing a message or a transfer is
-                    still running, choose Later and restart when you are
-                    done — the update is already in place.
+                    {upgradeProgress.deferred
+                      ? "The update is downloaded and verified. QMail will close for a few seconds while the update is installed, then open again by itself. If you are writing a message or a transfer is still running, choose Later and upgrade when you are done."
+                      : "The new version is installed. Restart QMail now to start using it? If you are writing a message or a transfer is still running, choose Later and restart when you are done — the update is already in place."}
                   </p>
                 ) : upgradeProgress?.phase === "installed" ? (
                   <p className="update-modal__description">
@@ -1104,7 +1128,9 @@ function App() {
                       className="update-modal__download-button"
                       onClick={handleRestartNow}
                     >
-                      Restart Now
+                      {upgradeProgress.deferred
+                        ? "Install and Restart"
+                        : "Restart Now"}
                     </button>
                     <button
                       className="update-modal__later-button"

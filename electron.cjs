@@ -3146,27 +3146,42 @@ ipcMain.handle('qmail:upgrade-start', async (_event, latestVersion) => {
 
 ipcMain.handle('qmail:upgrade-cancel', () => upgrade.cancelUpgrade());
 
-ipcMain.handle('qmail:upgrade-restart', () => {
+ipcMain.handle('qmail:upgrade-restart', async () => {
   const target = upgrade.resolveUpgradeTarget();
   if (!target.supported) return false;
 
-  // Only after a verified swap. Without this latch the IPC would be a
-  // free kill-the-backend-and-relaunch primitive for anything that can
-  // reach the preload API.
+  // Only after a verified swap/staging. Without this latch the IPC would
+  // be a free kill-the-backend-and-relaunch primitive for anything that
+  // can reach the preload API.
   if (!upgrade.consumeInstalledLatch()) {
     upgradeLog('upgrade-restart refused: no completed upgrade to restart into');
     return false;
   }
+
+  if (upgrade.hasPendingDeferredSwap()) {
+    // Windows: the swap could not happen while running (the portable stub
+    // holds its own file). Hand the install to the helper, then quit —
+    // the helper waits for this process to release QMail.exe, swaps, and
+    // relaunches the new build itself.
+    const launched = await upgrade.launchPendingHelper(upgradeLog);
+    if (launched !== true) {
+      // 'declined' (UAC refused) or spawn failure: nothing has changed;
+      // .new stays staged and the latch is re-armed by trying again.
+      return launched;
+    }
+    upgradeLog('upgrade-restart: quitting so the install helper can swap');
+    killBackend('upgrade-restart');
+    app.quit();
+    return true;
+  }
+
   upgradeLog(`upgrade-restart: relaunching ${target.targetPath}`);
 
-  // Spawn the swapped launcher explicitly instead of app.relaunch():
-  // relaunch's default execPath is the portable build's TEMP-UNPACKED
-  // binary, and even with an execPath override the portable stub's
-  // process tree makes its behavior murky — a detached spawn of the real
-  // on-disk file is deterministic. The backend is stopped first so the
-  // new instance never races the old core.exe for the data dir. CLI
-  // flags (e.g. -port) ride along so a scripted launch comes back with
-  // the same configuration; argv[0] is the executable itself.
+  // Linux (swap already done in-place): spawn the swapped launcher
+  // explicitly instead of app.relaunch() — relaunch's default execPath is
+  // the portable build's TEMP-UNPACKED binary. The backend is stopped
+  // first so the new instance never races the old core.exe for the data
+  // dir. CLI flags (e.g. -port) ride along; argv[0] is the executable.
   killBackend('upgrade-restart');
   try {
     const child = spawn(target.targetPath, process.argv.slice(1), {

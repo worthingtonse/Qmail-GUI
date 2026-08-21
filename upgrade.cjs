@@ -9,12 +9,25 @@
 //  (Client_Data/ etc.), and this module only ever creates, renames, or
 //  deletes three paths — the target and its ".new" / ".old" siblings.
 //
-//  WHY RENAME, NOT OVERWRITE: Windows locks a running .exe against write
-//  and delete but allows RENAME on the same volume. So the swap is:
-//  download to <target>.new (same directory, so the renames stay
-//  same-volume and atomic), verify SHA-256, rename target -> .old, rename
-//  .new -> target, relaunch. The .old cannot be deleted while the old
-//  launcher still runs; the next startup deletes it (cleanupLeftovers).
+//  HOW THE SWAP HAPPENS — two modes:
+//
+//  Linux (in-place): POSIX rename over a running binary is allowed (the
+//  process keeps its old inode), so the swap runs directly: download to
+//  <target>.new, verify SHA-256, rename target -> .old, .new -> target,
+//  relaunch.
+//
+//  Windows (DEFERRED, via helper): the electron-builder portable stub
+//  holds an open handle on its own QMail.exe for its whole lifetime that
+//  blocks even RENAME (verified in the field 2026-08-20: EBUSY on
+//  target -> .old no matter how long we retry; elevation does not help —
+//  it is a sharing violation, not a permissions problem). So on Windows
+//  this module only downloads and verifies <target>.new while running,
+//  then hands a small PowerShell helper script to the OS as the app
+//  quits. The helper waits for the launcher file to be released, does
+//  the rename swap (restoring the original if the install step fails),
+//  restarts the new QMail, deletes the .old leftover, and appends every
+//  step to upgrade.log. No separate installer binary ships — the script
+//  travels to powershell.exe as an -EncodedCommand, never as a temp file.
 //
 //  macOS is deliberately unsupported here (an .app bundle in a .dmg needs
 //  a different installer flow); mobile never self-replaces. Callers use
@@ -78,6 +91,13 @@ function consumeInstalledLatch() {
   return was;
 }
 
+// Windows deferred swap, armed by performUpgrade once <target>.new is
+// verified: { targetPath, elevate }. The helper is launched by
+// launchPendingHelper() at restart time, right before app.quit().
+let pendingSwap = null;
+
+const hasPendingDeferredSwap = () => pendingSwap !== null;
+
 const noop = () => {};
 
 /**
@@ -127,7 +147,7 @@ function resolveUpgradeTarget() {
  * before anything else touches the launcher directory.
  */
 function cleanupLeftovers(targetPath, log = noop) {
-  for (const suffix of ['.old', '.new']) {
+  for (const suffix of ['.old', '.new', '.probe']) {
     const leftover = targetPath + suffix;
     try {
       if (fs.existsSync(leftover)) {
@@ -473,6 +493,124 @@ async function elevatedSwap(targetPath, log) {
 }
 
 /**
+ * The Windows install helper: a self-contained PowerShell script with the
+ * three launcher paths embedded as single-quoted literals (psQuote — no
+ * interpolation into anything shell-parsed, survives spaces/apostrophes/
+ * %/unicode via the UTF-16 -EncodedCommand transport). It runs AFTER the
+ * app quits:
+ *   1. Retry renaming target -> .old until the portable stub releases the
+ *      file (up to ~60s), covering both process exit and any antivirus
+ *      scan of the fresh download.
+ *   2. Rename .new -> target; on failure restore .old -> target so the
+ *      user always has a launcher.
+ *   3. Start the (new or restored) launcher. When the helper itself runs
+ *      elevated, launch through explorer.exe so QMail comes back at
+ *      normal user rights instead of as administrator.
+ *   4. Delete the .old leftover (the old process is gone, so it is
+ *      finally deletable) and log every step to upgrade.log.
+ */
+function buildWindowsHelperScript(targetPath, { viaExplorer = false } = {}) {
+  const oldPath = targetPath + '.old';
+  const stagedPath = targetPath + '.new';
+  const logPath = path.join(path.dirname(targetPath), 'upgrade.log');
+
+  const relaunch = viaExplorer
+    ? 'Start-Process -FilePath explorer.exe -ArgumentList $t'
+    : 'Start-Process -FilePath $t -WorkingDirectory (Split-Path -Parent $t)';
+
+  const inner =
+    "$ErrorActionPreference='Stop'\n" +
+    `$t=${psQuote(targetPath)}; $o=${psQuote(oldPath)}; $s=${psQuote(stagedPath)}; $lg=${psQuote(logPath)}\n` +
+    'function L($m){ try { Add-Content -LiteralPath $lg -Value ("[{0}] helper: {1}" -f (Get-Date -Format o), $m) } catch {} }\n' +
+    "L 'started; waiting for QMail to close and release its file'\n" +
+    '$moved=$false\n' +
+    'for($i=0; $i -lt 120; $i++){\n' +
+    '  try { Move-Item -LiteralPath $t -Destination $o -Force -ErrorAction Stop; $moved=$true; break }\n' +
+    '  catch { Start-Sleep -Milliseconds 500 }\n' +
+    '}\n' +
+    "if(-not $moved){ L 'gave up: QMail.exe was never released; nothing changed'; exit 1 }\n" +
+    'try {\n' +
+    '  Move-Item -LiteralPath $s -Destination $t -Force -ErrorAction Stop\n' +
+    "  L 'swap complete'\n" +
+    '} catch {\n' +
+    '  L ("install failed: {0}; restoring the original" -f $_)\n' +
+    "  try { Move-Item -LiteralPath $o -Destination $t -Force } catch { L 'RESTORE FAILED — launcher is at .old' }\n" +
+    '}\n' +
+    `try { ${relaunch}; L 'relaunched' } catch { L ("relaunch failed: {0}" -f $_) }\n` +
+    'for($i=0; $i -lt 20; $i++){\n' +
+    '  if(-not (Test-Path -LiteralPath $o)){ break }\n' +
+    '  try { Remove-Item -LiteralPath $o -Force -ErrorAction Stop; break } catch { Start-Sleep -Milliseconds 500 }\n' +
+    '}\n' +
+    "L 'done'\n";
+
+  return { inner, encoded: Buffer.from(inner, 'utf16le').toString('base64') };
+}
+
+/**
+ * Launch the deferred Windows swap helper armed by performUpgrade. Call
+ * with the app about to quit (helper waits for the file to be released,
+ * so ordering is forgiving).
+ *
+ * @returns {Promise<true|'declined'|false>} true = helper is running,
+ *   quit now; 'declined' = the folder needs elevation and the UAC prompt
+ *   was refused (nothing changed, .new still staged); false = no pending
+ *   swap or the helper could not be launched.
+ */
+async function launchPendingHelper(log = noop) {
+  const pending = pendingSwap;
+  pendingSwap = null;
+  if (!pending || process.platform !== 'win32') return false;
+
+  const { targetPath, elevate } = pending;
+  const { encoded } = buildWindowsHelperScript(targetPath, {
+    viaExplorer: elevate,
+  });
+
+  if (elevate) {
+    // The folder is not user-writable, so the helper itself must run
+    // elevated. The UAC prompt happens NOW, before the app quits — a
+    // decline leaves everything unchanged and is reported to the caller.
+    const outer =
+      'try { ' +
+      "Start-Process -FilePath 'powershell.exe' -ArgumentList " +
+      `'-NoProfile','-WindowStyle','Hidden','-EncodedCommand','${encoded}' ` +
+      '-Verb RunAs | Out-Null; exit 0 ' +
+      '} catch { exit 5 }';
+    const status = await runProcess(
+      'powershell.exe',
+      ['-NoProfile', '-Command', outer],
+      { windowsHide: true, stdio: 'ignore' },
+    );
+    if (status !== 0) {
+      log(`upgrade: elevated helper launch exit=${status} (declined?)`);
+      // Nothing changed: keep .new staged and re-arm both the pending
+      // swap and the restart latch so the user can simply try again.
+      pendingSwap = pending;
+      installedAwaitingRestart = true;
+      return 'declined';
+    }
+    log('upgrade: elevated install helper launched');
+    return true;
+  }
+
+  try {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+      { detached: true, stdio: 'ignore', windowsHide: true },
+    );
+    child.unref();
+    log('upgrade: install helper launched');
+    return true;
+  } catch (e) {
+    log(`upgrade: could not launch install helper: ${e.message}`);
+    pendingSwap = pending;
+    installedAwaitingRestart = true;
+    return false;
+  }
+}
+
+/**
  * Abort the in-flight download, if any. The staged .new file is deleted
  * by performUpgrade's error path.
  */
@@ -615,6 +753,29 @@ async function performUpgrade({ latestVersion, onProgress = noop, log = noop }) 
       }
     }
 
+    if (process.platform === 'win32') {
+      // The portable stub blocks any rename of the running QMail.exe, so
+      // the swap is DEFERRED: verify staging, decide whether the helper
+      // will need elevation (probe-write in the launcher directory), and
+      // arm the helper for launchPendingHelper() at restart.
+      let elevate = false;
+      const probePath = targetPath + '.probe';
+      try {
+        fs.writeFileSync(probePath, 'w');
+        fs.unlinkSync(probePath);
+      } catch (e) {
+        if (isPermissionError(e)) {
+          elevate = true;
+          log('upgrade: launcher directory not writable — helper will elevate');
+        }
+      }
+      pendingSwap = { targetPath, elevate };
+      installedAwaitingRestart = true;
+      log(`upgrade: staged ${version}; swap deferred to install helper (elevate=${elevate})`);
+      onProgress({ phase: 'ready' });
+      return { ok: true, deferred: true, targetPath };
+    }
+
     onProgress({ phase: 'installing' });
     try {
       await swapInPlace(targetPath, log);
@@ -640,7 +801,7 @@ async function performUpgrade({ latestVersion, onProgress = noop, log = noop }) 
     log(`upgrade: installed ${version} at ${targetPath}`);
     installedAwaitingRestart = true;
     onProgress({ phase: 'ready' });
-    return { ok: true, targetPath };
+    return { ok: true, deferred: false, targetPath };
   } catch (e) {
     await discardStaged();
     const code =
@@ -659,6 +820,10 @@ module.exports = {
   performUpgrade,
   cancelUpgrade,
   consumeInstalledLatch,
+  hasPendingDeferredSwap,
+  launchPendingHelper,
   // exported for tests
   parseSha256Sums,
+  swapInPlace,
+  buildWindowsHelperScript,
 };

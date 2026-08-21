@@ -18,6 +18,8 @@ import {
   cleanupLeftovers,
   cancelUpgrade,
   consumeInstalledLatch,
+  swapInPlace,
+  buildWindowsHelperScript,
 } from "../upgrade.cjs";
 import { buildDate as LOCAL_BUILD_DATE } from "../version.json";
 
@@ -140,7 +142,11 @@ describe("performUpgrade guards", () => {
 describe.runIf(process.platform === "win32")("performUpgrade pipeline", () => {
   const NEW_BYTES = Buffer.from("NEW LAUNCHER BYTES v2");
 
-  it("downloads, verifies, and swaps the launcher in place", async () => {
+  it("downloads, verifies, and STAGES the update for the deferred swap", async () => {
+    // On Windows the running portable stub blocks renaming QMail.exe, so
+    // a successful run leaves the verified bytes at .new and defers the
+    // actual swap to the install helper at restart. The launcher itself
+    // must be untouched.
     const targetPath = makeTempTarget();
     stubFetch((url) => {
       if (url.endsWith("/SHA256SUMS")) {
@@ -157,15 +163,13 @@ describe.runIf(process.platform === "win32")("performUpgrade pipeline", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(fs.readFileSync(targetPath)).toEqual(NEW_BYTES);
-    // The renamed-away original survives as .old for the next-start sweep.
-    expect(fs.readFileSync(targetPath + ".old", "utf8")).toBe(
-      "OLD LAUNCHER BYTES",
-    );
-    expect(fs.existsSync(targetPath + ".new")).toBe(false);
+    expect(result.deferred).toBe(true);
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
+    expect(fs.readFileSync(targetPath + ".new")).toEqual(NEW_BYTES);
+    expect(fs.existsSync(targetPath + ".old")).toBe(false);
+    expect(fs.existsSync(targetPath + ".probe")).toBe(false);
     expect(phases).toContain("downloading");
     expect(phases).toContain("verifying");
-    expect(phases).toContain("installing");
     expect(phases.at(-1)).toBe("ready");
   });
 
@@ -190,7 +194,8 @@ describe.runIf(process.platform === "win32")("performUpgrade pipeline", () => {
     const result = await performUpgrade({ latestVersion: NEW_VERSION });
 
     expect(result.ok).toBe(true);
-    expect(fs.readFileSync(targetPath)).toEqual(staleBytes);
+    expect(fs.readFileSync(targetPath + ".new")).toEqual(staleBytes);
+    expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
   });
 
   it("rejects the download when no hash matches, leaving the launcher intact", async () => {
@@ -266,12 +271,19 @@ describe.runIf(process.platform === "win32")("performUpgrade swap failures", () 
     return error;
   };
 
-  it(
-    "EBUSY on the swap fails to manual without elevating, launcher restored",
-    async () => {
-      const targetPath = makeTempTarget();
-      stubGoodDownload();
+  // swapInPlace is the LIVE install path on Linux (Windows defers to the
+  // helper); its failure contract is exercised directly since a Windows
+  // performUpgrade run no longer reaches it.
+  const stageForSwap = () => {
+    const targetPath = makeTempTarget();
+    fs.writeFileSync(targetPath + ".new", NEW_BYTES);
+    return targetPath;
+  };
 
+  it(
+    "swapInPlace: persistent EBUSY restores the launcher and rethrows",
+    async () => {
+      const targetPath = stageForSwap();
       const realRename = fs.promises.rename.bind(fs.promises);
       vi.spyOn(fs.promises, "rename").mockImplementation((from, to) => {
         // The install rename (staged -> target) is persistently EBUSY, as
@@ -280,48 +292,61 @@ describe.runIf(process.platform === "win32")("performUpgrade swap failures", () 
         return realRename(from, to);
       });
 
-      const result = await performUpgrade({ latestVersion: NEW_VERSION });
-
-      expect(result.ok).toBe(false);
-      // EBUSY is a transient lock, not "needs admin rights": the code must
-      // be 'swap' (manual fallback), never 'permission' (UAC prompt).
-      expect(result.code).toBe("swap");
+      await expect(swapInPlace(targetPath, () => {})).rejects.toMatchObject({
+        code: "EBUSY",
+      });
       expect(fs.readFileSync(targetPath, "utf8")).toBe("OLD LAUNCHER BYTES");
-      expect(fs.existsSync(targetPath + ".new")).toBe(false);
-      expect(consumeInstalledLatch()).toBe(false);
+      expect(fs.existsSync(targetPath + ".old")).toBe(false);
+      expect(fs.readFileSync(targetPath + ".new")).toEqual(NEW_BYTES);
     },
-    30_000,
+    60_000,
   );
 
   it(
-    "a stranded swap keeps .old and .new as the only remaining copies",
+    "swapInPlace: a stranded swap keeps .old and .new and marks the error",
     async () => {
-      const targetPath = makeTempTarget();
-      stubGoodDownload();
-
+      const targetPath = stageForSwap();
       const realRename = fs.promises.rename.bind(fs.promises);
       vi.spyOn(fs.promises, "rename").mockImplementation((from, to) => {
         // Second rename (staged -> target) fails AND the rollback
-        // (old -> target) fails: the worst case the review flagged. The
-        // pipeline must not "clean up" the user's only two copies, and
-        // must not walk into an elevation prompt over a half-done swap.
+        // (old -> target) fails: the worst case. The caller must neither
+        // elevate over a half-done swap nor delete either file — the
+        // stranded flag is its signal.
         if (String(from).endsWith(".new")) throw errWithCode("EPERM");
         if (String(from).endsWith(".old")) throw errWithCode("EPERM");
         return realRename(from, to);
       });
 
-      const result = await performUpgrade({ latestVersion: NEW_VERSION });
-
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe("swap");
+      await expect(swapInPlace(targetPath, () => {})).rejects.toMatchObject({
+        stranded: true,
+      });
       expect(fs.existsSync(targetPath)).toBe(false); // renamed away
       expect(fs.readFileSync(targetPath + ".old", "utf8")).toBe(
         "OLD LAUNCHER BYTES",
       );
       expect(fs.readFileSync(targetPath + ".new")).toEqual(NEW_BYTES);
     },
-    60_000,
+    90_000,
   );
+
+  it("buildWindowsHelperScript embeds hostile paths without interpolation", () => {
+    // The characters that broke (or would break) shell transports: %VAR%
+    // expansion in cmd, $() in sh, apostrophes in PowerShell literals.
+    const target = "C:\\Users\\Bob's PC\\100%USERNAME%\\$(reboot)\\QMail.exe";
+    const { inner, encoded } = buildWindowsHelperScript(target);
+
+    // Apostrophes must be doubled inside the single-quoted literals.
+    expect(inner).toContain("Bob''s PC");
+    // The path rides inside single quotes — never bare in the script.
+    expect(inner).toContain(`'${target.replace(/'/g, "''")}'`);
+    // The transport is UTF-16 base64 that decodes back byte-for-byte, so
+    // no shell (cmd/sh) ever parses the script text.
+    expect(Buffer.from(encoded, "base64").toString("utf16le")).toBe(inner);
+    // The helper must wait for release, restore on failure, and clean up.
+    expect(inner).toContain("Move-Item");
+    expect(inner).toContain("restoring the original");
+    expect(inner).toContain("upgrade.log");
+  });
 
   it("cancel during the download deletes .new and keeps the launcher", async () => {
     const targetPath = makeTempTarget();
