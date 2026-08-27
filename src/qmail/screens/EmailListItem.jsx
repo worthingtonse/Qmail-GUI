@@ -9,6 +9,7 @@ import {
   MailOpen,
   Menu,
   Paperclip,
+  Pencil,
   RotateCcw,
   ShieldAlert,
   Star,
@@ -141,6 +142,12 @@ const EmailListItem = ({
       action: "add-contact",
       label: "Add this person to contacts",
       icon: UserPlus,
+      disabled: !canUseSenderActions,
+    },
+    {
+      action: "edit-contact",
+      label: "Edit this person's contact",
+      icon: Pencil,
       disabled: !canUseSenderActions,
     },
     {

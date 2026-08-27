@@ -1135,3 +1135,202 @@
   justify-content: flex-end;
   gap: var(--space-md);
 }
+
+/* --- Per-phase / per-server send progress -------------------------------
+   Core reports Staging (writing stripes to disk) and Uploading (sending to
+   the 9 RAIDA servers) as distinct phases. Each gets its own bar, and the
+   upload expands into one row per server: the overall percent advances only
+   as whole servers finish, so it can sit still for minutes while every
+   server is actively transferring. */
+.compose-modal__phase-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.compose-modal__phase-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.compose-modal__phase-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-modal__server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.15rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--tertiary-bg);
+}
+
+.compose-modal__server-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr 6.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.compose-modal__server-track {
+  position: relative;
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--tertiary-bg);
+}
+
+.compose-modal__server-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-primary, var(--accent-success));
+  transition: width calc(1000ms * var(--motion-scale)) linear;
+}
+
+/* Finished server reads as done at a glance; a server that has had to retry
+   is flagged so a stalled peer is visible without reading the log. */
+.compose-modal__server-fill.is-done {
+  background: var(--accent-success);
+}
+
+.compose-modal__server-fill.has-retries {
+  background: var(--accent-warning, #d08a2c);
+}
+
+.compose-modal__server-meta {
+  text-align: right;
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-modal__server-fill {
+    transition: none;
+  }
+}
+
+/* A stripe core cancelled because enough others committed (the upload needs
+   8 of 9; the 9th is parity). Dimmed rather than coloured as a fault. */
+.compose-modal__server-fill.is-skipped {
+  background: var(--tertiary-bg);
+  opacity: 0.6;
+}
+
+/* ==================== REPLY REFERENCE PANE ====================
+   When replying, show the original message beside the composer. Reply does
+   not quote the original into the body, so this is the only place its text
+   is visible while writing. Splits left/right on a wide window and stacks
+   on a narrow one. */
+.compose-modal__body--split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-lg);
+}
+
+.compose-modal__body--split .compose-modal__compose-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.compose-modal__compose-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.compose-modal__reply-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  max-height: 100%;
+  padding: var(--space-md);
+  border: 1px solid var(--tertiary-bg);
+  border-radius: var(--radius-md, 0.75rem);
+  background: var(--secondary-bg, rgba(255, 255, 255, 0.03));
+}
+
+.compose-modal__reply-source-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.compose-modal__reply-source-label {
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.compose-modal__reply-source-toggle,
+.compose-modal__reply-source-show {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--tertiary-bg);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.compose-modal__reply-source-toggle:hover,
+.compose-modal__reply-source-show:hover {
+  border-color: var(--accent-primary, var(--accent-success));
+}
+
+.compose-modal__reply-source-show {
+  align-self: flex-start;
+}
+
+.compose-modal__reply-source-from {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.compose-modal__reply-source-subject {
+  font-size: var(--font-size-sm);
+  opacity: 0.85;
+}
+
+/* The original text scrolls inside its own pane so a long message never
+   pushes the composer off screen. */
+.compose-modal__reply-source-body {
+  flex: 1;
+  min-height: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--tertiary-bg);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Narrow window: stack the reference above the composer instead of
+   squeezing both into unusable columns. */
+@media (max-width: 900px) {
+  .compose-modal__body--split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compose-modal__reply-source-body {
+    max-height: 30vh;
+  }
+}

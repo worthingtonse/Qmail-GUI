@@ -6,6 +6,7 @@ import WalletActionModal from "./WalletActionModal";
 import LegacyImportModal from "./LegacyImportModal";
 import CoinEncryptionModal from "./CoinEncryptionModal";
 import ContactsPane from "./ContactsPane";
+import EditContactModal from "./EditContactModal";
 import TransactionsPane from "./TransactionsPane";
 import AccountPane from "./AccountPane";
 import NavigationPane from "./NavigationPane";
@@ -52,6 +53,7 @@ import {
   markQMailPaymentRefunded,
   starEmail,
   addContact,
+  getContacts,
   setContactFavorite,
   convertSnToEmail,
   getIdentity,
@@ -422,6 +424,8 @@ const QMailDashboard = ({
   const [emails, setEmails] = useState([]);
   const [, setDrafts] = useState([]);
   const [selectedEmail, setSelectedEmail] = useState(null);
+  // Contact editor opened from a message row menu: { contact, isNew, favorite }.
+  const [senderContactEditor, setSenderContactEditor] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalEmailCount, setTotalEmailCount] = useState(0);
   const [sortMode, setSortMode] = useState("newest");
@@ -2884,29 +2888,92 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     };
   };
 
-  const addSenderContact = async (email, { favorite = false } = {}) => {
-    const payload = await buildSenderContactPayload(email);
-    if (!payload.success) return payload;
+  const findExistingContact = async (serialNumber) => {
+    const result = await getContacts();
+    const contacts = result?.data?.contacts;
+    if (!result?.success || !Array.isArray(contacts)) return null;
+    const target = String(serialNumber);
+    return contacts.find((contact) => String(contact.userId) === target) || null;
+  };
 
-    const contactResult = await addContact(payload.data);
-    const contactAlreadyExists =
-      !contactResult.success &&
-      /already|exist|duplicate/i.test(String(contactResult.error || ""));
-    if (!contactResult.success && !contactAlreadyExists) {
-      return { success: false, error: contactResult.error || "Could not add contact." };
+  // Opens the shared Edit Contact dialog for a message sender, so the name can
+  // be typed before anything is saved. Existing contacts open pre-filled.
+  const openSenderContactEditor = async (email, { favorite = false } = {}) => {
+    const payload = await buildSenderContactPayload(email);
+    if (!payload.success) {
+      showDashboardNotification(payload.error, "error");
+      return;
     }
 
-    if (favorite) {
-      const favoriteResult = await setContactFavorite(payload.data.serial_number, true);
+    const existing = await findExistingContact(payload.data.serial_number);
+    const suggestedName = `${payload.data.first_name} ${payload.data.last_name}`.trim();
+
+    setSenderContactEditor({
+      isNew: !existing,
+      favorite,
+      basePayload: payload.data,
+      contact: {
+        id: payload.data.serial_number,
+        email: existing?.autoAddress || getEmailSenderAddress(email, "") || payload.data.serial_number,
+        name: existing ? existing.fullName : suggestedName,
+        description: existing ? existing.description : payload.data.description,
+        denomination: existing ? existing.denomination : payload.data.denomination,
+        className: existing?.className,
+        trustLevel: existing?.trustLevel,
+        userNotes: existing?.userNotes,
+        isFavorite: Boolean(existing?.isFavorite),
+      },
+    });
+  };
+
+  const saveSenderContact = async ({ name, description }) => {
+    if (!senderContactEditor) {
+      return { success: false, error: "No sender is selected." };
+    }
+
+    const { basePayload, contact, isNew, favorite } = senderContactEditor;
+    const nameParts = name.trim().split(/\s+/).filter(Boolean);
+    const result = await addContact({
+      ...basePayload,
+      first_name: nameParts[0] || name.trim(),
+      last_name: nameParts.slice(1).join(" "),
+      description,
+      class_name: contact.className,
+      trust_level: contact.trustLevel,
+      user_notes: contact.userNotes,
+    });
+
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || (isNew ? "Could not add contact." : "Could not update contact."),
+      };
+    }
+
+    // contacts/create is an upsert, so it clears the favorite flag on rewrite:
+    // re-apply it when asked for, or when the contact was already a favorite.
+    if (favorite || contact.isFavorite) {
+      const favoriteResult = await setContactFavorite(basePayload.serial_number, true);
       if (!favoriteResult.success) {
-        return {
-          success: false,
-          error: favoriteResult.error || "Contact was added, but favorite could not be saved.",
-        };
+        setSenderContactEditor(null);
+        showDashboardNotification(
+          favoriteResult.error || "Contact saved, but favorite status could not be set.",
+          "warning",
+        );
+        return { success: true };
       }
     }
 
-    return { success: true, alreadyExists: contactAlreadyExists };
+    setSenderContactEditor(null);
+    showDashboardNotification(
+      isNew
+        ? favorite
+          ? `${name.trim()} added to favorites.`
+          : `${name.trim()} added to contacts.`
+        : `${name.trim()} updated.`,
+      "success",
+    );
+    return { success: true };
   };
 
   const moveMessagesToFolder = async (messages, targetFolder) => {
@@ -2946,18 +3013,14 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
     if (!email || email.isPending) return;
 
     try {
-      if (action === "add-contact" || action === "add-favorite") {
-        const result = await addSenderContact(email, {
+      if (
+        action === "add-contact" ||
+        action === "add-favorite" ||
+        action === "edit-contact"
+      ) {
+        await openSenderContactEditor(email, {
           favorite: action === "add-favorite",
         });
-        showDashboardNotification(
-          result.success
-            ? action === "add-favorite"
-              ? "Sender added to favorites."
-              : "Sender added to contacts."
-            : result.error || "Could not add this sender.",
-          result.success ? "success" : "error",
-        );
         return;
       }
 
@@ -4490,6 +4553,12 @@ const handleDeleteEmail = async (emailId, isPermanent = false) => {
         editor={profileEditor}
         onClose={() => setProfileEditor(null)}
         qmailAddress={qmailAddress}
+      />
+      <EditContactModal
+        contact={senderContactEditor?.contact || null}
+        mode={senderContactEditor?.isNew ? "add" : "edit"}
+        onClose={() => setSenderContactEditor(null)}
+        onSaveContact={saveSenderContact}
       />
       <NavigationPane
         activeView={activeView}

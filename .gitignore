@@ -54,3 +54,9 @@ __pycache__/
 # the packaged app (see the "!public/non-committed-art" exclusion in
 # vite.config.js). Art that the app actually uses belongs in public/ proper.
 public/non-committed-art/
+
+# Working notes, design files, log dumps and AI handoff docs. These are
+# scratch/reference material for whoever is working on the repo, not
+# shipped source, and some of it (log archives, .pdn art) is large binary
+# that git cannot diff or compress. Kept out of history entirely.
+docs/

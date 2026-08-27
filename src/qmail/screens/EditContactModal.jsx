@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, Loader2, Pencil, X } from "lucide-react";
 import "./AddContactModal.css";
 
-const EditContactModal = ({ contact, onClose, onSaveContact }) => {
+const EditContactModal = ({ contact, onClose, onSaveContact, mode = "edit" }) => {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
@@ -16,6 +16,8 @@ const EditContactModal = ({ contact, onClose, onSaveContact }) => {
   }, [contact]);
 
   if (!contact) return null;
+
+  const isNewContact = mode === "add";
 
   const handleClose = () => {
     if (!isSaving) onClose();
@@ -38,10 +40,16 @@ const EditContactModal = ({ contact, onClose, onSaveContact }) => {
         description: description.trim(),
       });
       if (!result?.success) {
-        setError(result?.error || "Failed to update contact.");
+        setError(
+          result?.error ||
+            (isNewContact ? "Failed to add contact." : "Failed to update contact."),
+        );
       }
     } catch (err) {
-      setError(err?.message || "Failed to update contact.");
+      setError(
+        err?.message ||
+          (isNewContact ? "Failed to add contact." : "Failed to update contact."),
+      );
     } finally {
       setIsSaving(false);
     }
@@ -58,14 +66,14 @@ const EditContactModal = ({ contact, onClose, onSaveContact }) => {
       >
         <header className="compose-modal__header add-contact-modal__header">
           <h2 id="edit-contact-modal-title" className="add-contact-modal__title">
-            Edit Contact
+            {isNewContact ? "Add Contact" : "Edit Contact"}
           </h2>
           <button
             onClick={handleClose}
             className="compose-modal__close-button add-contact-modal__close-button"
             disabled={isSaving}
             type="button"
-            aria-label="Close edit contact dialog"
+            aria-label={`Close ${isNewContact ? "add" : "edit"} contact dialog`}
           >
             <X size={20} />
           </button>
@@ -140,7 +148,7 @@ const EditContactModal = ({ contact, onClose, onSaveContact }) => {
                 </>
               ) : (
                 <>
-                  <Pencil size={16} /> Save Changes
+                  <Pencil size={16} /> {isNewContact ? "Add Contact" : "Save Changes"}
                 </>
               )}
             </button>

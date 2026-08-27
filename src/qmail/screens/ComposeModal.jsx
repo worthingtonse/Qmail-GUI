@@ -15,6 +15,7 @@ import {
   getDrafts,
   sendEmail,
   getQMailCanSend,
+  getQMailObjectCapabilities,
   getQMailWalletBalance,
   getTaskStatus,
   getObjectTransferStatus,
@@ -47,6 +48,11 @@ import {
   rememberActiveTransfer,
 } from "../activeTransferRegistry";
 import { addressDerivedSymbols, useDrdSymbols } from "../avatar/drdSymbols";
+import {
+  describeSendPhase,
+  scaleSendProgress,
+  readPhaseProgress,
+} from "./composeSendProgress.js";
 import QmailCartoucheAvatar from "./QmailCartoucheAvatar";
 
 /**
@@ -70,7 +76,25 @@ const ComposeContactCartouche = ({ denominationCode, serialNumber }) => {
 };
 
 const MIN_RAIDA_FOR_SEND = 6;
-const SEND_POLL_TIMEOUT_MS = 60000;
+// WO-2.1: the old SEND_POLL_TIMEOUT_MS = 60000 wall clock GUARANTEED
+// abandonment of any large send (a 3.85 GB upload cannot finish in 60 s
+// under any circumstance) while the backend worker kept running unwatched.
+// Replaced with a stall detector: the poll loop now runs until the task is
+// terminal, and fails only after SEND_STALL_TIMEOUT_MS with NO observable
+// forward progress (state / progress %% / message / uploaded bytes all
+// unchanged). The core-side staging heartbeat
+// (core/src/qmail/qmail_send_object_transfer.c:230-241) supplies progress
+// during staging, the phase that previously looked identical to a hang.
+//
+// Large-attachment demo: core rewrites the task record every 100ms, so ANY
+// change to it (state / progress / message / bytes) is a liveness signal and
+// the detector keys off exactly that. Critically it must NOT require progress
+// to INCREASE: the percentage legitimately drops at each staging->network
+// handoff (see SEND_PHASE_LABELS). 120s is well clear of the ~100ms record
+// rewrite while still catching a genuinely frozen task quickly - the old
+// 10-minute value would have left a dead send spinning for ten minutes.
+const SEND_STALL_TIMEOUT_MS = 2 * 60 * 1000;
+
 const MAX_SEND_POLL_FAILURES = 3;
 const utf8ByteLength = (value) =>
   new TextEncoder().encode(String(value || "")).length;
@@ -221,6 +245,9 @@ const ComposeModal = ({
   const [showAdvanced, setShowAdvanced] = useState(readStoredShowAdvanced);
   const [networkStatus, setNetworkStatus] = useState(null);
   const [canSend, setCanSend] = useState(null);
+  // WO-2.6: backend-configured attachment cap (qmail_max_attachment_bytes),
+  // fetched once per modal open from the can-send response. null until known.
+  const maxAttachmentBytesRef = useRef(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState(null);
@@ -238,10 +265,26 @@ const ComposeModal = ({
   const [sendingStatus, setSendingStatus] = useState(null); // 'sending', 'completed', 'failed'
   const [progress, setProgress] = useState(0);
   const [uploadByteProgress, setUploadByteProgress] = useState(null);
+  // Per-phase / per-server progress from core's task `data` payload
+  // (phase, stage_percent, upload_percent, servers[]). null on an older
+  // core that does not emit it - the UI falls back to the single bar.
+  const [phaseProgress, setPhaseProgress] = useState(null);
   const [transferOperationIds, setTransferOperationIds] = useState([]);
   const [transferState, setTransferState] = useState("");
   const [transferControlPending, setTransferControlPending] = useState("");
   const [transferFailure, setTransferFailure] = useState(null);
+  // Reply reference pane: the message being answered, shown beside the
+  // composer so the user can read it while writing. Reply deliberately does
+  // NOT quote the original into the body, so without this the text is not
+  // visible anywhere while composing.
+  const [replySource, setReplySource] = useState(null);
+  const [showReplySource, setShowReplySource] = useState(true);
+  // Set once the send's PARENT task reports success. Core then cancels any
+  // still-running redundant stripe (the upload needs 8 of 9; the 9th is
+  // parity) and those sub-tasks report "Upload cancelled" a second or two
+  // later. Without this, that late cancellation repaints a delivered send as
+  // "Transfer failed" — observed 2026-08-26, Client16.
+  const sendSucceededRef = useRef(false);
   const [error, setError] = useState(null);
   // Invalid recipient-address modal: { message } when an address fails
   // format validation on send. Unlike the inline `error` banner, this
@@ -299,6 +342,17 @@ const ComposeModal = ({
       loadContacts();
       checkNetworkStatus();
 
+      // WO-2.6: learn the backend's attachment size cap so over-cap files
+      // are rejected at selection time, not after staging gigabytes. Read
+      // from the backend (Sean expects the value to change soon) — never
+      // hardcoded here.
+      void getQMailCanSend({}).then((check) => {
+        const cap = Number(check?.data?.maxAttachmentBytes);
+        if (check?.success && Number.isFinite(cap) && cap > 0) {
+          maxAttachmentBytesRef.current = cap;
+        }
+      });
+
       // gpt-batch3 #1: reset touchedFields per open. A field is
       // "touched" when it has a non-empty initial value (provided by
       // editDraft/replyTo) OR when the user later types into it.
@@ -306,6 +360,33 @@ const ComposeModal = ({
       const initialTouched = { to: false, cc: false, bcc: false, subsubject: false };
 
       const { mode, sourceEmail, ownIdentity, draftId } = composeContext || {};
+
+      // Keep the original message available for the reference pane on any
+      // mode that answers or forwards an existing message.
+      if (["reply", "replyAll", "forward"].includes(mode) && sourceEmail) {
+        setShowReplySource(true);
+        setReplySource({
+          from:
+            sourceEmail.senderEmail ||
+            sourceEmail.from ||
+            sourceEmail.sender ||
+            "",
+          subject: sourceEmail.subject || "",
+          body:
+            sourceEmail.body ||
+            sourceEmail.bodyPreview ||
+            sourceEmail.body_preview ||
+            "",
+          timestamp:
+            sourceEmail.receivedTimestamp ??
+            sourceEmail.received_timestamp ??
+            sourceEmail.sentTimestamp ??
+            sourceEmail.sent_timestamp ??
+            null,
+        });
+      } else {
+        setReplySource(null);
+      }
 
       if (mode === "draft" && sourceEmail) {
         // Load draft for editing
@@ -724,7 +805,6 @@ const ComposeModal = ({
     return false;
   };
 
-
   // gpt-batch5 #2: defensive limits tracking the backend's real
   // capacity for the comma/semicolon-joined attachment string buffer
   // (MAX_PATH_LEN * 4 = 16384 bytes) and UPLOAD_MAX_ATTACHMENTS = 245.
@@ -788,6 +868,27 @@ const ComposeModal = ({
             });
             continue;
           }
+          // WO-2.6: enforce the backend's attachment size cap at selection
+          // time. The user learns immediately, not after hashing and
+          // staging gigabytes. Skipped when the cap is unknown (older
+          // backend) — the core-side cap still rejects the send.
+          {
+            const cap = maxAttachmentBytesRef.current;
+            const entrySize = Number(entry.size);
+            if (
+              cap != null &&
+              Number.isFinite(entrySize) &&
+              entrySize > cap
+            ) {
+              const sizeGb = (entrySize / 1073741824).toFixed(2);
+              const capGb = (cap / 1073741824).toFixed(2);
+              rejected.push({
+                name,
+                reason: `file is ${sizeGb} GB; the attachment limit is ${capGb} GB`,
+              });
+              continue;
+            }
+          }
           if (out.length >= MAX_ATTACHMENT_COUNT) {
             rejected.push({
               name,
@@ -831,11 +932,22 @@ const ComposeModal = ({
     setAttachments((prev) => prev.filter((a) => a.path !== filePath));
   };
 
+  // Large-attachment demo: attachments now run to hundreds of GB, so the
+  // formatter has to carry past MB or a 160 GiB file renders as
+  // "163840.0 MB". Accepts a string too (byte counts arrive as decimal
+  // strings from the object-transfer API - see the handoff, section 6.1).
   const formatAttachmentSize = (bytes) => {
-    if (typeof bytes !== "number" || bytes < 0) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const n = typeof bytes === "string" ? Number(bytes) : bytes;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "";
+    if (n < 1024) return `${n} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = n / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(1)} ${units[unit]}`;
   };
 
   const getRecipientValue = (field) => {
@@ -1195,10 +1307,68 @@ const ComposeModal = ({
       }
     }
 
+    // Large-attachment pre-flight. rest_core stages the whole file to disk
+    // before any of it reaches the network, so a server-side size rejection
+    // would otherwise surface only after many minutes of staging. Query the
+    // server's limits first and refuse the guaranteed-to-fail send up front.
+    //
+    // Block on max_object_bytes (a hard limit). Warn-and-proceed on low
+    // available_bytes (striping may still succeed; it is the user's risk).
+    // Capabilities is optional on older backends - if the query fails we
+    // proceed rather than block, since core enforces the real cap anyway.
+    if (attachments.length > 0) {
+      const capabilities = await getQMailObjectCapabilities();
+      if (capabilities.success) {
+        const { maxObjectBytes, storageClasses } = capabilities.data;
+
+        if (maxObjectBytes != null) {
+          const tooLarge = attachments.find((attachment) => {
+            const size = Number(attachment.size);
+            return Number.isFinite(size) && BigInt(Math.trunc(size)) > maxObjectBytes;
+          });
+          if (tooLarge) {
+            setAttachError(
+              `"${tooLarge.name}" is ${formatAttachmentSize(tooLarge.size)}, ` +
+                `which exceeds the server's maximum object size of ` +
+                `${formatAttachmentSize(maxObjectBytes.toString())}. ` +
+                `Remove it or split the file, then send again.`,
+            );
+            return;
+          }
+        }
+
+        // Soft check: warn if the largest attachment would not comfortably
+        // fit in a storage class's remaining space. Non-blocking.
+        const largestBytes = attachments.reduce((max, attachment) => {
+          const size = Number(attachment.size);
+          return Number.isFinite(size) && size > max ? size : max;
+        }, 0);
+        if (largestBytes > 0 && storageClasses.length > 0) {
+          const roomiest = storageClasses.reduce((best, entry) => {
+            if (entry.availableBytes == null) return best;
+            return best == null || entry.availableBytes > best
+              ? entry.availableBytes
+              : best;
+          }, null);
+          if (roomiest != null && BigInt(Math.trunc(largestBytes)) > roomiest) {
+            setAttachError(
+              `Warning: the server reports only ` +
+                `${formatAttachmentSize(roomiest.toString())} available, ` +
+                `less than this attachment. The send will continue, but it ` +
+                `may fail if storage runs out.`,
+            );
+          }
+        }
+      }
+    }
+
+    // WO-2.4: include the attachment byte sizes so the backend prices the
+    // storage fee instead of estimating it as zero.
     const fundingCheck = await getQMailCanSend({
       to: toList,
       cc: ccList,
       bcc: bccList,
+      files: attachments.map((attachment) => Number(attachment.size) || 0),
     });
     if (!fundingCheck.success) {
       setError(
@@ -1207,17 +1377,35 @@ const ComposeModal = ({
       return;
     }
     if (!fundingCheck.data.canSend) {
-      setError(
-        fundingCheck.data.message ||
-          "Add funds to your Default wallet before sending mail.",
+      // WO-2.4 IMPORTANT: locker funding is currently PAUSED
+      // (qmail_locker_funding_enabled=false, core WO-1.1), so the quote is
+      // INFORMATIONAL — the user will not actually be charged. Show the
+      // shortfall as a warning but do NOT block the send on it. When funding
+      // is unpaused this branch should become a hard block again.
+      const required = Number(fundingCheck.data.walletRequired) || 0;
+      const balance = Number(fundingCheck.data.walletBalance) || 0;
+      console.warn(
+        `QMail can-send: wallet_required=${required} CC exceeds ` +
+          `wallet_balance=${balance} CC — proceeding because locker ` +
+          `funding is paused (quote is informational).`,
       );
-      return;
+      setSendProgress(
+        `Note: this send would cost about ${required} CC ` +
+          `(balance ${balance} CC). Fees are currently paused, so it will ` +
+          `proceed without charge.`,
+      );
     }
 
     clearAutosaveTimer();
     setIsSending(true);
     setSendingStatus("sending");
     setSendProgress("Preparing qmail...");
+    // Required by the monotonic clamp in the poll loop: without this, a
+    // second send in the same modal session would inherit the previous
+    // send's 100% and the bar would stay pinned there.
+    setProgress(0);
+    setPhaseProgress(null);
+    sendSucceededRef.current = false;
     setTransferOperationIds([]);
     transferOperationIdsRef.current = [];
     setTransferState("");
@@ -1274,6 +1462,15 @@ const ComposeModal = ({
     };
 
     const markSendFailed = async (message, source = null) => {
+      // The send already completed and was delivered; a trailing cancellation
+      // of a redundant stripe must not overturn that verdict.
+      if (sendSucceededRef.current) {
+        const cancelState = String(source?.state || "").toLowerCase();
+        if (cancelState === "cancelled" || cancelState === "cancelling" ||
+            /cancel/i.test(String(message || ""))) {
+          return;
+        }
+      }
       let normalizedFailure =
         source?.transferError ||
         normalizeTransferError(source || {
@@ -1380,7 +1577,7 @@ const ComposeModal = ({
         // qmailApiServices.js already iterates this array and
         // appends one attachment_file_path query param per entry.
         attachments: attachments.map((a) => a.path),
-        storage_weeks: storageWeeks || 0
+        storage_weeks: storageWeeks || 4
       };
 
       const result = await sendEmail(emailData);
@@ -1402,15 +1599,22 @@ const ComposeModal = ({
       if (result.success && result.data.taskId) {
         const currentTaskId = result.data.taskId;
         setTaskId(currentTaskId);
-        const deadline = Date.now() + SEND_POLL_TIMEOUT_MS;
+        // WO-2.1: no wall-clock deadline. Poll until the task reaches a
+        // terminal state; fail only on a genuine stall (nothing observable
+        // changed for SEND_STALL_TIMEOUT_MS).
         let consecutivePollFailures = 0;
         let taskFinished = false;
+        // Once the PARENT task reports success the send is done and delivered.
+        // Core cancels any still-running redundant stripe at that point (the
+        // upload needs 8 of 9; the 9th is parity), and those sub-tasks then
+        // report "Upload cancelled". That is normal completion, not failure —
+        // this latch stops a late sub-task error from repainting a finished
+        // send as "Transfer failed".
+        let parentSucceeded = false;
+        let lastActivityAt = Date.now();
+        let lastActivitySignature = "";
 
-        while (
-          !taskFinished &&
-          !cancelledRef.current &&
-          Date.now() < deadline
-        ) {
+        while (!taskFinished && !cancelledRef.current) {
           // Wait 1 second before checking status
           await new Promise(resolve => setTimeout(resolve, 1000));
           if (cancelledRef.current) break;
@@ -1428,6 +1632,42 @@ const ComposeModal = ({
           if (taskResult.success) {
             consecutivePollFailures = 0;
             const { state, progress: currentProgress, message, isFinished, isSuccessful, error: taskError } = taskResult.data;
+
+            // WO-2.1 stall detector: any observable change (state, progress,
+            // message, or uploaded bytes) resets the clock. Only a genuinely
+            // frozen task — no movement at all for SEND_STALL_TIMEOUT_MS —
+            // is treated as a failure.
+            {
+              const taskData = taskResult.data.result;
+              const activitySignature = JSON.stringify([
+                state,
+                currentProgress,
+                message,
+                taskData && typeof taskData === "object"
+                  ? [taskData.completed_bytes, taskData.uploaded_bytes]
+                  : null,
+              ]);
+              if (activitySignature !== lastActivitySignature) {
+                lastActivitySignature = activitySignature;
+                lastActivityAt = Date.now();
+              } else if (
+                !isFinished &&
+                Date.now() - lastActivityAt >= SEND_STALL_TIMEOUT_MS
+              ) {
+                taskFinished = true;
+                if (uploadCancellationRequestedRef.current) {
+                  markSendCancelled();
+                } else {
+                  await markSendFailed(
+                    `The send stopped making progress and has NOT been ` +
+                      `confirmed. The backend task may still be running. ` +
+                      `Task: ${currentTaskId}`,
+                    taskResult.data,
+                  );
+                }
+                continue;
+              }
+            }
             const discoveredOperationIds =
               extractTransferOperationIds(taskResult.data);
             const observedTransferState =
@@ -1472,16 +1712,29 @@ const ComposeModal = ({
                 observedTransferState === "cancelled" ||
                 observedTransferState === "cancelling"
               ) {
-                setSendingStatus(observedTransferState);
+                // Core cancels the leftover redundant stripe once enough
+                // stripes have committed. If the parent already succeeded,
+                // this is bookkeeping on a finished send, not a failure.
+                if (!parentSucceeded) {
+                  setSendingStatus(observedTransferState);
+                }
               } else {
                 setTransferFailure(null);
                 setSendingStatus("sending");
               }
             }
             
-            setProgress(currentProgress || 0);
+            // Monotonic: never let the displayed bar move backwards. The
+            // banding above handles the staging->network reset, and this
+            // clamp covers everything else (coarse per-server commit counts,
+            // an unrecognized phase message, a task record read out of order).
+            // Reset to 0 only happens when a new send starts.
+            {
+              const scaled = scaleSendProgress(currentProgress, describeSendPhase(message));
+              setProgress((shown) => (scaled > shown ? scaled : shown));
+            }
             if (observedTransferState !== "paused") {
-              setSendProgress(message || "Processing...");
+              setSendProgress(describeSendPhase(message));
             }
             setUploadByteProgress(
               deriveUploadByteProgress(
@@ -1489,17 +1742,67 @@ const ComposeModal = ({
                 attachmentTotalBytes,
               ),
             );
+            setPhaseProgress(readPhaseProgress(taskResult.data));
             
             if (isFinished) {
               taskFinished = true; // Break the loop
               
               if (isSuccessful || state === "completed") {
+                parentSucceeded = true;
+                sendSucceededRef.current = true;
+                // WO-2.3: a "completed" task is NOT the same as "delivered".
+                // The backend reports all_accepted / tell_successes /
+                // tell_failures in the task result
+                // (core/api_src/api_handlers_qmail_messages_send.c:2066-2072);
+                // until now only supportLogsFlow.js read them, so a queued
+                // retry or a total Tell failure rendered as a green
+                // "Qmail sent successfully!".
+                const tellData =
+                  taskResult.data.result &&
+                  typeof taskResult.data.result === "object"
+                    ? taskResult.data.result
+                    : {};
+                const tellSuccesses = Number(tellData.tell_successes);
+                const tellFailures = Number(tellData.tell_failures);
+                const allAccepted =
+                  tellData.all_accepted === true ||
+                  tellData.all_accepted === 1 ||
+                  tellData.all_accepted === "true" ||
+                  tellData.all_accepted === "1";
+                const hasTellFields =
+                  Number.isFinite(tellSuccesses) &&
+                  Number.isFinite(tellFailures);
+
+                if (hasTellFields && tellSuccesses === 0 && tellFailures > 0) {
+                  // Total Tell failure: nothing was delivered to anyone.
+                  // (Backend WO-1.4 now fails the task in this case, so this
+                  // is belt-and-braces for a success-shaped 0/N result.)
+                  await markSendFailed(
+                    "The qmail was uploaded but NO recipient was notified " +
+                      "— it has not been delivered. It will be retried in " +
+                      "the background.",
+                    taskResult.data,
+                  );
+                  taskFinished = true;
+                  continue;
+                }
+
                 knownOperationIds.forEach((operationId) =>
                   forgetActiveTransfer(operationId),
                 );
                 setSendingStatus("completed");
                 setTransferFailure(null);
-                setSendProgress("Qmail sent successfully!");
+                if (hasTellFields && !allAccepted && tellFailures > 0) {
+                  // Partial delivery: some beacons accepted, some queued for
+                  // retry. Never render this as a plain success.
+                  setSendProgress(
+                    `Qmail sent, but ${tellFailures} recipient ` +
+                      `notification${tellFailures === 1 ? "" : "s"} failed ` +
+                      `and will be retried in the background.`,
+                  );
+                } else {
+                  setSendProgress("Qmail sent successfully!");
+                }
                 setUploadByteProgress(
                   deriveUploadByteProgress(
                     { ...taskResult.data, isSuccessful: true },
@@ -1542,12 +1845,19 @@ const ComposeModal = ({
           }
         }
 
+        // WO-2.1: with the wall clock removed, the loop only exits on a
+        // terminal task, a stall, or user cancellation — so this branch is
+        // defensive. If it ever fires, it must never read as success (the
+        // old "Check Sent in a few minutes" wording is what misled the
+        // 3.85 GB sender) and must name the task for support correlation.
         if (!taskFinished && !cancelledRef.current) {
           if (uploadCancellationRequestedRef.current) {
             markSendCancelled();
           } else {
             await markSendFailed(
-              "Send is taking longer than expected. Check Sent in a few minutes.",
+              `The app stopped tracking this send. It has NOT been ` +
+                `confirmed; the upload may still be running in the ` +
+                `background. Task: ${currentTaskId}`,
             );
           }
         }
@@ -1700,8 +2010,14 @@ const ComposeModal = ({
       setSendProgress("Upload resumed.");
 
       void (async () => {
-        const deadline = Date.now() + SEND_POLL_TIMEOUT_MS;
-        while (!cancelledRef.current && Date.now() < deadline) {
+        // WO-2.1 (site 2): this resume-watch loop previously expired after a
+        // 60 s wall clock and just stopped, silently, while the transfers
+        // kept running. Now it watches until a terminal state and only gives
+        // up on a genuine stall (completedBytes frozen for
+        // SEND_STALL_TIMEOUT_MS).
+        let lastResumeActivityAt = Date.now();
+        let lastResumeBytes = -1n;
+        while (!cancelledRef.current) {
           const statuses = [];
           for (const operationId of successfulIds) {
             statuses.push(await getObjectTransferStatus(operationId));
@@ -1730,7 +2046,17 @@ const ComposeModal = ({
             });
 
             const failedStatus = successfulStatuses.find(
-              (status) => status.isFinished && !status.isSuccessful,
+              (status) =>
+                status.isFinished &&
+                !status.isSuccessful &&
+                // A redundant stripe cancelled after the send succeeded is
+                // expected bookkeeping, not a transfer failure.
+                !(
+                  sendSucceededRef.current &&
+                  ["cancelled", "cancelling"].includes(
+                    String(status.state || "").toLowerCase(),
+                  )
+                ),
             );
             if (failedStatus) {
               const failure =
@@ -1761,6 +2087,24 @@ const ComposeModal = ({
               setTransferState("paused");
               setSendingStatus("paused");
               setSendProgress("Upload paused again.");
+              return;
+            }
+
+            // WO-2.1 stall check: rising completedBytes resets the clock.
+            if (completedBytes !== lastResumeBytes) {
+              lastResumeBytes = completedBytes;
+              lastResumeActivityAt = Date.now();
+            } else if (
+              Date.now() - lastResumeActivityAt >= SEND_STALL_TIMEOUT_MS
+            ) {
+              setSendingStatus("failed");
+              setTransferFailure(null);
+              setError(
+                "The resumed upload stopped making progress and has NOT " +
+                  "been confirmed. It may still be running in the background.",
+              );
+              setSendProgress("Upload is not making progress.");
+              setIsSending(false);
               return;
             }
           }
@@ -1819,6 +2163,95 @@ const ComposeModal = ({
             <span className="compose-modal__transfer-error-detail">
               {transferFailure.detail}
             </span>
+          )}
+          {/* Per-phase bars. Core reports Staging (writing stripes to disk)
+              and Uploading (sending them to the 9 servers) as separate
+              phases, each with its OWN 0-100 progress, so each gets its own
+              bar instead of sharing one band that appears to reset. The
+              upload bar expands into one row per RAIDA: overall upload
+              percent alone sits still for minutes while individual servers
+              are mid-transfer. */}
+          {phaseProgress && (
+            <div className="compose-modal__phase-progress">
+              {[
+                {
+                  key: "staging",
+                  label: "Preparing stripes",
+                  percent: phaseProgress.stagePercent,
+                },
+                {
+                  key: "uploading",
+                  label: "Uploading to servers",
+                  percent: phaseProgress.uploadPercent,
+                },
+              ].map((bar) => (
+                <div className="compose-modal__phase-row" key={bar.key}>
+                  <div className="compose-modal__phase-head">
+                    <span>{bar.label}</span>
+                    <strong>{bar.percent}%</strong>
+                  </div>
+                  <div
+                    className="compose-modal__transfer-progress-track"
+                    role="progressbar"
+                    aria-label={bar.label}
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow={bar.percent}
+                  >
+                    <span
+                      className="compose-modal__transfer-progress-fill"
+                      style={{ width: `${bar.percent}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {phaseProgress.servers.length > 0 && (
+                <div className="compose-modal__server-list">
+                  {phaseProgress.servers.map((srv) => (
+                    <div
+                      className="compose-modal__server-row"
+                      key={srv.raidaId}
+                    >
+                      <span className="compose-modal__server-name">
+                        RAIDA {srv.raidaId}
+                      </span>
+                      <div
+                        className="compose-modal__server-track"
+                        role="progressbar"
+                        aria-label={`RAIDA ${srv.raidaId} upload`}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow={srv.percent}
+                      >
+                        <span
+                          className={
+                            "compose-modal__server-fill" +
+                            (srv.ok ? " is-done" : "") +
+                            (srv.state === "cancelled" ||
+                            srv.state === "cancelling"
+                              ? " is-skipped"
+                              : "") +
+                            (srv.retries > 0 ? " has-retries" : "")
+                          }
+                          style={{ width: `${srv.percent}%` }}
+                        />
+                      </div>
+                      <span className="compose-modal__server-meta">
+                        {/* A cancelled stripe is the redundant (parity) copy
+                            core reaps once enough stripes have committed —
+                            label it plainly so it does not read as a fault. */}
+                        {srv.state === "cancelled" ||
+                        srv.state === "cancelling"
+                          ? "not needed"
+                          : `${srv.percent}%`}
+                        {srv.retries > 0 ? ` · ${srv.retries} retries` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           {uploadByteProgress && (
             <>
@@ -1990,7 +2423,55 @@ const ComposeModal = ({
             <X size={20} />
           </button>
         </header>
-        <div className="compose-modal__body">
+        <div
+          className={
+            "compose-modal__body" +
+            (replySource && showReplySource ? " compose-modal__body--split" : "")
+          }
+        >
+          {/* Reference pane: the message being replied to, shown beside the
+              composer. Reply does not quote the original into the body, so
+              without this its text is not visible while writing. */}
+          {replySource && showReplySource && (
+            <aside className="compose-modal__reply-source">
+              <div className="compose-modal__reply-source-head">
+                <span className="compose-modal__reply-source-label">
+                  In reply to
+                </span>
+                <button
+                  type="button"
+                  className="compose-modal__reply-source-toggle"
+                  onClick={() => setShowReplySource(false)}
+                  title="Hide the original message"
+                >
+                  Hide
+                </button>
+              </div>
+              {replySource.from && (
+                <div className="compose-modal__reply-source-from">
+                  {replySource.from}
+                </div>
+              )}
+              {replySource.subject && (
+                <div className="compose-modal__reply-source-subject">
+                  {replySource.subject}
+                </div>
+              )}
+              <div className="compose-modal__reply-source-body">
+                {replySource.body || "(no message text)"}
+              </div>
+            </aside>
+          )}
+          {replySource && !showReplySource && (
+            <button
+              type="button"
+              className="compose-modal__reply-source-show"
+              onClick={() => setShowReplySource(true)}
+            >
+              Show the message you are replying to
+            </button>
+          )}
+          <div className="compose-modal__compose-pane">
           {/* Error Message */}
           {error && (
             <div className="compose-modal__error" role="alert">
@@ -2092,7 +2573,7 @@ const ComposeModal = ({
                   type="number"
                   id="storageWeeks"
                   min="1"
-                  max="52"
+                  max="520"
                   value={storageWeeks}
                   onChange={(e) =>
                     setStorageWeeks(parseInt(e.target.value) || 4)
@@ -2116,6 +2597,7 @@ const ComposeModal = ({
               disabled={isSending}
               rows={12}
             />
+          </div>
           </div>
         </div>
 

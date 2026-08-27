@@ -2149,6 +2149,18 @@ export const getQMailCanSend = async (options = {}) => {
     appendCanSendRecipientParams(params, "cc", options.cc);
     appendCanSendRecipientParams(params, "bcc", options.bcc);
 
+    // WO-2.4: pass attachment byte sizes so the backend prices the storage
+    // fee. Without files= the documented backend contract is an explicit
+    // ZERO storage estimate (api_handlers_qmail_misc.c:840-843) — which is
+    // how a ~40 CC send was waved through as free. Backend accepts up to 64
+    // entries; UPLOAD_MAX_ATTACHMENTS is smaller, so no truncation risk.
+    const files = (Array.isArray(options.files) ? options.files : [])
+      .map((size) => Math.trunc(Number(size) || 0))
+      .filter((size) => size > 0);
+    if (files.length) {
+      params.set("files", files.join(","));
+    }
+
     const response = await fetch(
       `${API_BASE_URL}/qmail/local/can-send?${params.toString()}`,
     );
@@ -2170,6 +2182,10 @@ export const getQMailCanSend = async (options = {}) => {
             : "You do not have enough CloudCoins to send mail. Add funds, then try again."),
         requiredUploadLockers: readNumericApiField(data.required_upload_lockers) ?? 0,
         requiredInboxFee: readNumericApiField(data.required_inbox_fee) ?? 0,
+        // WO-2.6: backend-configured attachment size cap
+        // (qmail_max_attachment_bytes, exposed on this response by core
+        // api_handlers_qmail_misc.c:975). null when the backend predates it.
+        maxAttachmentBytes: readNumericApiField(data.max_attachment_bytes) ?? null,
         walletRequired: readNumericApiField(data.wallet_required) ?? 0,
         walletBalance: readNumericApiField(data.wallet_balance) ?? 0,
         combinedWalletValue: readNumericApiField(data.combined_wallet_value) ?? 0,
@@ -2673,6 +2689,78 @@ export const markQMailPaymentRefunded = async (emailId) => {
     };
   } catch (error) {
     console.error("Mark QMail payment refunded failed:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Parse a byte-count field that the object-transfer API returns as a decimal
+ * STRING so it survives Number.MAX_SAFE_INTEGER (handoff section 6.1).
+ * Returns a BigInt, or null when absent/unparseable. Never routes the value
+ * through Number() - a 160 GiB count must stay exact.
+ */
+const readBigIntApiField = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    try {
+      // BigInt() accepts a decimal string or a safe number; it throws on
+      // anything else (floats, junk), which the catch turns into a skip.
+      return BigInt(typeof value === "number" ? Math.trunc(value) : String(value).trim());
+    } catch {
+      continue;
+    }
+  }
+  return null;
+};
+
+/**
+ * GET /api/qmail/net/objects/capabilities - server limits for durable object
+ * transfers. Used as a send-time pre-flight so an over-sized attachment is
+ * refused BEFORE rest_core stages hundreds of GB to disk.
+ *
+ * Byte counts are kept as BigInt (see readBigIntApiField). This endpoint is
+ * optional on older backends: a non-200 resolves to { success: false } and
+ * callers are expected to proceed rather than block the send.
+ *
+ * @returns {Promise<{success: boolean, data?: object, error?: string}>}
+ */
+export const getQMailObjectCapabilities = async () => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/qmail/net/objects/capabilities`);
+    const data = await handleResponse(response);
+    if (!data || typeof data !== "object") {
+      throw new Error("Invalid response from capabilities endpoint");
+    }
+
+    const storageClasses = Array.isArray(data.storage_classes)
+      ? data.storage_classes.map((entry) => ({
+          classId: readNumericApiField(entry?.class_id) ?? null,
+          mediaType: readNumericApiField(entry?.media_type) ?? null,
+          classFlags: readNumericApiField(entry?.class_flags) ?? null,
+          maxObjectBytes: readBigIntApiField(entry?.max_object_bytes),
+          capacityBytes: readBigIntApiField(entry?.capacity_bytes),
+          availableBytes: readBigIntApiField(entry?.available_bytes),
+          maxRetentionSeconds: readNumericApiField(entry?.max_retention_seconds) ?? null,
+          priceScheduleId: readNumericApiField(entry?.price_schedule_id) ?? null,
+        }))
+      : [];
+
+    return {
+      success: true,
+      data: {
+        maxObjectBytes: readBigIntApiField(data.max_object_bytes),
+        maxChunkBytes: readBigIntApiField(data.max_chunk_bytes),
+        preferredChunkBytes: readBigIntApiField(data.preferred_chunk_bytes),
+        maxDownloadRangeBytes: readBigIntApiField(data.max_download_range_bytes),
+        maxActiveTransfers: readNumericApiField(data.max_active_transfers) ?? null,
+        maxParallel: readNumericApiField(data.max_parallel) ?? null,
+        paymentMode: readNumericApiField(data.payment_mode) ?? null,
+        storageClasses,
+        raw: data,
+      },
+    };
+  } catch (error) {
+    console.error("QMail object capabilities query failed:", error);
     return { success: false, error: error.message };
   }
 };
