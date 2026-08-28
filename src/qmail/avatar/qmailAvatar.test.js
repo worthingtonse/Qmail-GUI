@@ -64,12 +64,6 @@ describe("getQmailAvatarTierName", () => {
 });
 
 describe("getQmailAvatarAssetHref", () => {
-  it("builds frame hrefs from the tier name", () => {
-    expect(getQmailAvatarAssetHref("frame", "mega")).toContain(
-      "/qmail-avatars/frames/mega.svg",
-    );
-  });
-
   it("builds zero-padded symbol hrefs from NewAvatars", () => {
     expect(getQmailAvatarAssetHref("symbol", 7)).toContain(
       "/qmail-avatars/NewAvatars/007.svg",
@@ -79,7 +73,8 @@ describe("getQmailAvatarAssetHref", () => {
     );
   });
 
-  it("returns null for unknown layer kinds (old word layers are gone)", () => {
+  it("returns null for unknown layer kinds (old word and frame layers are gone)", () => {
+    expect(getQmailAvatarAssetHref("frame", "mega")).toBeNull();
     expect(getQmailAvatarAssetHref("adjectives", 7)).toBeNull();
     expect(getQmailAvatarAssetHref("nouns", 42)).toBeNull();
   });

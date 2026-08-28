@@ -63,18 +63,18 @@ export const getQmailAvatarTierName = (denominationCode) => {
 
 /**
  * Asset href for a cartouche layer.
- *   getQmailAvatarAssetHref("frame", "kilo") -> .../qmail-avatars/frames/kilo.svg
- *   getQmailAvatarAssetHref("symbol", 51)    -> .../qmail-avatars/NewAvatars/051.svg
+ *   getQmailAvatarAssetHref("symbol", 51) -> .../qmail-avatars/NewAvatars/051.svg
  *
- * Frames are the hand-authored SVG placards (one per denomination tier,
- * including epic). Symbols are SVG too; their render-time color comes from
- * the user's serial number (avatar/serialColor.js) via alpha masking, with
- * the baked golden-angle color as the no-serial fallback.
+ * Symbols are SVG; their render-time color comes from the user's serial
+ * number (avatar/serialColor.js) via alpha masking, with the baked
+ * golden-angle color as the no-serial fallback.
+ *
+ * The "frame" layer (hand-authored per-tier placards under
+ * qmail-avatars/frames/) is gone: nothing rendered it, and the art was
+ * removed. It returns null like any other unknown kind rather than
+ * handing back an href to a file that is not there.
  */
 export const getQmailAvatarAssetHref = (kind, identifier) => {
-  if (kind === "frame") {
-    return joinBasePath(`qmail-avatars/frames/${identifier}.svg`);
-  }
   if (kind === "symbol") {
     return joinBasePath(
       `qmail-avatars/NewAvatars/${String(identifier).padStart(3, "0")}.svg`,
