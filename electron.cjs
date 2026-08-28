@@ -29,7 +29,6 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
-const net = require('net');
 const crypto = require('crypto');
 const { classifyCoinFileSizes } = require('./coin-file-state.cjs');
 const { parseTransactionCsv } = require('./transaction-log.cjs');
@@ -802,7 +801,8 @@ const QMAIL_USAGE =
 
 Options:
   --port <N>      Pin backend (core) HTTP port to N (1..65535).
-                  Default: random free port.
+                  Default: core picks the port and reports it in
+                  Client_Data/core.port.
   --debug         Enable core.exe debug logging (forwarded as -debug).
                   DevTools are reachable from the renderer via F12.
   --dev           Run against the Vite dev server at localhost:5173
@@ -811,12 +811,13 @@ Options:
   --help, -h      Print this message and exit.
 
 Examples:
-  QMail.exe                          Normal launch, random backend port.
+  QMail.exe                          Normal launch, core picks the port.
   QMail.exe --port 8081              Pin backend to port 8081.
   QMail.exe --port 8082 --debug      Pin port 8082, verbose core logging.
 
-Two instances launched without --port each get their own random port,
-so they will not conflict.`;
+Two instances launched without --port each get their own port: core
+retries onto a free one when its first choice is taken, and reports the
+port it actually bound, so they will not conflict.`;
 
 function parseQMailArgs(argv) {
   const out = { port: null, debug: false, dev: false };
@@ -881,22 +882,68 @@ const isDev = qmailArgs.dev;
 const windowIconPath = path.join(__dirname, isDev ? 'public' : 'dist', 'icon.png');
 log(`Args: port=${qmailArgs.port ?? 'random'} debug=${qmailArgs.debug} dev=${qmailArgs.dev}`);
 
-// Multi-instance support: ask the OS for a free TCP port. We bind a
-// throwaway server to port 0, read the port the OS assigned, then
-// close it and hand that port to core.exe via -port. There's a tiny
-// race window where another process could grab it between close and
-// spawn, but it's the standard pattern and avoids the alternative
-// (parsing core.exe's stdout to learn the port, which is fragile).
-function findFreePort() {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.unref();
-    probe.on('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address();
-      probe.close(() => resolve(port));
-    });
-  });
+// Backend port discovery. core is the ONLY component that knows which port
+// it actually serves on: it falls back to another port when its first choice
+// is already taken (desktop machines often have 8080 busy), so anything we
+// pick up front can be silently wrong. core writes the real port to
+// Client_Data/core.port AFTER a successful bind and BEFORE it prints
+// "REST API server running on", so reading that file is authoritative.
+//
+// The previous design (bind :0, close, hand the number to core via -port)
+// looked safe but produced the "No backend" failure: if the port got taken
+// in the gap, core recovered onto a different port and the GUI kept talking
+// to the old one.
+function backendPortFilePath(dataDir) {
+  return path.join(dataDir, 'Client_Data', 'core.port');
+}
+
+// A core.port left behind by a previous run would be read as if it described
+// the process we just spawned. Remove it before spawning so a stale value can
+// never win the race against the new core's write.
+function clearStaleBackendPortFile(dataDir) {
+  if (!dataDir) return;
+  try {
+    fs.rmSync(backendPortFilePath(dataDir), { force: true });
+  } catch (error) {
+    log('WARN: could not clear stale core.port: ' + error.message);
+  }
+}
+
+function readAdvertisedBackendPort(dataDir) {
+  if (!dataDir) return null;
+  try {
+    const raw = fs.readFileSync(backendPortFilePath(dataDir), 'utf8').trim();
+    const port = Number(raw);
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+    log('WARN: ignoring invalid core.port value: ' + raw);
+  } catch (error) {
+    // ENOENT is the normal "not written yet" case while polling.
+    if (error.code !== 'ENOENT') {
+      log('WARN: could not read core.port: ' + error.message);
+    }
+  }
+  return null;
+}
+
+// Poll for core.port. Deliberately does NOT fall back to a guessed port:
+// guessing is what produces a GUI that talks to the wrong door and reports
+// "No backend". If core never advertises, that is a real startup failure and
+// the caller surfaces it as one.
+async function waitForAdvertisedBackendPort(dataDir, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const advertised = readAdvertisedBackendPort(dataDir);
+    if (advertised) return advertised;
+    if (backendProcess === null) {
+      log('ERROR: backend exited before advertising a port');
+      return null;
+    }
+    if (Date.now() >= deadline) {
+      log('ERROR: backend did not advertise a port within ' + timeoutMs + 'ms');
+      return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }
 
 // core.exe creates its own Client_Data/ directory next to itself — no setup needed
@@ -916,8 +963,14 @@ function isWritableDir(dir) {
   }
 }
 
-function startBackend(port) {
-  log('Starting backend on port ' + port + '...');
+// requestedPort is the user's explicit --port, or null to let core choose
+// (and report back via core.port).
+function startBackend(requestedPort) {
+  log(
+    requestedPort
+      ? 'Starting backend on explicit port ' + requestedPort + '...'
+      : 'Starting backend; core will choose its port and advertise it...',
+  );
 
   let backendDir, backendPath, dataDir;
 
@@ -1002,7 +1055,10 @@ function startBackend(port) {
   // BUG-52: core.exe uses GetModuleFileNameA() to locate Client_Data,
   // which in portable mode points at Electron's temp extraction dir.
   // Pass -data-dir explicitly so user data lands next to QMail.exe.
-  const coreArgs = ['-port', String(port), '-data-dir', dataDir];
+  clearStaleBackendPortFile(dataDir);
+
+  const coreArgs = ['-data-dir', dataDir];
+  if (requestedPort) coreArgs.unshift('-port', String(requestedPort));
   if (qmailArgs.debug) coreArgs.push('-debug');
   log('Backend args: ' + coreArgs.join(' '));
 
@@ -1029,7 +1085,7 @@ function startBackend(port) {
     });
     backendProcess = child;
 
-    log('Backend started PID: ' + child.pid + ' on port ' + port);
+    log('Backend started PID: ' + child.pid);
 
     child.stdout.on('data', (data) => {
       const output = data.toString().trim();
@@ -1037,10 +1093,18 @@ function startBackend(port) {
 
       // Detect when backend is ready to accept requests
       if (output.includes('REST API server running on')) {
-        log('Backend is ready for requests');
+        // core writes core.port before printing this line, so by now the file
+        // is authoritative. Re-read it: this is the last chance to correct the
+        // port if core bound somewhere other than where we expected.
+        const advertised = readAdvertisedBackendPort(dataDir);
+        if (advertised && advertised !== backendPort) {
+          log('Backend port corrected to ' + advertised + ' (was ' + backendPort + ')');
+          backendPort = advertised;
+        }
+        log('Backend is ready for requests on port ' + backendPort);
         // Broadcast to all windows that backend is ready
         if (mainWindow) {
-          mainWindow.webContents.send('backend-ready', { port });
+          mainWindow.webContents.send('backend-ready', { port: backendPort });
         }
       }
     });
@@ -3272,6 +3336,27 @@ ipcMain.handle('list-sound-files', async () => {
     return [];
   }
 });
+// Core never came up. Without this the splash sits there forever (it only
+// closes on the main window's first paint, which will never happen), leaving
+// a hung app with no explanation. Tell the user plainly and exit.
+function showBackendStartupFailure() {
+  log('ERROR: aborting startup — backend never became reachable');
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+    splashWindow = null;
+  }
+  try {
+    dialog.showErrorBox(
+      'QMail — backend did not start',
+      'The QMail backend (core) did not start, so the app cannot continue. '
+      + 'Check the log for details, then try launching QMail again.',
+    );
+  } catch {
+    /* dialog unavailable — still quit below */
+  }
+  app.quit();
+}
+
 // Boot sequence (Option 2 - backend gets a head start):
 //   1. Pick a free port for the backend (OS-assigned, supports multi-instance).
 //   2. Spawn core.exe with that port (backend starts in background).
@@ -3290,23 +3375,31 @@ async function boot() {
     upgrade.cleanupLeftovers(upgradeTarget.targetPath, upgradeLog);
   }
 
+  // Splash goes up before we wait on anything, so the user sees life while
+  // core is starting.
+  loadWindowSettings();
+  createSplashWindow();
+
+  // Start backend first so it has time to initialize while splash is showing.
+  startBackend(qmailArgs.port);
+
   if (qmailArgs.port !== null) {
+    // Explicit --port is strict: core was told exactly where to bind, and a
+    // failure to do so should surface rather than be silently rerouted.
     backendPort = qmailArgs.port;
     log('Using explicit port: ' + backendPort);
   } else {
-    try {
-      backendPort = await findFreePort();
-      log('Reserved random port: ' + backendPort);
-    } catch (e) {
-      log('ERROR: Could not reserve a free port: ' + e.message);
-      backendPort = 8080; // fallback to historical default
+    // Ask core where it actually landed. No guessed fallback: a wrong port is
+    // exactly the "No backend" failure this replaced.
+    const advertised = await waitForAdvertisedBackendPort(backendDataDir);
+    if (advertised === null) {
+      showBackendStartupFailure();
+      return;
     }
+    backendPort = advertised;
+    log('Using advertised backend port: ' + backendPort);
   }
 
-  // Start backend first so it has time to initialize while splash is showing
-  startBackend(backendPort);
-  loadWindowSettings();
-  createSplashWindow();
   createMainWindow(backendPort);
 }
 
