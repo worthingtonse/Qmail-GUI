@@ -8,7 +8,7 @@ export ELECTRON_BUILDER_CACHE=${ELECTRON_BUILDER_CACHE:-$PWD/.cache/electron-bui
 bash ci/download_published_core.sh linux
 node ci/stamp_ci_version.cjs
 npx vite build
-npx electron-builder --config electron-builder.config.cjs --linux AppImage --x64 --publish=never
+npx electron-builder --config electron-builder.config.cjs --linux AppImage deb tar.gz --x64 --publish=never
 
 test -s release/QMail.AppImage
 mkdir -p ci-build

@@ -901,6 +901,21 @@ function findFreePort() {
 
 // core.exe creates its own Client_Data/ directory next to itself — no setup needed
 
+// Return true if `dir` exists (or can be created) AND is writable. Used to
+// pick a data dir that core can actually create Client_Data/ under — on a
+// Linux AppImage the exe lives inside a read-only FUSE mount, so a naive
+// "next to the executable" choice is read-only (EROFS) and the backend dies.
+function isWritableDir(dir) {
+  if (!dir) return false;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function startBackend(port) {
   log('Starting backend on port ' + port + '...');
 
@@ -936,13 +951,26 @@ function startBackend(port) {
       // ~/Library/Application Support/q-mail).
       dataDir = app.getPath('userData');
     } else {
-      // Windows/Linux portable: data lives NEXT TO the launcher so users can
-      // carry wallets/mail on a USB stick. electron-builder portable mode
-      // exposes the launcher's on-disk directory via PORTABLE_EXECUTABLE_DIR;
-      // fall back to the directory of the running executable.
+      // Windows/Linux. Where user data (Client_Data/) should live, in order
+      // of preference:
+      //   1. Windows portable: next to QMail.exe (PORTABLE_EXECUTABLE_DIR).
+      //   2. Linux AppImage: next to the .AppImage file (APPIMAGE) — the
+      //      Linux analog of portable mode, so wallets/mail can ride along
+      //      on a USB stick. This path is on the real disk, NOT the mount.
+      //   3. path.dirname(app.getPath('exe')): fine for a normal installed
+      //      build, but on an AppImage it resolves INTO the read-only FUSE
+      //      mount (/tmp/.mount_QMail.XXXX) where core cannot create
+      //      Client_Data (EROFS) and exits 1 — so we only take it if it is
+      //      actually writable.
+      //   4. Fallback: the OS per-user data dir (always writable).
+      const dataDirCandidates = [
+        process.env.PORTABLE_EXECUTABLE_DIR,
+        process.env.APPIMAGE ? path.dirname(process.env.APPIMAGE) : null,
+        path.dirname(app.getPath('exe')),
+      ];
       dataDir =
-        process.env.PORTABLE_EXECUTABLE_DIR
-        || path.dirname(app.getPath('exe'));
+        dataDirCandidates.find(isWritableDir)
+        || app.getPath('userData');
     }
   }
 
