@@ -57,8 +57,8 @@ variables:
   WINDOWS_SIGNING: "off"
   BUILD_PLATFORM:
     value: "none"
-    options: ["none", "windows", "linux", "mac", "all"]
-    description: "Which platform to package. 'none' validates only."
+    options: ["none", "windows", "linux", "mac", "all", "linux-deb", "linux-targz"]
+    description: "Which platform to package. 'none' validates only. linux-deb / linux-targz build and publish one linux format on their own, independently of the AppImage."
   PUBLISH:
     value: "no"
     options: ["no", "yes"]
@@ -313,3 +313,62 @@ bump-client-version-mac:
       artifacts: true
   script:
     - bash ci/bump_qmail_client_version.sh ci-build/version-mac.json mac
+
+# ---------------------------------------------------------------------------
+# deb / tar.gz — one self-contained job per format.
+#
+# These build AND publish in a single job on linux-build, uploading no binary
+# artifact at all. package-linux cannot carry them: all three linux formats
+# together blow the instance artifact limit (413 Request Entity Too Large), and
+# publish-linux runs on a different runner so the file would have to travel.
+# Building where we publish sidesteps that entirely -- the same reasoning
+# publish-mac already uses for the 180MB dmg.
+#
+# Deliberately independent of each other and of the AppImage: a deb failure
+# cannot stop a tar.gz release, and neither can stop or delay QMail.AppImage.
+# Each bumps only its own manifest key (linux-deb / linux-tar-gz), so a user on
+# one format is never told to update because a different format was rebuilt.
+#
+# No `needs:` — each is a complete pipeline of its own, triggered by
+# deploy-deb / deploy-targz in the PowerShell profile.
+#
+# NOT part of BUILD_PLATFORM=all: `all` means the three desktop platforms and
+# gates on assert-build-dates comparing a windows/linux pair. These two use an
+# exact-match rule of their own so deploy-all keeps packaging exactly what it
+# always did.
+# ---------------------------------------------------------------------------
+.one_format_rules: &one_format_rules
+  rules:
+    - if: '($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $BUILD_PLATFORM == $PLATFORM_NAME'
+
+package-publish-linux-deb:
+  stage: package
+  tags: [linux-build]
+  timeout: 90m
+  variables:
+    PLATFORM_NAME: "linux-deb"
+    GIT_CLEAN_FLAGS: -ffdx -e .npm -e .cache
+  <<: *one_format_rules
+  script:
+    - bash ci/package_one_linux_format.sh deb
+  artifacts:
+    paths:
+      - ci-build/version-linux.json
+      - ci-build/qmail-linux-deb.sha256
+    expire_in: 1 week
+
+package-publish-linux-targz:
+  stage: package
+  tags: [linux-build]
+  timeout: 90m
+  variables:
+    PLATFORM_NAME: "linux-targz"
+    GIT_CLEAN_FLAGS: -ffdx -e .npm -e .cache
+  <<: *one_format_rules
+  script:
+    - bash ci/package_one_linux_format.sh tar.gz
+  artifacts:
+    paths:
+      - ci-build/version-linux.json
+      - ci-build/qmail-linux-tar-gz.sha256
+    expire_in: 1 week
