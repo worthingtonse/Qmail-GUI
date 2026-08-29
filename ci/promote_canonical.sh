@@ -23,8 +23,11 @@
 # =============================================================================
 set -euo pipefail
 
-PLATFORM=${1:?usage: promote_canonical.sh <windows|linux|mac> <version.json>}
-VERSION_JSON=${2:?usage: promote_canonical.sh <windows|linux|mac> <version.json>}
+PLATFORM=${1:?usage: promote_canonical.sh <windows|linux|mac> <version.json> [format]}
+VERSION_JSON=${2:?usage: promote_canonical.sh <windows|linux|mac> <version.json> [format]}
+# Linux only: which of the three formats to promote. Defaults to AppImage so
+# existing callers keep their behaviour.
+FORMAT=${3:-AppImage}
 
 BIN_DIR=/var/www/cloudcoinconsortium.com/bin
 SSH_OPTS="-o BatchMode=yes"
@@ -39,7 +42,17 @@ BUILD_DATE=$(sed -nE 's/^.*"buildDate"[[:space:]]*:[[:space:]]*"([0-9]{4}-[0-9]{
 
 case "$PLATFORM" in
   windows) DATED="qmail-windows-${BUILD_DATE}.exe";            CANON="QMail.exe";       MODE=0755 ;;
-  linux)   DATED="qmail-linux-desktop-${BUILD_DATE}.AppImage"; CANON="QMail.AppImage";  MODE=0755 ;;
+  linux)
+    case "$FORMAT" in
+      # The AppImage and the tarball are run directly, so they stay 0755. The
+      # .deb is fed to dpkg/apt and is never executed in place: 0644.
+      AppImage) EXT="AppImage"; MODE=0755 ;;
+      deb)      EXT="deb";      MODE=0644 ;;
+      tar.gz)   EXT="tar.gz";   MODE=0644 ;;
+      *) echo "unsupported linux format: $FORMAT (use AppImage|deb|tar.gz)" >&2; exit 2 ;;
+    esac
+    DATED="qmail-linux-desktop-${BUILD_DATE}.${EXT}"; CANON="QMail.${EXT}"
+    ;;
   mac)     DATED="qmail-mac-${BUILD_DATE}.dmg";                CANON="QMail.dmg";       MODE=0644 ;;
   *)       echo "unsupported platform: $PLATFORM" >&2; exit 2 ;;
 esac

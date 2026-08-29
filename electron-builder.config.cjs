@@ -147,8 +147,16 @@ const config = {
   appImage: {
     artifactName: isIntl ? "QMail-intl.AppImage" : "QMail.AppImage",
   },
+  // deb/tar.gz use fixed names for the same reason the AppImage does: ci/
+  // package_linux.sh and publish_gui_bin.sh reference them by path, and a
+  // ${version}-bearing name would change under them on every version bump.
+  // publish_gui_bin.sh maps these to dated + -latest names under /bin, and
+  // promote_canonical.sh then refreshes the canonical QMail.deb/.tar.gz.
   deb: {
-    artifactName: "QMail-${version}-${arch}.${ext}",
+    artifactName: isIntl ? "QMail-intl.deb" : "QMail.deb",
+  },
+  tarGz: {
+    artifactName: isIntl ? "QMail-intl.tar.gz" : "QMail.tar.gz",
   },
 };
 

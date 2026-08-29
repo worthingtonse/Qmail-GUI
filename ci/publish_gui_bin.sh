@@ -17,9 +17,12 @@
 # =============================================================================
 set -euo pipefail
 
-PLATFORM=${1:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
-ARTIFACT=${2:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
-VERSION_JSON=${3:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json>}
+PLATFORM=${1:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json> [format]}
+ARTIFACT=${2:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json> [format]}
+VERSION_JSON=${3:?usage: publish_gui_bin.sh <windows|linux> <artifact> <version.json> [format]}
+# Linux ships three formats from one build. Defaults to AppImage so existing
+# callers (and the windows path, which has only one format) are unaffected.
+FORMAT=${4:-AppImage}
 
 BIN_DIR=/var/www/cloudcoinconsortium.com/bin
 SSH_OPTS="-o BatchMode=yes"
@@ -48,8 +51,14 @@ case "$PLATFORM" in
     LATEST="qmail-windows-latest.exe"
     ;;
   linux)
-    DATED="qmail-linux-desktop-${BUILD_DATE}.AppImage"
-    LATEST="qmail-linux-desktop-latest.AppImage"
+    case "$FORMAT" in
+      AppImage) EXT="AppImage" ;;
+      deb)      EXT="deb" ;;
+      tar.gz)   EXT="tar.gz" ;;
+      *) echo "unsupported linux format: $FORMAT (use AppImage|deb|tar.gz)" >&2; exit 2 ;;
+    esac
+    DATED="qmail-linux-desktop-${BUILD_DATE}.${EXT}"
+    LATEST="qmail-linux-desktop-latest.${EXT}"
     ;;
   *)
     echo "unsupported platform: $PLATFORM (use publish_mac_bin.sh for mac)" >&2

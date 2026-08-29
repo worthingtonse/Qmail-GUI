@@ -134,8 +134,12 @@ package-linux:
   artifacts:
     paths:
       - release/QMail.AppImage
+      - release/QMail.deb
+      - release/QMail.tar.gz
       - ci-build/version-linux.json
       - ci-build/qmail-linux-desktop.sha256
+      - ci-build/qmail-linux-deb.sha256
+      - ci-build/qmail-linux-tar-gz.sha256
       - ci-build/linux-core.sha256
     expire_in: 1 week
 
@@ -226,12 +230,20 @@ publish-linux:
     - job: assert-build-dates
       optional: true
   script:
-    - bash ci/publish_gui_bin.sh linux release/QMail.AppImage ci-build/version-linux.json
-    - bash ci/promote_canonical.sh linux ci-build/version-linux.json
+    # One publish+promote pair per format. Kept as separate calls so each
+    # script stays single-artifact, matching the windows/mac paths.
+    - bash ci/publish_gui_bin.sh linux release/QMail.AppImage ci-build/version-linux.json AppImage
+    - bash ci/promote_canonical.sh linux ci-build/version-linux.json AppImage
+    - bash ci/publish_gui_bin.sh linux release/QMail.deb ci-build/version-linux.json deb
+    - bash ci/promote_canonical.sh linux ci-build/version-linux.json deb
+    - bash ci/publish_gui_bin.sh linux release/QMail.tar.gz ci-build/version-linux.json tar.gz
+    - bash ci/promote_canonical.sh linux ci-build/version-linux.json tar.gz
   artifacts:
     paths:
       - ci-build/version-linux.json
       - ci-build/qmail-linux-desktop.sha256
+      - ci-build/qmail-linux-deb.sha256
+      - ci-build/qmail-linux-tar-gz.sha256
     expire_in: 1 week
 
 # Runs on the MAC, not fleet-deploy: the dmg is ~180MB and never becomes an
@@ -292,7 +304,12 @@ bump-client-version-linux:
     - job: publish-linux
       artifacts: true
   script:
+    # One key per format: a user on the .deb must not be told to update
+    # because the AppImage was rebuilt. The script merges one key per run
+    # and leaves every other platform's published date alone.
     - bash ci/bump_qmail_client_version.sh ci-build/version-linux.json linux-app
+    - bash ci/bump_qmail_client_version.sh ci-build/version-linux.json linux-deb
+    - bash ci/bump_qmail_client_version.sh ci-build/version-linux.json linux-tar-gz
 
 bump-client-version-mac:
   stage: probe
