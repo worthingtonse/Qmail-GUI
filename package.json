@@ -5,6 +5,8 @@
   "type": "module",
   "main": "electron.cjs",
   "description": "QMail-Decentralized.Quantum-Safe.Unsurveillable.",
+  "author": "RAIDA Tech <sean@raidatech.com>",
+  "homepage": "https://cloudcoinconsortium.com",
   "scripts": {
     "dev": "vite",
     "dev2": "cross-env VITE_PORT=5174 VITE_API_PORT=8081 vite",
