@@ -37,12 +37,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker run --rm   -e CI=true   -e CI_PIPELINE_IID="${CI_PIPELINE_IID:?}"   -e QMAIL_BIN_BASE_URL="${QMAIL_BIN_BASE_URL:-}"   -e npm_config_cache=/project/.npm   -e ELECTRON_CACHE=/project/.cache/electron   -e ELECTRON_BUILDER_CACHE=/project/.cache/electron-builder   -e APPIMAGE_EXTRACT_AND_RUN=1   -e FORMAT="$FORMAT"   -v "$PWD:/project"   -w /project   "$IMAGE"   bash -lc 'npm ci && bash ci/download_published_core.sh linux && node ci/stamp_ci_version.cjs && npx vite build && npx electron-builder --config electron-builder.config.cjs --linux "$FORMAT" --x64 --publish=never'
+docker run --rm   -e CI=true   -e CI_PIPELINE_IID="${CI_PIPELINE_IID:?}"   -e QMAIL_BIN_BASE_URL="${QMAIL_BIN_BASE_URL:-}"   -e npm_config_cache=/project/.npm   -e ELECTRON_CACHE=/project/.cache/electron   -e ELECTRON_BUILDER_CACHE=/project/.cache/electron-builder   -e APPIMAGE_EXTRACT_AND_RUN=1   -e FORMAT="$FORMAT"   -e ARTIFACT="$ARTIFACT"   -e HASH="$HASH"   -v "$PWD:/project"   -w /project   "$IMAGE"   bash -lc 'npm ci && bash ci/download_published_core.sh linux && node ci/stamp_ci_version.cjs && npx vite build && npx electron-builder --config electron-builder.config.cjs --linux "$FORMAT" --x64 --publish=never && test -s "$ARTIFACT" && mkdir -p ci-build && sha256sum "$ARTIFACT" > "$HASH" && cp version.json ci-build/version-linux.json'
+
+# Hand ownership back before the host touches anything: the container runs as
+# root, so release/ and ci-build/ are root-owned until this runs. (The EXIT trap
+# also does this, but it fires too late for the publish steps below.)
+cleanup
 
 test -s "$ARTIFACT"
-mkdir -p ci-build
-sha256sum "$ARTIFACT" > "$HASH"
-cp version.json ci-build/version-linux.json
+test -s "$HASH"
 echo "packaged $ARTIFACT"
 
 if [[ "${PUBLISH:-no}" != "yes" ]]; then
