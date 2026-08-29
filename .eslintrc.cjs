@@ -11,6 +11,14 @@ module.exports = {
     'plugin:react-hooks/recommended',
   ],
   ignorePatterns: ['dist', '.eslintrc.cjs', 'public/electron.cjs', 'public/preload.cjs'],
+  // Test files run under Node, so process/Buffer are legitimately defined
+  // there. Scoped to *.test.js so app code keeps its browser-only globals.
+  overrides: [
+    {
+      files: ['**/*.test.js'],
+      env: { node: true },
+    },
+  ],
   parserOptions: { 
     ecmaVersion: 'latest', 
     sourceType: 'module' 
