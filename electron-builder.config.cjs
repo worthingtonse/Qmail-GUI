@@ -126,8 +126,13 @@ const config = {
     target: [
       { target: "AppImage", arch: ["x64"] },
       { target: "deb", arch: ["x64"] },
+      // tar.gz has no top-level options block (unlike deb), so its name is
+      // set here on the target entry itself.
       { target: "tar.gz", arch: ["x64"] },
     ],
+    // Fallback name for linux targets with no options block of their own --
+    // i.e. tar.gz. appImage/deb have their own artifactName and override this.
+    artifactName: isIntl ? "QMail-intl.${ext}" : "QMail.${ext}",
     category: "Network",
     icon: "public/icon.png",
     // .deb requires a maintainer field.
@@ -147,16 +152,15 @@ const config = {
   appImage: {
     artifactName: isIntl ? "QMail-intl.AppImage" : "QMail.AppImage",
   },
-  // deb/tar.gz use fixed names for the same reason the AppImage does: ci/
-  // package_linux.sh and publish_gui_bin.sh reference them by path, and a
+  // deb uses a fixed name for the same reason the AppImage does: ci/
+  // package_linux.sh and publish_gui_bin.sh reference it by path, and a
   // ${version}-bearing name would change under them on every version bump.
-  // publish_gui_bin.sh maps these to dated + -latest names under /bin, and
-  // promote_canonical.sh then refreshes the canonical QMail.deb/.tar.gz.
+  // (tar.gz gets the same treatment via linux.artifactName above -- it has
+  // no options block of its own.) publish_gui_bin.sh maps these to dated +
+  // -latest names under /bin, and promote_canonical.sh then refreshes the
+  // canonical QMail.deb / QMail.tar.gz.
   deb: {
     artifactName: isIntl ? "QMail-intl.deb" : "QMail.deb",
-  },
-  tarGz: {
-    artifactName: isIntl ? "QMail-intl.tar.gz" : "QMail.tar.gz",
   },
 };
 
